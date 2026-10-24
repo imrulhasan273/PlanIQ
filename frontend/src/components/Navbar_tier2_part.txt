@@ -1,0 +1,319 @@
+Created At: 2026-10-24T20:41:28+06:00
+Completed At: 2026-10-24T20:41:29+06:00
+File Path: `file:///d:/Personal/GitHub/PlanIQ/frontend/src/components/Navbar.tsx`
+Total Lines: 510
+Total Bytes: 21181
+Showing lines 200 to 510
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+200:                 <span>Export Report</span>
+201:               </button>
+202:             )}
+203: 
+204:             <button
+205:               type="button"
+206:               className="btn btn-secondary btn-sm"
+207:               onClick={onOpenSettings}
+208:               title="Configure AI API Key (Gemini, OpenAI, Ollama) and Settings"
+209:               style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+210:             >
+211:               <Settings size={14} color="#38bdf8" />
+212:               <span>AI Settings</span>
+213:             </button>
+214:           </div>
+215:         </div>
+216:       </div>
+217: 
+218:       {/* TIER 2: Workspace Categorized Navigation Ribbon Bar with Hover Dropdowns */}
+219:       {plan && (
+220:         <div className="navbar-ribbon-tier">
+221:           {/* Left: Category Hover Dropdown Controls */}
+222:           <div className="ribbon-categories">
+223:             {/* Category Dropdown 1: Diagnostics & Architecture */}
+224:             <div
+225:               ref={diagRef}
+226:               className="nav-dropdown-item-wrap"
+227:               onMouseEnter={() => handleMenuEnter('diagnostics')}
+228:               onMouseLeave={handleMenuLeave}
+229:             >
+230:               <button
+231:                 type="button"
+232:                 className={`nav-category-btn ${isDiagnosticsActive ? 'active' : ''}`}
+233:                 onClick={(e) => {
+234:                   e.stopPropagation();
+235:                   if (!isDiagnosticsActive) {
+236:                     handleSelectTab('overview', e);
+237:                   } else {
+238:                     setOpenMenu(openMenu === 'diagnostics' ? null : 'diagnostics');
+239:                   }
+240:                 }}
+241:               >
+242:                 <LayoutDashboard size={14} color={isDiagnosticsActive ? '#38bdf8' : '#94a3b8'} />
+243:                 <span className="category-title">Diagnostics & Architecture</span>
+244:                 {isDiagnosticsActive && (
+245:                   <span className="category-active-hint">
+246:                     {activeTab === 'overview'
+247:                       ? 'Overview'
+248:                       : activeTab === 'visualizer'
+249:                       ? 'Plan Tree'
+250:                       : activeTab === 'batchflow'
+251:                       ? 'Batch Flow'
+252:                       : 'Wait Stats'}
+253:                   </span>
+254:                 )}
+255:                 <ChevronDown size={13} className={`chevron-icon ${openMenu === 'diagnostics' ? 'open' : ''}`} />
+256:               </button>
+257: 
+258:               {openMenu === 'diagnostics' && (
+259:                 <div
+260:                   className="nav-dropdown-flyout glass-panel"
+261:                   onMouseEnter={() => {
+262:                     if (timerRef.current) clearTimeout(timerRef.current);
+263:                   }}
+264:                   onMouseLeave={handleMenuLeave}
+265:                 >
+266:                   <div className="dropdown-flyout-header">
+267:                     <span className="flyout-section-title">Query Architecture & Health</span>
+268:                   </div>
+269: 
+270:                   <button
+271:                     type="button"
+272:                     className={`flyout-item ${activeTab === 'overview' ? 'active' : ''}`}
+273:                     onMouseDown={(e) => handleSelectTab('overview', e)}
+274:                     onClick={(e) => handleSelectTab('overview', e)}
+275:                   >
+276:                     <div className="flyout-item-icon-box cyan-box">
+277:                       <Activity size={16} color="#38bdf8" />
+278:                     </div>
+279:                     <div className="flyout-item-text">
+280:                       <div className="flyout-item-headline">
+281:                         <span className="flyout-title">Overview & Diagnostics</span>
+282:                         <span className="flyout-badge cyan-badge">13 Detectors</span>
+283:                       </div>
+284:                       <span className="flyout-desc">
+285:                         10-Second root cause verdict, wait statistics, and engine health scorecard
+286:                       </span>
+287:                     </div>
+288:                     {activeTab === 'overview' && <Check size={14} color="#38bdf8" className="flyout-check" />}
+289:                   </button>
+290: 
+291:                   <button
+292:                     type="button"
+293:                     className={`flyout-item ${activeTab === 'visualizer' ? 'active' : ''}`}
+294:                     onMouseDown={(e) => handleSelectTab('visualizer', e)}
+295:                     onClick={(e) => handleSelectTab('visualizer', e)}
+296:                   >
+297:                     <div className="flyout-item-icon-box indigo-box">
+298:                       <GitFork size={16} color="#818cf8" />
+299:                     </div>
+300:                     <div className="flyout-item-text">
+301:                       <div className="flyout-item-headline">
+302:                         <span className="flyout-title">Plan Tree Visualizer</span>
+303:                         <span className="flyout-badge indigo-badge">{plan.totalStatements} Blocks</span>
+304:                       </div>
+305:                       <span className="flyout-desc">
+306:                         Interactive graphical operator tree with cardinality skews and pipeline cost flows
+307:                       </span>
+308:                     </div>
+309:                     {activeTab === 'visualizer' && <Check size={14} color="#818cf8" className="flyout-check" />}
+310:                   </button>
+311: 
+312:                   <button
+313:                     type="button"
+314:                     className={`flyout-item ${activeTab === 'batchflow' ? 'active' : ''}`}
+315:                     onMouseDown={(e) => handleSelectTab('batchflow', e)}
+316:                     onClick={(e) => handleSelectTab('batchflow', e)}
+317:                   >
+318:                     <div className="flyout-item-icon-box sky-box">
+319:                       <TrendingUp size={16} color="#38bdf8" />
+320:                     </div>
+321:                     <div className="flyout-item-text">
+322:                       <div className="flyout-item-headline">
+323:                         <span className="flyout-title">Batch Flow & TempDB</span>
+324:                         <span className="flyout-badge sky-badge">Timeline</span>
+325:                       </div>
+326:                       <span className="flyout-desc">
+327:                         Sequential statement execution waterfall, cumulative subtree cost progression, and TempDB physical usage
+328:                       </span>
+329:                     </div>
+330:                     {activeTab === 'batchflow' && <Check size={14} color="#38bdf8" className="flyout-check" />}
+331:                   </button>
+332: 
+333:                   <button
+334:                     type="button"
+335:                     className={`flyout-item ${activeTab === 'waitstats' ? 'active' : ''}`}
+336:                     onMouseDown={(e) => handleSelectTab('waitstats', e)}
+337:                     onClick={(e) => handleSelectTab('waitstats', e)}
+338:                   >
+339:                     <div className="flyout-item-icon-box amber-box">
+340:                       <Clock size={16} color="#fbbf24" />
+341:                     </div>
+342:                     <div className="flyout-item-text">
+343:                       <div className="flyout-item-headline">
+344:                         <span className="flyout-title">Wait Statistics</span>
+345:                         <span className="flyout-badge amber-badge">
+346:                           {(plan.waitStats || []).length > 0 ? `${(plan.waitStats || []).length} Waits` : 'Deep-Dive'}
+347:                         </span>
+348:                       </div>
+349:                       <span className="flyout-desc">
+350:                         Physical engine wait events (Disk I/O, Parallelism, Memory Grants, Schedulers) and DBA remedies
+351:                       </span>
+352:                     </div>
+353:                     {activeTab === 'waitstats' && <Check size={14} color="#fbbf24" className="flyout-check" />}
+354:                   </button>
+355:                 </div>
+356:               )}
+357:             </div>
+358: 
+359:             {/* Category Dropdown 2: Optimization & Tuning */}
+360:             <div
+361:               ref={optRef}
+362:               className="nav-dropdown-item-wrap"
+363:               onMouseEnter={() => handleMenuEnter('optimization')}
+364:               onMouseLeave={handleMenuLeave}
+365:             >
+366:               <button
+367:                 type="button"
+368:                 className={`nav-category-btn ${isOptimizationActive ? 'active' : ''}`}
+369:                 onClick={(e) => {
+370:                   e.stopPropagation();
+371:                   if (!isOptimizationActive) {
+372:                     handleSelectTab('indexes', e);
+373:                   } else {
+374:                     setOpenMenu(openMenu === 'optimization' ? null : 'optimization');
+375:                   }
+376:                 }}
+377:               >
+378:                 <Wrench size={14} color={isOptimizationActive ? '#c084fc' : '#94a3b8'} />
+379:                 <span className="category-title">Optimization & Tuning</span>
+380:                 {isOptimizationActive && (
+381:                   <span className="category-active-hint">
+382:                     {activeTab === 'indexes' ? 'Indexes' : activeTab === 'advisor' ? 'AI Doctor' : 'Comparator'}
+383:                   </span>
+384:                 )}
+385:                 <ChevronDown size={13} className={`chevron-icon ${openMenu === 'optimization' ? 'open' : ''}`} />
+386:               </button>
+387: 
+388:               {openMenu === 'optimization' && (
+389:                 <div
+390:                   className="nav-dropdown-flyout glass-panel"
+391:                   onMouseEnter={() => {
+392:                     if (timerRef.current) clearTimeout(timerRef.current);
+393:                   }}
+394:                   onMouseLeave={handleMenuLeave}
+395:                 >
+396:                   <div className="dropdown-flyout-header">
+397:                     <span className="flyout-section-title">Query & Index Tuning Tools</span>
+398:                   </div>
+399: 
+400:                   <button
+401:                     type="button"
+402:                     className={`flyout-item ${activeTab === 'indexes' ? 'active' : ''}`}
+403:                     onMouseDown={(e) => handleSelectTab('indexes', e)}
+404:                     onClick={(e) => handleSelectTab('indexes', e)}
+405:                   >
+406:                     <div className="flyout-item-icon-box emerald-box">
+407:                       <KeyRound size={16} color="#34d399" />
+408:                     </div>
+409:                     <div className="flyout-item-text">
+410:                       <div className="flyout-item-headline">
+411:                         <span className="flyout-title">Missing Indexes</span>
+412:                         <span className="flyout-badge emerald-badge">
+413:                           {(plan.allMissingIndexes || []).length} Suggestions
+414:                         </span>
+415:                       </div>
+416:                       <span className="flyout-desc">
+417:                         Smart consolidated composite indexes to eliminate write penalties & raw hints
+418:                       </span>
+419:                     </div>
+420:                     {activeTab === 'indexes' && <Check size={14} color="#34d399" className="flyout-check" />}
+421:                   </button>
+422: 
+423:                   <button
+424:                     type="button"
+425:                     className={`flyout-item ${activeTab === 'advisor' ? 'active' : ''}`}
+426:                     onMouseDown={(e) => handleSelectTab('advisor', e)}
+427:                     onClick={(e) => handleSelectTab('advisor', e)}
+428:                   >
+429:                     <div className="flyout-item-icon-box purple-box">
+430:                       <Sparkles size={16} color="#c084fc" />
+431:                     </div>
+432:                     <div className="flyout-item-text">
+433:                       <div className="flyout-item-headline">
+434:                         <span className="flyout-title">AI Performance Doctor</span>
+435:                         <span className="flyout-badge purple-badge">AI Copilot</span>
+436:                       </div>
+437:                       <span className="flyout-desc">
+438:                         Automated T-SQL rewrites, Monaco side-by-side diff editor & hint advisor
+439:                       </span>
+440:                     </div>
+441:                     {activeTab === 'advisor' && <Check size={14} color="#c084fc" className="flyout-check" />}
+442:                   </button>
+443: 
+444:                   <button
+445:                     type="button"
+446:                     className={`flyout-item ${activeTab === 'comparator' ? 'active' : ''}`}
+447:                     onMouseDown={(e) => handleSelectTab('comparator', e)}
+448:                     onClick={(e) => handleSelectTab('comparator', e)}
+449:                   >
+450:                     <div className="flyout-item-icon-box sky-box">
+451:                       <GitCompare size={16} color="#38bdf8" />
+452:                     </div>
+453:                     <div className="flyout-item-text">
+454:                       <div className="flyout-item-headline">
+455:                         <span className="flyout-title">Plan Comparator</span>
+456:                         <span className="flyout-badge sky-badge">A / B Benchmark</span>
+457:                       </div>
+458:                       <span className="flyout-desc">
+459:                         Side-by-side Before vs After execution plan differential cost analysis
+460:                       </span>
+461:                     </div>
+462:                     {activeTab === 'comparator' && <Check size={14} color="#38bdf8" className="flyout-check" />}
+463:                   </button>
+464:                 </div>
+465:               )}
+466:             </div>
+467: 
+468:             {/* Category 3: Tuning Playbook & Anti-Pattern Lab */}
+469:             <div className="nav-dropdown-item-wrap">
+470:               <button
+471:                 type="button"
+472:                 className={`nav-category-btn ${isPlaybookActive ? 'active' : ''}`}
+473:                 onClick={(e) => handleSelectTab('playbook', e)}
+474:                 title="Comprehensive DBA Anti-Pattern Guide, Relational Join Physics & T-SQL Rewrites"
+475:               >
+476:                 <BookOpen size={14} color={isPlaybookActive ? '#c084fc' : '#94a3b8'} />
+477:                 <span className="category-title">Tuning Playbook</span>
+478:                 {isPlaybookActive && <span className="category-active-hint">Playbook</span>}
+479:               </button>
+480:             </div>
+481:           </div>
+482: 
+483:           {/* Right: Ribbon Quick Health Status */}
+484:           <div className="ribbon-status-area">
+485:             {verdict && (
+486:               <div
+487:                 className="ribbon-verdict-pill"
+488:                 onClick={(e) => handleSelectTab('overview', e)}
+489:                 title={`Executive Bottleneck: Stmt #${verdict.culpritStatementId} accounts for ${verdict.costPercentage}% of batch cost`}
+490:               >
+491:                 <Zap size={13} color="#f43f5e" />
+492:                 <span>Culprit: Stmt #{verdict.culpritStatementId} ({verdict.costPercentage}% Cost)</span>
+493:               </div>
+494:             )}
+495:             {plan.diagnostics && (
+496:               <div
+497:                 className={`ribbon-grade-pill grade-${(plan.diagnostics.scoreGrade || 'c').toLowerCase()}`}
+498:                 title="Overall execution plan health grade based on XML diagnostics"
+499:               >
+500:                 <span>Health: {plan.diagnostics.healthScore}/100</span>
+501:                 <strong className="grade-letter">[{plan.diagnostics.scoreGrade || 'C'}]</strong>
+502:               </div>
+503:             )}
+504:           </div>
+505:         </div>
+506:       )}
+507:     </header>
+508:   );
+509: };
+510: 
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

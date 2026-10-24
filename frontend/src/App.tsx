@@ -5,26 +5,46 @@ import { PlanVisualizerTab } from './components/PlanVisualizerTab';
 import { MissingIndexesTab } from './components/MissingIndexesTab';
 import { AIAdvisorTab } from './components/AIAdvisorTab';
 import { PlanComparatorTab } from './components/PlanComparatorTab';
+import { BatchFlowTab } from './components/BatchFlowTab';
+import { WaitStatsTab } from './components/WaitStatsTab';
+import { TuningPlaybookTab } from './components/TuningPlaybookTab';
+import { DeadlockTab } from './components/DeadlockTab';
 import { PasteModal } from './components/PasteModal';
 import { AISettingsModal } from './components/AISettingsModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { PlanAnalysis, StatementAnalysis } from './types/plan';
-import { LoadSamplePlan, OpenFilePicker, ParsePlan } from '../wailsjs/go/main/App';
+import { DeadlockGraph } from './types/deadlock';
+import { isDeadlockXML, parseDeadlockXML } from './utils/deadlockParser';
+import { LoadSamplePlan, OpenFileAndParse, OpenFilePicker, ParsePlan } from '../wailsjs/go/main/App';
 import { exportDiagnosticReportHTML } from './utils/reportExporter';
 import { parseShowPlanXMLClient } from './utils/clientPlanParser';
-import { Loader2, Database, Upload, FileCode2 } from 'lucide-react';
+import { Loader2, Database, Upload, FileCode2, ShieldAlert } from 'lucide-react';
 import './App.css';
 
 import samplePlanData from './sample_plan.json';
 
+export type TabType =
+  | 'overview'
+  | 'visualizer'
+  | 'batchflow'
+  | 'waitstats'
+  | 'indexes'
+  | 'advisor'
+  | 'comparator'
+  | 'playbook'
+  | 'deadlock';
+
 export function App() {
   const [plan, setPlan] = useState<PlanAnalysis | null>(null);
   const [selectedStatement, setSelectedStatement] = useState<StatementAnalysis | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'visualizer' | 'indexes' | 'advisor' | 'comparator'>('overview');
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
 
   const [isPasteOpen, setIsPasteOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [deadlockGraphs, setDeadlockGraphs] = useState<DeadlockGraph[]>([]);
 
   const [aiConfig, setAiConfig] = useState<{
     provider: 'offline' | 'gemini' | 'openai' | 'ollama';
@@ -35,7 +55,11 @@ export function App() {
     const saved = localStorage.getItem('planiq_ai_config');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed.provider === 'gemini' && (!parsed.model || parsed.model.includes('2.8'))) {
+          parsed.model = 'gemini-2.0-flash';
+        }
+        return parsed;
       } catch {
         // ignore
       }
@@ -43,12 +67,16 @@ export function App() {
     return {
       provider: 'offline',
       apiKey: '',
-      model: '',
+      model: 'gemini-2.0-flash',
       endpointUrl: 'http://localhost:11434',
     };
   });
 
   const handleSaveConfig = (newConfig: any) => {
+    // Sanitize gemini model name
+    if (newConfig.provider === 'gemini' && (!newConfig.model || newConfig.model.includes('2.8'))) {
+      newConfig = { ...newConfig, model: 'gemini-2.0-flash' };
+    }
     setAiConfig(newConfig);
     localStorage.setItem('planiq_ai_config', JSON.stringify(newConfig));
   };
@@ -110,16 +138,23 @@ export function App() {
     try {
       if (typeof window !== 'undefined' && (window as any).go?.main?.App?.OpenFilePicker) {
         const res = await OpenFilePicker();
-        if (res && res[1]) {
-          const filePath = res[0] || 'Selected Plan';
-          const fileName = filePath.split(/[/\\]/).pop() || 'Execution Plan';
-          await handleParseManual(res[1], fileName);
+        if (res && res.content) {
+          await handleParseManual(res.content, res.name || res.path || 'Execution Plan');
+        }
+      } else if (typeof window !== 'undefined' && (window as any).go?.main?.App?.OpenFileAndParse) {
+        const data = await OpenFileAndParse();
+        if (data) {
+          setPlan(data);
+          if (data.statements && data.statements.length > 0) {
+            setSelectedStatement(data.statements[0]);
+          }
+          setActiveTab('overview');
         }
       } else {
         // Fallback for standard browser tab
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.sqlplan,.xml';
+        input.accept = '.sqlplan,.xml,.xdl';
         input.onchange = (e: any) => {
           const file = e.target.files?.[0];
           if (!file) return;
@@ -142,10 +177,49 @@ export function App() {
     }
   };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const content = evt.target?.result as string;
+      if (content) {
+        await handleParseManual(content, file.name);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const handleParseManual = async (xmlContent: string, planName: string) => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
+      // Check if this is a SQL Server Deadlock Graph (.xdl or deadlock XML)
+      if (isDeadlockXML(xmlContent)) {
+        const deadlocks = parseDeadlockXML(xmlContent);
+        setDeadlockGraphs(deadlocks);
+        setActiveTab('deadlock');
+        return;
+      }
+
       const data = await parsePlanSafely(xmlContent, planName);
       setPlan(data);
       if (data.statements.length > 0) {
@@ -154,7 +228,7 @@ export function App() {
       setActiveTab('overview');
     } catch (err: any) {
       console.error('Failed to parse XML:', err);
-      setErrorMessage(err?.message || 'Failed to parse execution plan XML');
+      setErrorMessage(err?.message || 'Failed to parse execution plan or deadlock XML');
     } finally {
       setIsLoading(false);
     }
@@ -169,7 +243,24 @@ export function App() {
   };
 
   return (
-    <div className="app-container">
+    <div
+      className="app-container"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className="drag-drop-overlay">
+          <Upload size={54} color="#38bdf8" />
+          <span style={{ fontSize: '18px', fontWeight: 600, marginTop: '14px', color: '#f8fafc' }}>
+            Drop .sqlplan or .xml file to analyze
+          </span>
+          <span style={{ fontSize: '13px', color: '#94a3b8', marginTop: '6px' }}>
+            Instant parsing and health diagnostics
+          </span>
+        </div>
+      )}
+
       <Navbar
         plan={plan}
         activeTab={activeTab}
@@ -202,30 +293,64 @@ export function App() {
           </div>
         )}
 
-        {plan ? (
-          <>
+        {activeTab === 'deadlock' ? (
+          <ErrorBoundary onReset={() => setActiveTab('overview')}>
+            <DeadlockTab
+              initialDeadlocks={deadlockGraphs}
+              onOpenXdlFile={handleOpenFile}
+            />
+          </ErrorBoundary>
+        ) : activeTab === 'playbook' ? (
+          <ErrorBoundary onReset={() => setActiveTab('overview')}>
+            <TuningPlaybookTab
+              plan={plan}
+              onNavigateToStatement={(stmt) => {
+                setSelectedStatement(stmt);
+                setActiveTab('visualizer');
+              }}
+            />
+          </ErrorBoundary>
+        ) : plan ? (
+          <ErrorBoundary onReset={() => setActiveTab('overview')}>
             {activeTab === 'overview' && (
               <OverviewTab
                 plan={plan}
                 onSelectStatement={handleSelectStatementFromOverview}
-                onNavigateTab={(t) => setActiveTab(t)}
+                onNavigateTab={(t: any) => setActiveTab(t)}
               />
             )}
 
-            {activeTab === 'visualizer' && selectedStatement && (
+            {activeTab === 'visualizer' && (
               <PlanVisualizerTab
                 plan={plan}
-                selectedStatement={selectedStatement}
+                selectedStatement={selectedStatement || plan.statements[0]}
                 onSelectStatement={(s) => setSelectedStatement(s)}
+              />
+            )}
+
+            {activeTab === 'batchflow' && (
+              <BatchFlowTab
+                plan={plan}
+                onSelectStatement={(s, targetTab) => {
+                  setSelectedStatement(s);
+                  setActiveTab(targetTab);
+                }}
+              />
+            )}
+
+            {activeTab === 'waitstats' && (
+              <WaitStatsTab
+                plan={plan}
+                onNavigateTab={(t: any) => setActiveTab(t)}
               />
             )}
 
             {activeTab === 'indexes' && <MissingIndexesTab plan={plan} />}
 
-            {activeTab === 'advisor' && selectedStatement && (
+            {activeTab === 'advisor' && (
               <AIAdvisorTab
                 plan={plan}
-                selectedStatement={selectedStatement}
+                selectedStatement={selectedStatement || plan.statements[0]}
                 onSelectStatement={(s) => setSelectedStatement(s)}
                 aiConfig={aiConfig}
                 onOpenSettings={() => setIsSettingsOpen(true)}
@@ -233,7 +358,7 @@ export function App() {
             )}
 
             {activeTab === 'comparator' && <PlanComparatorTab />}
-          </>
+          </ErrorBoundary>
         ) : (
           /* Blank state when no plan is loaded */
           <div className="welcome-state-container">
@@ -248,14 +373,23 @@ export function App() {
               </p>
 
               <div className="welcome-buttons-row">
-                <button className="btn btn-primary btn-lg" onClick={handleLoadSample}>
-                  <FileCode2 size={18} />
-                  <span>Load explan.xml Sample (Stored Proc)</span>
-                </button>
-
-                <button className="btn btn-secondary btn-lg" onClick={handleOpenFile}>
+                <button className="btn btn-primary btn-lg" onClick={handleOpenFile}>
                   <Upload size={18} />
                   <span>Open .sqlplan File</span>
+                </button>
+
+                <button className="btn btn-secondary btn-lg" onClick={handleLoadSample}>
+                  <FileCode2 size={18} />
+                  <span>Load Demo Sample Plan</span>
+                </button>
+
+                <button
+                  className="btn btn-secondary btn-lg"
+                  onClick={() => setActiveTab('deadlock')}
+                  style={{ borderColor: 'rgba(244, 63, 94, 0.4)' }}
+                >
+                  <ShieldAlert size={18} color="#f43f5e" />
+                  <span>Deadlock Graph Viewer (.xdl)</span>
                 </button>
               </div>
             </div>

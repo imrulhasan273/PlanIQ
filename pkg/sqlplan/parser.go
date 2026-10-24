@@ -1,20 +1,80 @@
 package sqlplan
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"golang.org/x/text/encoding/unicode"
 )
+
+// DecodeToUTF8 detects and converts UTF-16 (LE or BE, with or without BOM) and UTF-8 BOM to clean UTF-8
+func DecodeToUTF8(raw []byte) ([]byte, error) {
+	if len(raw) >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF {
+		return raw[3:], nil
+	}
+	if len(raw) >= 2 {
+		if raw[0] == 0xFF && raw[1] == 0xFE {
+			// UTF-16 LE with BOM
+			return unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM).NewDecoder().Bytes(raw[2:])
+		}
+		if raw[0] == 0xFE && raw[1] == 0xFF {
+			// UTF-16 BE with BOM
+			return unicode.UTF16(unicode.BigEndian, unicode.IgnoreBOM).NewDecoder().Bytes(raw[2:])
+		}
+		if raw[0] == '<' && raw[1] == 0 {
+			// UTF-16 LE without BOM
+			return unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM).NewDecoder().Bytes(raw)
+		}
+		if raw[0] == 0 && raw[1] == '<' {
+			// UTF-16 BE without BOM
+			return unicode.UTF16(unicode.BigEndian, unicode.IgnoreBOM).NewDecoder().Bytes(raw)
+		}
+	}
+	return raw, nil
+}
+
+// ParseFile reads an execution plan file from disk, normalizes encoding, and parses it
+func ParseFile(filePath string, planName string) (*PlanAnalysis, error) {
+	raw, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+	if planName == "" {
+		planName = filepath.Base(filePath)
+	}
+	return ParseBytes(raw, planName)
+}
+
+// ParseBytes parses ShowPlan XML from raw bytes
+func ParseBytes(raw []byte, planName string) (*PlanAnalysis, error) {
+	utf8Bytes, err := DecodeToUTF8(raw)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode XML content: %w", err)
+	}
+
+	reader := bytes.NewReader(utf8Bytes)
+	decoder := xml.NewDecoder(reader)
+	decoder.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
+		return input, nil
+	}
+
+	return parsePlanWithDecoder(decoder, planName)
+}
 
 // ParseXML processes raw SQL Server ShowPlan XML and produces an in-depth PlanAnalysis
 func ParseXML(xmlContent string, planName string) (*PlanAnalysis, error) {
-	reader := strings.NewReader(xmlContent)
-	decoder := xml.NewDecoder(reader)
+	return ParseBytes([]byte(xmlContent), planName)
+}
 
+func parsePlanWithDecoder(decoder *xml.Decoder, planName string) (*PlanAnalysis, error) {
 	analysis := &PlanAnalysis{
 		PlanName:          planName,
 		Statements:        make([]*StatementAnalysis, 0),
@@ -176,13 +236,17 @@ func (e *xmlElement) findFirst(name string) *xmlElement {
 
 func (e *xmlElement) findAll(name string) []*xmlElement {
 	var results []*xmlElement
+	e.findAllInto(name, &results)
+	return results
+}
+
+func (e *xmlElement) findAllInto(name string, results *[]*xmlElement) {
 	for _, child := range e.Children {
 		if child.Name == name {
-			results = append(results, child)
+			*results = append(*results, child)
 		}
-		results = append(results, child.findAll(name)...)
+		child.findAllInto(name, results)
 	}
-	return results
 }
 
 func parseXMLToNode(decoder *xml.Decoder) (*xmlElement, error) {
@@ -201,8 +265,8 @@ func parseXMLToNode(decoder *xml.Decoder) (*xmlElement, error) {
 		case xml.StartElement:
 			elem := &xmlElement{
 				Name:     t.Name.Local,
-				Attrs:    make(map[string]string),
-				Children: make([]*xmlElement, 0),
+				Attrs:    make(map[string]string, len(t.Attr)),
+				Children: make([]*xmlElement, 0, 4),
 			}
 			for _, a := range t.Attr {
 				elem.Attrs[a.Name.Local] = a.Value
@@ -216,11 +280,6 @@ func parseXMLToNode(decoder *xml.Decoder) (*xmlElement, error) {
 		case xml.EndElement:
 			if len(stack) > 1 {
 				stack = stack[:len(stack)-1]
-			}
-
-		case xml.CharData:
-			if len(stack) > 0 {
-				stack[len(stack)-1].Text += string(t)
 			}
 		}
 	}
@@ -707,7 +766,13 @@ func generateAdvancedDiagnostics(root *xmlElement, analysis *PlanAnalysis) *Adva
 	diag.ScalarUDFWarnings = extractScalarUDFWarnings(root, analysis)
 	diag.CardinalityEngine = extractCardinalityEngine(root)
 
+	// Extended detectors: key lookups, spools, missing stats, parameter sniffing,
+	// non-sargable predicates, row goals, adaptive joins / IQP
+	populateExtraDiagnostics(root, analysis, diag)
+
 	diag.HealthScore, diag.ScoreGrade = calculateHealthScore(diag, analysis)
+
+	appendFindingAntiPatterns(analysis, diag)
 	return diag
 }
 
@@ -924,15 +989,15 @@ func consolidateMissingIndexes(indexes []*MissingIndexInfo) []*ConsolidatedIndex
 		groups[key].totalImpact += idx.Impact
 	}
 
-	var results []*ConsolidatedIndex
+	results := make([]*ConsolidatedIndex, 0)
 	for _, key := range groupOrder {
 		grp := groups[key]
 		count := len(grp.items)
 		avgImpact := grp.totalImpact / float64(count)
 
-		var combinedEq []string
-		var combinedIneq []string
-		var combinedInc []string
+		combinedEq := make([]string, 0)
+		combinedIneq := make([]string, 0)
+		combinedInc := make([]string, 0)
 		eqMap := make(map[string]bool)
 		ineqMap := make(map[string]bool)
 		incMap := make(map[string]bool)
@@ -1115,6 +1180,8 @@ func calculateHealthScore(diag *AdvancedDiagnostics, analysis *PlanAnalysis) (in
 			break
 		}
 	}
+
+	score -= extraHealthPenalty(diag)
 
 	if score < 15 {
 		score = 15

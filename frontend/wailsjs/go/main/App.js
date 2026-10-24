@@ -14,6 +14,10 @@ export function LoadSamplePlan() {
   return window['go']['main']['App']['LoadSamplePlan']();
 }
 
+export function OpenFileAndParse() {
+  return window['go']['main']['App']['OpenFileAndParse']();
+}
+
 export function OpenFilePicker() {
   return window['go']['main']['App']['OpenFilePicker']();
 }

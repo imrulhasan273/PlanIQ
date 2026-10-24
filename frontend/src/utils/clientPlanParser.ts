@@ -14,10 +14,17 @@ import {
   ScalarUDFWarning,
   CardinalityEstimationEngine,
 } from '../types/plan';
+import {
+  computeExtraDiagnostics,
+  buildFindingAntiPatterns,
+  extraHealthPenalty,
+} from './extraDiagnostics';
 
 export function parseShowPlanXMLClient(xmlString: string, planName: string = 'Execution Plan'): PlanAnalysis {
+  // Normalize XML declaration to avoid browser DOMParser rejection when string specifies utf-16
+  const cleanXml = xmlString.replace(/<\?xml([^>]+)encoding=["']utf-16["']([^>]*)>/i, '<?xml$1encoding="utf-8"$2>');
   const parser = new DOMParser();
-  const xmlDoc = parser.parseFromString(xmlString, 'text/xml');
+  const xmlDoc = parser.parseFromString(cleanXml, 'text/xml');
 
   // Check for XML parse errors
   const parseError = xmlDoc.getElementsByTagName('parsererror');
@@ -184,6 +191,19 @@ export function parseShowPlanXMLClient(xmlString: string, planName: string = 'Ex
 
   // Advanced Root Cause Diagnostics
   const diagnostics = generateAdvancedDiagnosticsClient(xmlDoc, statements, allMissingIndexes, maxDopReason, antiPatterns);
+
+  // Append findings from 7 detectors to high-level anti-patterns
+  const extraAnti = buildFindingAntiPatterns(diagnostics);
+  extraAnti.forEach((ea) => {
+    antiPatterns.push({
+      type: ea.type,
+      severity: ea.severity.toLowerCase(),
+      title: ea.title,
+      description: ea.description,
+      affectedStatements: ea.affectedStatements,
+      recommendation: ea.recommendation,
+    } as any);
+  });
 
   return {
     planName,
@@ -493,6 +513,9 @@ function generateAdvancedDiagnosticsClient(
   const scalarUdfWarnings = extractScalarUDFWarningsClient(statements);
   const cardinalityEngine = extractCardinalityEngineClient(xmlDoc);
 
+  // 7 Extended Root Cause Detectors
+  const extra = computeExtraDiagnostics(xmlDoc, cardinalityEngine?.modelVersion, scalarUdfWarnings.length);
+
   const { healthScore, scoreGrade } = calculateHealthScoreClient(
     memoryGrant,
     parallelismSkew,
@@ -501,7 +524,8 @@ function generateAdvancedDiagnosticsClient(
     cardinalityEngine,
     allMissingIndexes,
     maxDopReason,
-    antiPatterns
+    antiPatterns,
+    extra
   );
 
   return {
@@ -511,6 +535,13 @@ function generateAdvancedDiagnosticsClient(
     consolidatedIndexes,
     scalarUdfWarnings,
     cardinalityEngine,
+    keyLookups: extra.keyLookups,
+    spools: extra.spools,
+    missingStatistics: extra.missingStatistics,
+    parameterSniffing: extra.parameterSniffing,
+    nonSargable: extra.nonSargable,
+    rowGoals: extra.rowGoals,
+    adaptive: extra.adaptive,
     healthScore,
     scoreGrade,
   };
@@ -829,7 +860,8 @@ function calculateHealthScoreClient(
   ce: CardinalityEstimationEngine | undefined,
   missingIndexes: MissingIndexInfo[],
   maxDopReason: string,
-  antiPatterns: any[]
+  antiPatterns: any[],
+  extra?: any
 ): { healthScore: number; scoreGrade: string } {
   let score = 100;
 
@@ -846,6 +878,10 @@ function calculateHealthScoreClient(
 
   if (antiPatterns.some((ap) => ap.type === 'HEAP_TABLE' || ap.type === 'TableScanOnHeap')) {
     score -= 10;
+  }
+
+  if (extra) {
+    score -= extraHealthPenalty(extra);
   }
 
   if (score < 15) score = 15;

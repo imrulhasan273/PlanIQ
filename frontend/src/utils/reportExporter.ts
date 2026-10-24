@@ -1,10 +1,45 @@
 import { PlanAnalysis } from '../types/plan';
+import { toPng, toSvg } from 'html-to-image';
 
-export function exportDiagnosticReportHTML(plan: PlanAnalysis) {
+/**
+ * Export any HTML element (like the Execution Plan tree canvas) to a High-Resolution PNG image
+ */
+export async function exportElementToPng(element: HTMLElement, filename: string): Promise<void> {
+  const dataUrl = await toPng(element, {
+    backgroundColor: '#090d16',
+    pixelRatio: 2, // High-DPI crisp export
+  });
+  const link = document.createElement('a');
+  link.download = filename.endsWith('.png') ? filename : `${filename}.png`;
+  link.href = dataUrl;
+  link.click();
+}
+
+/**
+ * Export any HTML element to an SVG vector file
+ */
+export async function exportElementToSvg(element: HTMLElement, filename: string): Promise<void> {
+  const dataUrl = await toSvg(element, {
+    backgroundColor: '#090d16',
+  });
+  const link = document.createElement('a');
+  link.download = filename.endsWith('.svg') ? filename : `${filename}.svg`;
+  link.href = dataUrl;
+  link.click();
+}
+
+/**
+ * Generates and downloads a 100% self-contained, offline interactive HTML diagnostic report.
+ * Works completely offline with zero external CDNs or network calls.
+ */
+export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
   const verdict = plan.executiveVerdict;
+  const diag = plan.diagnostics;
   const now = new Date().toLocaleString();
 
-  const missingIndexesHtml = plan.allMissingIndexes.map((idx, i) => `
+  const missingIndexesHtml = plan.allMissingIndexes
+    .map(
+      (idx, i) => `
     <div class="card index-card">
       <div class="card-header">
         <span class="badge badge-success">#${i + 1} - ${idx.table}</span>
@@ -17,12 +52,16 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis) {
       </p>
       <pre><code>${idx.suggestedDdl}</code></pre>
     </div>
-  `).join('');
+  `
+    )
+    .join('');
 
-  const antiPatternsHtml = plan.antiPatterns.map((ap) => `
+  const antiPatternsHtml = plan.antiPatterns
+    .map(
+      (ap) => `
     <div class="card ap-card severity-${ap.severity}">
       <div class="card-header">
-        <span class="badge badge-${ap.severity}">${ap.severity.toUpperCase()}</span>
+        <span class="badge badge-${ap.severity.toLowerCase()}">${ap.severity.toUpperCase()}</span>
         <strong style="font-size: 14px;">${ap.title} (${(ap.affectedStatements || []).join(', ')})</strong>
       </div>
       <p style="margin: 8px 0; color: #e2e8f0; font-size: 13px;">${ap.description}</p>
@@ -30,18 +69,106 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis) {
         <strong>Fix:</strong> ${ap.recommendation}
       </div>
     </div>
-  `).join('');
+  `
+    )
+    .join('');
 
-  const waitStatsHtml = (plan.waitStats || []).map((ws) => `
+  const waitStatsHtml = (plan.waitStats || [])
+    .map(
+      (ws) => `
     <tr>
       <td><code>${ws.waitType}</code></td>
       <td><span class="badge badge-info">${ws.category}</span></td>
       <td style="text-align: right; font-weight: 600;">${ws.waitTimeMs.toLocaleString()} ms</td>
       <td style="text-align: right;">${ws.waitCount.toLocaleString()}</td>
     </tr>
-  `).join('');
+  `
+    )
+    .join('');
 
-  const statementsHtml = plan.statements.map((s) => `
+  // Parameter Sniffing Section in HTML Report
+  const sniffParams = diag?.parameterSniffing?.[0]?.parameters || [];
+  const sniffingHtml =
+    sniffParams.length > 0
+      ? `
+    <h2>Parameter Sniffing & Variable Inspector (${sniffParams.length} Parameters)</h2>
+    <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 24px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Compiled Value (Cached)</th>
+            <th>Runtime Value (Actual)</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sniffParams
+            .map(
+              (p) => `
+            <tr>
+              <td><code>${p.name}</code></td>
+              <td><code>${p.dataType}</code></td>
+              <td><code>${p.compiledValue}</code></td>
+              <td style="color: ${p.mismatch ? '#f43f5e' : '#34d399'}; font-weight: 700;">
+                <code>${p.hasRuntime ? p.runtimeValue : 'Not recorded'}</code>
+              </td>
+              <td>
+                <span class="badge ${p.mismatch ? 'badge-critical' : 'badge-success'}">
+                  ${p.mismatch ? 'SKEW DETECTED' : 'MATCHES'}
+                </span>
+              </td>
+            </tr>
+          `
+            )
+            .join('')}
+        </tbody>
+      </table>
+    </div>
+  `
+      : '';
+
+  // Adaptive Joins Section in HTML Report
+  const adaptiveJoins = diag?.adaptive?.adaptiveJoins || [];
+  const adaptiveHtml =
+    adaptiveJoins.length > 0
+      ? `
+    <h2>Adaptive Joins & IQP Processing (${adaptiveJoins.length} Operators)</h2>
+    <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 24px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Node #</th>
+            <th>Stmt #</th>
+            <th>Threshold Rows</th>
+            <th>Actual Input Rows</th>
+            <th>Runtime Chosen Join</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${adaptiveJoins
+            .map(
+              (aj) => `
+            <tr>
+              <td><strong>#${aj.nodeId}</strong></td>
+              <td>#${aj.statementId}</td>
+              <td style="color: #fbbf24; font-weight: 700;">${aj.hasThreshold ? aj.thresholdRows.toLocaleString() : 'Dynamic'}</td>
+              <td><strong>${aj.hasActualRows ? aj.actualRows.toLocaleString() : 'N/A'}</strong></td>
+              <td><span class="badge badge-info">${aj.actualJoinType || 'Adaptive'}</span></td>
+            </tr>
+          `
+            )
+            .join('')}
+        </tbody>
+      </table>
+    </div>
+  `
+      : '';
+
+  const statementsHtml = plan.statements
+    .map(
+      (s) => `
     <tr>
       <td style="font-weight: 600;">#${s.statementId}</td>
       <td style="text-align: right; font-weight: 700; color: ${s.statementSubTreeCost > 10 ? '#f43f5e' : '#38bdf8'};">
@@ -52,7 +179,9 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis) {
         ${s.statementText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
       </td>
     </tr>
-  `).join('');
+  `
+    )
+    .join('');
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -91,6 +220,17 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis) {
     .title-row h1 { font-size: 28px; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 12px; }
     .subtitle { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
     .meta-box { text-align: right; font-size: 12px; color: var(--text-muted); }
+    .btn-print {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .btn-print:hover { background: #0369a1; }
 
     .verdict-banner {
       background: linear-gradient(135deg, rgba(244, 63, 94, 0.12) 0%, rgba(15, 23, 42, 0.8) 100%);
@@ -166,6 +306,7 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis) {
       body { background: #fff; color: #1e293b; padding: 20px; }
       .verdict-banner, .card, .metric-card { border: 1px solid #cbd5e1; background: #f8fafc; color: #0f172a; }
       pre { background: #f1f5f9; color: #0f172a; border: 1px solid #cbd5e1; }
+      .btn-print { display: none; }
     }
   </style>
 </head>
@@ -177,11 +318,14 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis) {
     </div>
     <div class="meta-box">
       <div>Generated: <strong>${now}</strong></div>
-      <div>Engine: <strong>PlanIQ / Wails v2</strong></div>
+      <div>Engine: <strong>PlanIQ v2.0 (Offline)</strong></div>
+      <button class="btn-print" onclick="window.print()">Print / Save as PDF</button>
     </div>
   </div>
 
-  ${verdict ? `
+  ${
+    verdict
+      ? `
   <div class="verdict-banner">
     <div class="verdict-tag">⚡ 10-Second Executive Root Cause Verdict</div>
     <div class="verdict-headline">${verdict.headline}</div>
@@ -190,7 +334,9 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis) {
       <strong>Actionable Resolution:</strong> ${verdict.actionableFix}
     </div>
   </div>
-  ` : ''}
+  `
+      : ''
+  }
 
   <div class="metrics-grid">
     <div class="metric-card">
@@ -206,15 +352,21 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis) {
       <div class="metric-val" style="color: var(--emerald);">${plan.allMissingIndexes.length}</div>
     </div>
     <div class="metric-card">
-      <div class="metric-label">Detected Anti-Patterns</div>
-      <div class="metric-val" style="color: var(--amber);">${plan.antiPatterns.length}</div>
+      <div class="metric-label">Health Score</div>
+      <div class="metric-val" style="color: var(--amber);">${diag ? diag.healthScore + '/100 [' + diag.scoreGrade + ']' : 'N/A'}</div>
     </div>
   </div>
+
+  ${sniffingHtml}
+
+  ${adaptiveHtml}
 
   <h2>Detected Query Anti-Patterns (${plan.antiPatterns.length})</h2>
   ${antiPatternsHtml || '<p style="color: var(--text-muted);">No critical anti-patterns detected.</p>'}
 
-  ${plan.waitStats && plan.waitStats.length > 0 ? `
+  ${
+    plan.waitStats && plan.waitStats.length > 0
+      ? `
   <h2>Execution Wait Statistics</h2>
   <div class="card" style="padding: 0; overflow: hidden;">
     <table>
@@ -231,7 +383,9 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis) {
       </tbody>
     </table>
   </div>
-  ` : ''}
+  `
+      : ''
+  }
 
   <h2>Missing Index Recommendations (${plan.allMissingIndexes.length})</h2>
   ${missingIndexesHtml || '<p style="color: var(--text-muted);">No missing indexes recommended by SQL Server optimizer.</p>'}

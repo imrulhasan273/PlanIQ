@@ -1,0 +1,208 @@
+Created At: 2026-10-24T20:41:23+06:00
+Completed At: 2026-10-24T20:41:24+06:00
+File Path: `file:///d:/Personal/GitHub/PlanIQ/frontend/src/components/Navbar.tsx`
+Total Lines: 510
+Total Bytes: 21181
+Showing lines 1 to 200
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: import React, { useState, useRef, useEffect } from 'react';
+2: import {
+3:   Database,
+4:   FileCode2,
+5:   Sparkles,
+6:   Upload,
+7:   GitCompare,
+8:   Download,
+9:   AlertTriangle,
+10:   Layers,
+11:   Activity,
+12:   Settings,
+13:   KeyRound,
+14:   LayoutDashboard,
+15:   GitFork,
+16:   Zap,
+17:   Code2,
+18:   ChevronDown,
+19:   Check,
+20:   Wrench,
+21:   Clock,
+22:   BookOpen,
+23:   TrendingUp,
+24:   HardDrive
+25: } from 'lucide-react';
+26: import { PlanAnalysis } from '../types/plan';
+27: 
+28: interface NavbarProps {
+29:   plan: PlanAnalysis | null;
+30:   activeTab: string;
+31:   setActiveTab: (tab: string) => void;
+32:   onOpenFile: () => void;
+33:   onOpenPasteModal: () => void;
+34:   onLoadSample: () => void;
+35:   onOpenSettings: () => void;
+36:   onExportReport?: () => void;
+37:   isLoading: boolean;
+38: }
+39: 
+40: export const Navbar: React.FC<NavbarProps> = ({
+41:   plan,
+42:   activeTab,
+43:   setActiveTab,
+44:   onOpenFile,
+45:   onOpenPasteModal,
+46:   onLoadSample,
+47:   onOpenSettings,
+48:   onExportReport,
+49:   isLoading,
+50: }) => {
+51:   const [openMenu, setOpenMenu] = useState<'diagnostics' | 'optimization' | null>(null);
+52:   const timerRef = useRef<any>(null);
+53:   const diagRef = useRef<HTMLDivElement>(null);
+54:   const optRef = useRef<HTMLDivElement>(null);
+55: 
+56:   const isDiagnosticsActive =
+57:     activeTab === 'overview' ||
+58:     activeTab === 'visualizer' ||
+59:     activeTab === 'batchflow' ||
+60:     activeTab === 'waitstats';
+61:   const isOptimizationActive =
+62:     activeTab === 'indexes' ||
+63:     activeTab === 'advisor' ||
+64:     activeTab === 'comparator';
+65:   const isPlaybookActive = activeTab === 'playbook';
+66: 
+67:   const formatMaxDop = (reason?: string) => {
+68:     if (!reason) return null;
+69:     if (reason === 'MaxDOPSetToOne') return 'MaxDOP = 1 (Serial)';
+70:     if (reason === 'NoParallelismPlans') return 'Serial Plan (No Parallelism)';
+71:     return reason;
+72:   };
+73: 
+74:   const verdict = plan?.executiveVerdict;
+75: 
+76:   const handleMenuEnter = (menu: 'diagnostics' | 'optimization') => {
+77:     if (timerRef.current) clearTimeout(timerRef.current);
+78:     setOpenMenu(menu);
+79:   };
+80: 
+81:   const handleMenuLeave = () => {
+82:     timerRef.current = setTimeout(() => {
+83:       setOpenMenu(null);
+84:     }, 220);
+85:   };
+86: 
+87:   const handleSelectTab = (tab: string, e?: React.MouseEvent) => {
+88:     if (e) {
+89:       e.preventDefault();
+90:       e.stopPropagation();
+91:     }
+92:     if (timerRef.current) clearTimeout(timerRef.current);
+93:     setActiveTab(tab);
+94:     setOpenMenu(null);
+95:   };
+96: 
+97:   useEffect(() => {
+98:     const handleClickOutside = (e: MouseEvent) => {
+99:       const target = e.target as Node;
+100:       if (diagRef.current && diagRef.current.contains(target)) return;
+101:       if (optRef.current && optRef.current.contains(target)) return;
+102:       setOpenMenu(null);
+103:     };
+104:     document.addEventListener('mousedown', handleClickOutside);
+105:     return () => document.removeEventListener('mousedown', handleClickOutside);
+106:   }, []);
+107: 
+108:   return (
+109:     <header className="navbar-wrapper">
+110:       {/* TIER 1: App Header, Loaded Plan Context & Primary Actions */}
+111:       <div className="navbar-top-tier">
+112:         {/* Left: Brand Identity & Active Plan Pill */}
+113:         <div className="brand-section">
+114:           <div className="logo-badge" title="PlanIQ - High-Performance SQL Server Execution Plan Analyzer">
+115:             <Database size={18} color="#38bdf8" />
+116:           </div>
+117:           <div className="brand-info-wrap">
+118:             <div className="brand-title-row">
+119:               <span className="brand-title">PlanIQ</span>
+120:               <span className="brand-version-pill">v2.0 Desktop</span>
+121:             </div>
+122:           </div>
+123: 
+124:           {/* Active Plan Meta Pills */}
+125:           {plan && (
+126:             <div className="plan-meta-row">
+127:               <span className="plan-meta-pill plan-name-pill" title={`File: ${plan.planName}`}>
+128:                 <FileCode2 size={12} color="#38bdf8" />
+129:                 <span className="plan-name">{plan.planName}</span>
+130:               </span>
+131:               <span className="plan-meta-pill" title="Total Statements in Plan">
+132:                 <Layers size={12} color="#818cf8" />
+133:                 <span>{plan.totalStatements} Stmts</span>
+134:               </span>
+135:               <span className="plan-meta-pill" title="Total Accumulated Subtree Cost">
+136:                 <Activity size={12} color="#34d399" />
+137:                 <span>Cost: {plan.totalSubTreeCost.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
+138:               </span>
+139:               {plan.maxDopReason && (
+140:                 <span
+141:                   className="plan-meta-pill warning-pill"
+142:                   title="Query execution is constrained to a single thread by server or resource governor setting"
+143:                 >
+144:                   <AlertTriangle size={12} color="#fbbf24" />
+145:                   <span>{formatMaxDop(plan.maxDopReason)}</span>
+146:                 </span>
+147:               )}
+148:             </div>
+149:           )}
+150:         </div>
+151: 
+152:         {/* Right: File I/O Actions & Controls */}
+153:         <div className="actions-section">
+154:           <div className="actions-group">
+155:             <button
+156:               type="button"
+157:               className="btn btn-primary btn-sm"
+158:               onClick={onOpenFile}
+159:               disabled={isLoading}
+160:               title="Open .sqlplan or .xml from disk"
+161:             >
+162:               <Upload size={14} />
+163:               <span>Open File</span>
+164:             </button>
+165: 
+166:             <button
+167:               type="button"
+168:               className="btn btn-secondary btn-sm"
+169:               onClick={onOpenPasteModal}
+170:               disabled={isLoading}
+171:               title="Paste ShowPlan XML from clipboard"
+172:             >
+173:               <Code2 size={14} />
+174:               <span>Paste XML</span>
+175:             </button>
+176: 
+177:             <button
+178:               type="button"
+179:               className="btn btn-secondary btn-sm"
+180:               onClick={onLoadSample}
+181:               disabled={isLoading}
+182:               title="Load demo sample execution plan"
+183:             >
+184:               <FileCode2 size={14} />
+185:               <span>Sample Plan</span>
+186:             </button>
+187:           </div>
+188: 
+189:           <div className="nav-vertical-divider" />
+190: 
+191:           <div className="actions-group">
+192:             {plan && onExportReport && (
+193:               <button
+194:                 type="button"
+195:                 className="btn btn-secondary btn-sm"
+196:                 onClick={onExportReport}
+197:                 title="Export full diagnostic report to standalone HTML"
+198:               >
+199:                 <Download size={14} />
+200:                 <span>Export Report</span>
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

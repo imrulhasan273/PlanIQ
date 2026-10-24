@@ -24,6 +24,13 @@ While traditional tools like SQL Server Management Studio (SSMS) simply render r
   - **Non-Sargable Implicit Conversions:** Identifies `CONVERT_IMPLICIT` warnings on join/filter predicates preventing index seeks.
   - **Scalar UDF (RBAR) Penalty:** Highlights row-by-agonizing-row scalar functions executing in relational pipelines.
   - **Parallelism Skew:** Identifies thread workload imbalances and single-threaded MaxDOP bottlenecks.
+- **🔒 Deadlock Graph Viewer (.xdl):** 100% offline interactive SQL Server deadlock visualizer. Highlights directed wait-for cycles, marks killed victim SPIDs, parses full `inputbuf` queries, displays execution call stacks, and prescribes T-SQL error 1205 retry patterns.
+- **🎛️ Parameter Sniffing & Runtime Variable Inspector:** Detects divergence between `<ParameterList>` Compiled (cached) and Runtime (executed) values, evaluates cardinality estimate skew, and provides 4 ready-to-copy T-SQL remedies (`OPTION (RECOMPILE)`, `OPTIMIZE FOR UNKNOWN`, value pinning, local variable masking).
+- **⚡ Adaptive Joins & Batch Mode on Rowstore (SQL 2019/2022 IQP):** Analyzes dynamic join inflection thresholds, shows whether the engine chose Nested Loops or Hash Match at runtime, and tracks CPU vectorization gains on rowstore tables.
+- **📸 High-Res Export (PDF / PNG / SVG & Offline HTML Sharing):** Export plan trees to High-Res PNG or vector SVG with a single click, or generate a standalone, self-contained interactive HTML diagnostic report that opens in any browser on air-gapped corporate networks without dependencies.
+- **⏱️ Batch Flow & TempDB Lifecycle Visualizer:** Sequential statement execution waterfall, cumulative subtree cost progression tracker, `#temp` table lifecycle matrix (Creation &rarr; Ingestion &rarr; Reads &rarr; Indexes &rarr; Drops), and TempDB worktable disk spill alerts.
+- **⏳ Wait Statistics & Resource Bottlenecks Deep-Dive:** Comprehensive physical wait event analyzer (Disk I/O, Parallelism, Memory Grants, Schedulers) with category distribution bars, ranked wait events, operator correlations, and built-in 12-wait DBA reference handbook.
+- **📚 SQL Server Tuning Playbook & Anti-Pattern Lab:** Interactive encyclopedia of 15+ engine anti-patterns with before-and-after T-SQL code comparisons, relational join physics deep-dive (Nested Loops vs Hash vs Merge vs Adaptive), query hints guide, and plan-aware detection.
 - **🧩 Smart Missing Index Consolidator:** Deduplicates and merges overlapping equality, inequality, and include columns into clean composite covering indexes (e.g. consolidates 13 raw hints down to 5 covering indexes).
 - **🤖 Deterministic DBA Engine & AI Query Rewriter:** Generates production-ready T-SQL rewrites (pre-creating `#temp` tables with clustered PKs, sargable date bounds) with an interactive **Monaco Side-by-Side Diff Viewer**.
 - **⚖️ Side-by-Side Plan Comparator:** Compare baseline and optimized `.sqlplan` files with cost reduction diffs and missing index resolution metrics.
@@ -37,6 +44,9 @@ While traditional tools like SQL Server Management Studio (SSMS) simply render r
 | :--- | :---: | :---: |
 | **Graphical Execution Plan** | ✅ Native GDI+ | ✅ Modern Responsive Canvas |
 | **Multi-Statement Batch Navigation** | ⚠️ Long horizontal scroll | ✅ Isolated statement cards + cost % |
+| **Batch Waterfall & TempDB Lifecycle** | ❌ None | ✅ Interactive Waterfall & `#temp` Matrix |
+| **Wait Statistics Analysis** | ⚠️ Buried in properties XML | ✅ Categorized Bar, Table & Remediation |
+| **Built-in Tuning Playbook & Code Diff** | ❌ None | ✅ 15+ Patterns with Before/After SQL |
 | **Automated Culprit Identification** | ❌ Manual DBA inspection | ✅ Instant 10-second isolation |
 | **Plan Health Score & Grade** | ❌ None | ✅ 0–100 Health Score (Grade A–F) |
 | **Legacy CE (CE 70) Detector** | ❌ Buried in XML attributes | ✅ Dedicated diagnostic alert card |
@@ -45,8 +55,12 @@ While traditional tools like SQL Server Management Studio (SSMS) simply render r
 | **Missing Index Handling** | ⚠️ Isolated green text per query | ✅ Smart Consolidator & Deduplicator |
 | **Automated Query Rewriting** | ❌ None | ✅ Deterministic DBA Engine + AI Diff |
 | **Interactive SQL Diff View** | ❌ None | ✅ Side-by-side Monaco Diff Viewer |
+| **Deadlock Graph Viewer (.xdl)** | ⚠️ Basic static boxes | ✅ Interactive Directed Cycle Graph + T-SQL Stack |
+| **Parameter Sniffing Inspector** | ⚠️ Buried in XML list | ✅ Compiled vs Runtime Diff + 4 T-SQL Fixes |
+| **Adaptive Joins & Batch Mode (IQP)** | ❌ Hidden in operator | ✅ Inflection Cutoff & Vectorization Analysis |
+| **High-Res Export (PNG/SVG/HTML)** | ❌ Fragmented screenshots | ✅ 1-Click PNG, SVG & Offline HTML Report |
 | **Cross-Platform / Zero-Install** | ❌ Windows-only (~4GB install) | ✅ Lightweight desktop app / Browser |
-| **Database Connection Required** | ✅ Yes (to capture plans) | ❌ No (analyzes exported `.sqlplan`/XML) |
+| **Database Connection Required** | ✅ Yes (to capture plans) | ❌ No (100% offline analysis of `.sqlplan`/`.xdl`) |
 
 ---
 

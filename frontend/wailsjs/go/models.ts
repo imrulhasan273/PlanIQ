@@ -42,13 +42,61 @@ export namespace advisor {
 		    return a;
 		}
 	}
+	export class RewriteStrategy {
+	    id: string;
+	    title: string;
+	    description: string;
+	    sql: string;
+	    estimatedGain: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RewriteStrategy(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.sql = source["sql"];
+	        this.estimatedGain = source["estimatedGain"];
+	    }
+	}
+	export class TechnicalSuggestion {
+	    category: string;
+	    title: string;
+	    severity: string;
+	    impact: string;
+	    technicalDetail: string;
+	    actionItem: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TechnicalSuggestion(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.category = source["category"];
+	        this.title = source["title"];
+	        this.severity = source["severity"];
+	        this.impact = source["impact"];
+	        this.technicalDetail = source["technicalDetail"];
+	        this.actionItem = source["actionItem"];
+	    }
+	}
 	export class AIResponse {
 	    summary: string;
 	    rootCause: string;
 	    recommendedRewrite: string;
 	    rewriteExplanation: string;
+	    alternativeRewrite?: string;
+	    tuningStrategies?: string[];
+	    technicalSuggestions?: TechnicalSuggestion[];
+	    strategies?: RewriteStrategy[];
 	    indexRecommendations: string[];
 	    serverConfigTips: string[];
+	    implementationChecklist?: string[];
+	    estimatedGains?: Record<string, string>;
 	    providerUsed: string;
 	
 	    static createFrom(source: any = {}) {
@@ -61,9 +109,55 @@ export namespace advisor {
 	        this.rootCause = source["rootCause"];
 	        this.recommendedRewrite = source["recommendedRewrite"];
 	        this.rewriteExplanation = source["rewriteExplanation"];
+	        this.alternativeRewrite = source["alternativeRewrite"];
+	        this.tuningStrategies = source["tuningStrategies"];
+	        this.technicalSuggestions = this.convertValues(source["technicalSuggestions"], TechnicalSuggestion);
+	        this.strategies = this.convertValues(source["strategies"], RewriteStrategy);
 	        this.indexRecommendations = source["indexRecommendations"];
 	        this.serverConfigTips = source["serverConfigTips"];
+	        this.implementationChecklist = source["implementationChecklist"];
+	        this.estimatedGains = source["estimatedGains"];
 	        this.providerUsed = source["providerUsed"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+
+}
+
+export namespace main {
+	
+	export class SelectedPlanFile {
+	    path: string;
+	    name: string;
+	    content: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SelectedPlanFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.content = source["content"];
 	    }
 	}
 
@@ -71,6 +165,588 @@ export namespace advisor {
 
 export namespace sqlplan {
 	
+	export class AdaptiveJoinFinding {
+	    statementId: string;
+	    nodeId: number;
+	    thresholdRows: number;
+	    hasThreshold: boolean;
+	    estimatedJoinType: string;
+	    actualJoinType: string;
+	    estimateRows: number;
+	    actualRows: number;
+	    hasActualRows: boolean;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AdaptiveJoinFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.statementId = source["statementId"];
+	        this.nodeId = source["nodeId"];
+	        this.thresholdRows = source["thresholdRows"];
+	        this.hasThreshold = source["hasThreshold"];
+	        this.estimatedJoinType = source["estimatedJoinType"];
+	        this.actualJoinType = source["actualJoinType"];
+	        this.estimateRows = source["estimateRows"];
+	        this.actualRows = source["actualRows"];
+	        this.hasActualRows = source["hasActualRows"];
+	        this.description = source["description"];
+	    }
+	}
+	export class IQPFeature {
+	    name: string;
+	    status: string;
+	    detail: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new IQPFeature(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.status = source["status"];
+	        this.detail = source["detail"];
+	    }
+	}
+	export class AdaptiveProcessing {
+	    adaptiveJoins: AdaptiveJoinFinding[];
+	    batchModeOperators: number;
+	    totalOperators: number;
+	    batchOnRowstore: boolean;
+	    features: IQPFeature[];
+	    summary: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AdaptiveProcessing(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.adaptiveJoins = this.convertValues(source["adaptiveJoins"], AdaptiveJoinFinding);
+	        this.batchModeOperators = source["batchModeOperators"];
+	        this.totalOperators = source["totalOperators"];
+	        this.batchOnRowstore = source["batchOnRowstore"];
+	        this.features = this.convertValues(source["features"], IQPFeature);
+	        this.summary = source["summary"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RowGoalFinding {
+	    statementId: string;
+	    nodeId: number;
+	    physicalOp: string;
+	    source: string;
+	    estimateRows: number;
+	    estimateRowsWithoutGoal: number;
+	    actualRows: number;
+	    hasActualRows: boolean;
+	    reductionFactor: number;
+	    misfired: boolean;
+	    severity: string;
+	    description: string;
+	    remedy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RowGoalFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.statementId = source["statementId"];
+	        this.nodeId = source["nodeId"];
+	        this.physicalOp = source["physicalOp"];
+	        this.source = source["source"];
+	        this.estimateRows = source["estimateRows"];
+	        this.estimateRowsWithoutGoal = source["estimateRowsWithoutGoal"];
+	        this.actualRows = source["actualRows"];
+	        this.hasActualRows = source["hasActualRows"];
+	        this.reductionFactor = source["reductionFactor"];
+	        this.misfired = source["misfired"];
+	        this.severity = source["severity"];
+	        this.description = source["description"];
+	        this.remedy = source["remedy"];
+	    }
+	}
+	export class NonSargableFinding {
+	    statementId: string;
+	    nodeId: number;
+	    physicalOp: string;
+	    table: string;
+	    index: string;
+	    functions: string[];
+	    leadingWildcard: boolean;
+	    predicate: string;
+	    tableCardinality: number;
+	    costPercent: number;
+	    severity: string;
+	    description: string;
+	    remedy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new NonSargableFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.statementId = source["statementId"];
+	        this.nodeId = source["nodeId"];
+	        this.physicalOp = source["physicalOp"];
+	        this.table = source["table"];
+	        this.index = source["index"];
+	        this.functions = source["functions"];
+	        this.leadingWildcard = source["leadingWildcard"];
+	        this.predicate = source["predicate"];
+	        this.tableCardinality = source["tableCardinality"];
+	        this.costPercent = source["costPercent"];
+	        this.severity = source["severity"];
+	        this.description = source["description"];
+	        this.remedy = source["remedy"];
+	    }
+	}
+	export class SniffedParameter {
+	    name: string;
+	    dataType: string;
+	    compiledValue: string;
+	    runtimeValue: string;
+	    hasRuntime: boolean;
+	    mismatch: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SniffedParameter(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.dataType = source["dataType"];
+	        this.compiledValue = source["compiledValue"];
+	        this.runtimeValue = source["runtimeValue"];
+	        this.hasRuntime = source["hasRuntime"];
+	        this.mismatch = source["mismatch"];
+	    }
+	}
+	export class ParameterSniffingFinding {
+	    affectedStatements: string[];
+	    parameters: SniffedParameter[];
+	    hasRuntimeValues: boolean;
+	    hasMismatch: boolean;
+	    hasEstimateImpact: boolean;
+	    mitigation: string;
+	    severity: string;
+	    description: string;
+	    remedy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ParameterSniffingFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.affectedStatements = source["affectedStatements"];
+	        this.parameters = this.convertValues(source["parameters"], SniffedParameter);
+	        this.hasRuntimeValues = source["hasRuntimeValues"];
+	        this.hasMismatch = source["hasMismatch"];
+	        this.hasEstimateImpact = source["hasEstimateImpact"];
+	        this.mitigation = source["mitigation"];
+	        this.severity = source["severity"];
+	        this.description = source["description"];
+	        this.remedy = source["remedy"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class MissingStatsFinding {
+	    statementId: string;
+	    nodeId: number;
+	    database: string;
+	    schema: string;
+	    table: string;
+	    columns: string[];
+	    severity: string;
+	    description: string;
+	    remedy: string;
+	    suggestedDdl: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MissingStatsFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.statementId = source["statementId"];
+	        this.nodeId = source["nodeId"];
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.table = source["table"];
+	        this.columns = source["columns"];
+	        this.severity = source["severity"];
+	        this.description = source["description"];
+	        this.remedy = source["remedy"];
+	        this.suggestedDdl = source["suggestedDdl"];
+	    }
+	}
+	export class SpoolFinding {
+	    statementId: string;
+	    nodeId: number;
+	    physicalOp: string;
+	    logicalOp: string;
+	    kind: string;
+	    purpose: string;
+	    table: string;
+	    estimateRows: number;
+	    estimateRebinds: number;
+	    estimateRewinds: number;
+	    actualRows: number;
+	    actualRebinds: number;
+	    actualRewinds: number;
+	    hasActualRows: boolean;
+	    costPercent: number;
+	    severity: string;
+	    description: string;
+	    remedy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SpoolFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.statementId = source["statementId"];
+	        this.nodeId = source["nodeId"];
+	        this.physicalOp = source["physicalOp"];
+	        this.logicalOp = source["logicalOp"];
+	        this.kind = source["kind"];
+	        this.purpose = source["purpose"];
+	        this.table = source["table"];
+	        this.estimateRows = source["estimateRows"];
+	        this.estimateRebinds = source["estimateRebinds"];
+	        this.estimateRewinds = source["estimateRewinds"];
+	        this.actualRows = source["actualRows"];
+	        this.actualRebinds = source["actualRebinds"];
+	        this.actualRewinds = source["actualRewinds"];
+	        this.hasActualRows = source["hasActualRows"];
+	        this.costPercent = source["costPercent"];
+	        this.severity = source["severity"];
+	        this.description = source["description"];
+	        this.remedy = source["remedy"];
+	    }
+	}
+	export class KeyLookupFinding {
+	    statementId: string;
+	    nodeId: number;
+	    lookupKind: string;
+	    schema: string;
+	    table: string;
+	    lookupIndex: string;
+	    seekIndex: string;
+	    estimateRows: number;
+	    lookupCount: number;
+	    hasActualRows: boolean;
+	    costPercent: number;
+	    fetchedColumns: string[];
+	    includeClause: string;
+	    severity: string;
+	    description: string;
+	    remedy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new KeyLookupFinding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.statementId = source["statementId"];
+	        this.nodeId = source["nodeId"];
+	        this.lookupKind = source["lookupKind"];
+	        this.schema = source["schema"];
+	        this.table = source["table"];
+	        this.lookupIndex = source["lookupIndex"];
+	        this.seekIndex = source["seekIndex"];
+	        this.estimateRows = source["estimateRows"];
+	        this.lookupCount = source["lookupCount"];
+	        this.hasActualRows = source["hasActualRows"];
+	        this.costPercent = source["costPercent"];
+	        this.fetchedColumns = source["fetchedColumns"];
+	        this.includeClause = source["includeClause"];
+	        this.severity = source["severity"];
+	        this.description = source["description"];
+	        this.remedy = source["remedy"];
+	    }
+	}
+	export class CardinalityEstimationEngine {
+	    modelVersion: string;
+	    isLegacy: boolean;
+	    description: string;
+	    remedy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CardinalityEstimationEngine(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.modelVersion = source["modelVersion"];
+	        this.isLegacy = source["isLegacy"];
+	        this.description = source["description"];
+	        this.remedy = source["remedy"];
+	    }
+	}
+	export class ScalarUDFWarning {
+	    statementId: string;
+	    functionName: string;
+	    description: string;
+	    remedy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScalarUDFWarning(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.statementId = source["statementId"];
+	        this.functionName = source["functionName"];
+	        this.description = source["description"];
+	        this.remedy = source["remedy"];
+	    }
+	}
+	export class ConsolidatedIndex {
+	    table: string;
+	    schema: string;
+	    combinedFromCount: number;
+	    equalityColumns: string[];
+	    inequalityColumns: string[];
+	    includeColumns: string[];
+	    suggestedDdl: string;
+	    averageImpact: number;
+	    storageBenefit: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConsolidatedIndex(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.table = source["table"];
+	        this.schema = source["schema"];
+	        this.combinedFromCount = source["combinedFromCount"];
+	        this.equalityColumns = source["equalityColumns"];
+	        this.inequalityColumns = source["inequalityColumns"];
+	        this.includeColumns = source["includeColumns"];
+	        this.suggestedDdl = source["suggestedDdl"];
+	        this.averageImpact = source["averageImpact"];
+	        this.storageBenefit = source["storageBenefit"];
+	    }
+	}
+	export class ImplicitConversion {
+	    statementId: string;
+	    convertIssue: string;
+	    expression: string;
+	    description: string;
+	    remedy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImplicitConversion(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.statementId = source["statementId"];
+	        this.convertIssue = source["convertIssue"];
+	        this.expression = source["expression"];
+	        this.description = source["description"];
+	        this.remedy = source["remedy"];
+	    }
+	}
+	export class ThreadDistribution {
+	    threadId: number;
+	    actualRows: number;
+	    percentage: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ThreadDistribution(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.threadId = source["threadId"];
+	        this.actualRows = source["actualRows"];
+	        this.percentage = source["percentage"];
+	    }
+	}
+	export class ParallelismSkew {
+	    hasSkew: boolean;
+	    nodeId: number;
+	    physicalOp: string;
+	    threadsCount: number;
+	    totalRows: number;
+	    maxThreadRows: number;
+	    minThreadRows: number;
+	    skewRatio: number;
+	    threads: ThreadDistribution[];
+	    rootCauseSummary: string;
+	    remedy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ParallelismSkew(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.hasSkew = source["hasSkew"];
+	        this.nodeId = source["nodeId"];
+	        this.physicalOp = source["physicalOp"];
+	        this.threadsCount = source["threadsCount"];
+	        this.totalRows = source["totalRows"];
+	        this.maxThreadRows = source["maxThreadRows"];
+	        this.minThreadRows = source["minThreadRows"];
+	        this.skewRatio = source["skewRatio"];
+	        this.threads = this.convertValues(source["threads"], ThreadDistribution);
+	        this.rootCauseSummary = source["rootCauseSummary"];
+	        this.remedy = source["remedy"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class MemoryGrantHealth {
+	    grantedMemoryKb: number;
+	    maxUsedMemoryKb: number;
+	    serialRequiredKb: number;
+	    serialDesiredKb: number;
+	    isBloated: boolean;
+	    wastedMemoryMb: number;
+	    wastedPercent: number;
+	    hasSpills: boolean;
+	    spillDetails: string;
+	    remedy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MemoryGrantHealth(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.grantedMemoryKb = source["grantedMemoryKb"];
+	        this.maxUsedMemoryKb = source["maxUsedMemoryKb"];
+	        this.serialRequiredKb = source["serialRequiredKb"];
+	        this.serialDesiredKb = source["serialDesiredKb"];
+	        this.isBloated = source["isBloated"];
+	        this.wastedMemoryMb = source["wastedMemoryMb"];
+	        this.wastedPercent = source["wastedPercent"];
+	        this.hasSpills = source["hasSpills"];
+	        this.spillDetails = source["spillDetails"];
+	        this.remedy = source["remedy"];
+	    }
+	}
+	export class AdvancedDiagnostics {
+	    memoryGrant?: MemoryGrantHealth;
+	    parallelismSkew?: ParallelismSkew;
+	    implicitConversions: ImplicitConversion[];
+	    consolidatedIndexes: ConsolidatedIndex[];
+	    scalarUdfWarnings: ScalarUDFWarning[];
+	    cardinalityEngine?: CardinalityEstimationEngine;
+	    keyLookups: KeyLookupFinding[];
+	    spools: SpoolFinding[];
+	    missingStatistics: MissingStatsFinding[];
+	    parameterSniffing: ParameterSniffingFinding[];
+	    nonSargable: NonSargableFinding[];
+	    rowGoals: RowGoalFinding[];
+	    adaptive?: AdaptiveProcessing;
+	    healthScore: number;
+	    scoreGrade: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AdvancedDiagnostics(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.memoryGrant = this.convertValues(source["memoryGrant"], MemoryGrantHealth);
+	        this.parallelismSkew = this.convertValues(source["parallelismSkew"], ParallelismSkew);
+	        this.implicitConversions = this.convertValues(source["implicitConversions"], ImplicitConversion);
+	        this.consolidatedIndexes = this.convertValues(source["consolidatedIndexes"], ConsolidatedIndex);
+	        this.scalarUdfWarnings = this.convertValues(source["scalarUdfWarnings"], ScalarUDFWarning);
+	        this.cardinalityEngine = this.convertValues(source["cardinalityEngine"], CardinalityEstimationEngine);
+	        this.keyLookups = this.convertValues(source["keyLookups"], KeyLookupFinding);
+	        this.spools = this.convertValues(source["spools"], SpoolFinding);
+	        this.missingStatistics = this.convertValues(source["missingStatistics"], MissingStatsFinding);
+	        this.parameterSniffing = this.convertValues(source["parameterSniffing"], ParameterSniffingFinding);
+	        this.nonSargable = this.convertValues(source["nonSargable"], NonSargableFinding);
+	        this.rowGoals = this.convertValues(source["rowGoals"], RowGoalFinding);
+	        this.adaptive = this.convertValues(source["adaptive"], AdaptiveProcessing);
+	        this.healthScore = source["healthScore"];
+	        this.scoreGrade = source["scoreGrade"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class AntiPattern {
 	    type: string;
 	    severity: string;
@@ -93,6 +769,8 @@ export namespace sqlplan {
 	        this.recommendation = source["recommendation"];
 	    }
 	}
+	
+	
 	export class ExecutiveVerdict {
 	    culpritStatementId: string;
 	    costPercentage: number;
@@ -115,6 +793,10 @@ export namespace sqlplan {
 	        this.actionableFix = source["actionableFix"];
 	    }
 	}
+	
+	
+	
+	
 	export class MissingIndexInfo {
 	    statementId: string;
 	    impact: number;
@@ -143,6 +825,10 @@ export namespace sqlplan {
 	        this.suggestedDdl = source["suggestedDdl"];
 	    }
 	}
+	
+	
+	
+	
 	export class PlanWarning {
 	    statementId: string;
 	    kind: string;
@@ -342,6 +1028,7 @@ export namespace sqlplan {
 	    globalWarnings: string[];
 	    allMissingIndexes: MissingIndexInfo[];
 	    antiPatterns: AntiPattern[];
+	    diagnostics?: AdvancedDiagnostics;
 	
 	    static createFrom(source: any = {}) {
 	        return new PlanAnalysis(source);
@@ -361,6 +1048,7 @@ export namespace sqlplan {
 	        this.globalWarnings = source["globalWarnings"];
 	        this.allMissingIndexes = this.convertValues(source["allMissingIndexes"], MissingIndexInfo);
 	        this.antiPatterns = this.convertValues(source["antiPatterns"], AntiPattern);
+	        this.diagnostics = this.convertValues(source["diagnostics"], AdvancedDiagnostics);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -453,6 +1141,11 @@ export namespace sqlplan {
 		    return a;
 		}
 	}
+	
+	
+	
+	
+	
 	
 	
 	

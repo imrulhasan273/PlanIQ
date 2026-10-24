@@ -84,27 +84,52 @@ export const AISettingsModal: React.FC<AISettingsModalProps> = ({
             </div>
           )}
 
-          <div className="form-group">
-            <label className="form-label">
-              <Bot size={13} style={{ display: 'inline', marginRight: '4px' }} />
-              Model Name (Optional)
-            </label>
-            <input
-              type="text"
-              className="form-input"
-              placeholder={
-                config.provider === 'gemini'
-                  ? 'gemini-2.5-flash (default)'
-                  : config.provider === 'openai'
-                  ? 'gpt-4o-mini (default)'
-                  : config.provider === 'ollama'
-                  ? 'llama3 / deepseek-coder'
-                  : 'Rule Engine'
-              }
-              value={config.model}
-              onChange={(e) => onChangeConfig({ ...config, model: e.target.value })}
-            />
-          </div>
+          {config.provider !== 'offline' && (
+            <div className="form-group">
+              <label className="form-label">
+                <Bot size={13} style={{ display: 'inline', marginRight: '4px' }} />
+                Model Selection
+              </label>
+
+              {config.provider === 'gemini' ? (
+                <select
+                  className="form-input"
+                  value={
+                    config.model === 'gemini-1.5-flash' ||
+                    config.model === 'gemini-1.5-pro' ||
+                    config.model === 'gemini-2.5-flash' ||
+                    config.model === 'gemini-2.0-flash'
+                      ? config.model
+                      : 'gemini-2.0-flash'
+                  }
+                  onChange={(e) => onChangeConfig({ ...config, model: e.target.value })}
+                >
+                  <option value="gemini-2.0-flash">gemini-2.0-flash (Recommended - Fast & Accurate)</option>
+                  <option value="gemini-1.5-flash">gemini-1.5-flash (Google AI Studio Free Tier)</option>
+                  <option value="gemini-1.5-pro">gemini-1.5-pro (Deep Complex T-SQL Reasoning)</option>
+                  <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                </select>
+              ) : config.provider === 'openai' ? (
+                <select
+                  className="form-input"
+                  value={config.model || 'gpt-4o-mini'}
+                  onChange={(e) => onChangeConfig({ ...config, model: e.target.value })}
+                >
+                  <option value="gpt-4o-mini">gpt-4o-mini (Recommended - Fast & Economical)</option>
+                  <option value="gpt-4o">gpt-4o (Full Architecture Capabilities)</option>
+                  <option value="o3-mini">o3-mini (High-Reasoning)</option>
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="llama3 / deepseek-coder"
+                  value={config.model || 'deepseek-coder'}
+                  onChange={(e) => onChangeConfig({ ...config, model: e.target.value })}
+                />
+              )}
+            </div>
+          )}
 
           <div className="settings-privacy-note glass-panel">
             <strong>🔒 Enterprise Privacy:</strong>
@@ -115,7 +140,21 @@ export const AISettingsModal: React.FC<AISettingsModalProps> = ({
         </div>
 
         <div className="modal-footer">
-          <button className="btn btn-primary" onClick={onClose} style={{ marginLeft: 'auto' }}>
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              // Sanitize any invalid model strings like gemini-2.8-flash
+              let finalModel = config.model;
+              if (config.provider === 'gemini') {
+                if (!finalModel || finalModel.includes('2.8')) {
+                  finalModel = 'gemini-2.0-flash';
+                }
+              }
+              onChangeConfig({ ...config, model: finalModel });
+              onClose();
+            }}
+            style={{ marginLeft: 'auto' }}
+          >
             <Save size={14} />
             <span>Save Settings</span>
           </button>

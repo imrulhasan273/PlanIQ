@@ -1,5 +1,25 @@
 import React from 'react';
-import { Database, FileCode2, Sparkles, FolderOpen, Upload, Cpu, GitCompare, Download } from 'lucide-react';
+import {
+  Database,
+  FileCode2,
+  Sparkles,
+  Upload,
+  GitCompare,
+  Download,
+  AlertTriangle,
+  Layers,
+  Activity,
+  Settings,
+  KeyRound,
+  LayoutDashboard,
+  GitFork,
+  Zap,
+  Code2,
+  Clock,
+  BookOpen,
+  TrendingUp,
+  ShieldAlert,
+} from 'lucide-react';
 import { PlanAnalysis } from '../types/plan';
 
 interface NavbarProps {
@@ -25,124 +45,202 @@ export const Navbar: React.FC<NavbarProps> = ({
   onExportReport,
   isLoading,
 }) => {
+  const formatMaxDop = (reason?: string) => {
+    if (!reason) return null;
+    if (reason === 'MaxDOPSetToOne') return 'MaxDOP=1';
+    if (reason === 'NoParallelismPlans') return 'Serial';
+    return reason;
+  };
+
   return (
-    <header className="navbar-container">
-      {/* Brand & Stats */}
-      <div className="brand-section">
-        <div className="logo-badge">
-          <Database className="w-5 h-5 text-cyan-400" size={20} color="#38bdf8" />
+    <header className="navbar-compact-row">
+      {/* LEFT: Brand & Active Plan Info */}
+      <div className="nav-left-section">
+        <div className="logo-badge" title="PlanIQ - SQL Server Execution Plan & Deadlock Analyzer">
+          <Database size={16} color="#38bdf8" />
         </div>
-        <div>
-          <div className="brand-title-row">
-            <span className="brand-title">PlanIQ</span>
-            <span className="brand-subtitle">SQL Server Plan Visualizer</span>
-            <span className="badge badge-info">Wails v2 ⚡</span>
+        <div className="brand-title-wrap">
+          <span className="brand-title">PlanIQ</span>
+          <span className="brand-version-pill">v2.0</span>
+        </div>
+
+        {/* Compact Plan Meta Pills (Single Row) */}
+        {plan && (
+          <div className="plan-meta-compact-row">
+            <span className="compact-meta-pill plan-name-pill" title={`File: ${plan.planName}`}>
+              <FileCode2 size={11} color="#38bdf8" />
+              <span className="compact-plan-name">{plan.planName}</span>
+            </span>
+            <span className="compact-meta-pill" title="Total Statements">
+              <Layers size={11} color="#818cf8" />
+              <span>{plan.totalStatements} Stmts</span>
+            </span>
+            <span className="compact-meta-pill" title="Subtree Cost">
+              <Activity size={11} color="#34d399" />
+              <span>Cost: {plan.totalSubTreeCost.toFixed(1)}</span>
+            </span>
+            {plan.maxDopReason && (
+              <span className="compact-meta-pill warning-pill" title={plan.maxDopReason}>
+                <AlertTriangle size={11} color="#fbbf24" />
+                <span>{formatMaxDop(plan.maxDopReason)}</span>
+              </span>
+            )}
           </div>
-          {plan && (
-            <div className="plan-meta-row">
-              <span className="plan-name" title={plan.planName}>{plan.planName}</span>
-              <span className="meta-separator">•</span>
-              <span className="meta-item">{plan.totalStatements} Stmts</span>
-              <span className="meta-separator">•</span>
-              <span className="meta-item">Cost: {plan.totalSubTreeCost.toFixed(2)}</span>
-              {plan.maxDopReason && (
-                <>
-                  <span className="meta-separator">•</span>
-                  <span className="badge badge-high" style={{ fontSize: '10px' }}>{plan.maxDopReason}</span>
-                </>
-              )}
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
-      {/* Nav Tabs */}
-      {plan && (
-        <nav className="nav-tabs">
-          <button
-            className={`nav-tab ${activeTab === 'overview' ? 'active' : ''}`}
-            onClick={() => setActiveTab('overview')}
-          >
-            Overview & Stats
-          </button>
-          <button
-            className={`nav-tab ${activeTab === 'visualizer' ? 'active' : ''}`}
-            onClick={() => setActiveTab('visualizer')}
-          >
-            Plan Tree Visualizer
-          </button>
-          <button
-            className={`nav-tab ${activeTab === 'indexes' ? 'active' : ''}`}
-            onClick={() => setActiveTab('indexes')}
-          >
-            Missing Indexes ({plan.allMissingIndexes.length})
-          </button>
-          <button
-            className={`nav-tab ${activeTab === 'advisor' ? 'active' : ''}`}
-            onClick={() => setActiveTab('advisor')}
-          >
-            <Sparkles size={14} color="#c084fc" />
-            AI Advisor
-          </button>
-          <button
-            className={`nav-tab ${activeTab === 'comparator' ? 'active' : ''}`}
-            onClick={() => setActiveTab('comparator')}
-          >
-            <GitCompare size={14} color="#38bdf8" />
-            Plan Comparator
-          </button>
-        </nav>
-      )}
-
-      {/* Action Buttons */}
-      <div className="actions-section">
+      {/* CENTER: Workspace Navigation Tabs (Same Row) */}
+      <nav className="nav-tabs-strip">
         <button
-          className="btn btn-secondary"
+          type="button"
+          className={`nav-tab-btn ${activeTab === 'overview' ? 'active' : ''}`}
+          onClick={() => setActiveTab('overview')}
+          title="Root Cause Verdict, Diagnostic Detectors & Scorecard"
+        >
+          <LayoutDashboard size={13} color={activeTab === 'overview' ? '#38bdf8' : '#94a3b8'} />
+          <span>Overview</span>
+        </button>
+
+        <button
+          type="button"
+          className={`nav-tab-btn ${activeTab === 'visualizer' ? 'active' : ''}`}
+          onClick={() => setActiveTab('visualizer')}
+          title="Interactive Graphical Plan Tree with Cardinality Skews"
+        >
+          <GitFork size={13} color={activeTab === 'visualizer' ? '#818cf8' : '#94a3b8'} />
+          <span>Plan Tree</span>
+        </button>
+
+        <button
+          type="button"
+          className={`nav-tab-btn ${activeTab === 'batchflow' ? 'active' : ''}`}
+          onClick={() => setActiveTab('batchflow')}
+          title="Sequential Statement Waterfall & TempDB Lifecycle"
+        >
+          <TrendingUp size={13} color={activeTab === 'batchflow' ? '#38bdf8' : '#94a3b8'} />
+          <span>Batch Flow</span>
+        </button>
+
+        <button
+          type="button"
+          className={`nav-tab-btn ${activeTab === 'waitstats' ? 'active' : ''}`}
+          onClick={() => setActiveTab('waitstats')}
+          title="Engine Wait Statistics & Bottlenecks"
+        >
+          <Clock size={13} color={activeTab === 'waitstats' ? '#fbbf24' : '#94a3b8'} />
+          <span>Wait Stats</span>
+        </button>
+
+        <button
+          type="button"
+          className={`nav-tab-btn ${activeTab === 'indexes' ? 'active' : ''}`}
+          onClick={() => setActiveTab('indexes')}
+          title="Consolidated Composite Covering Indexes"
+        >
+          <KeyRound size={13} color={activeTab === 'indexes' ? '#34d399' : '#94a3b8'} />
+          <span>Indexes</span>
+          {plan && plan.allMissingIndexes.length > 0 && (
+            <span className="nav-tab-badge">{plan.allMissingIndexes.length}</span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          className={`nav-tab-btn ${activeTab === 'advisor' ? 'active' : ''}`}
+          onClick={() => setActiveTab('advisor')}
+          title="AI & Deterministic DBA Query Rewriter"
+        >
+          <Sparkles size={13} color={activeTab === 'advisor' ? '#c084fc' : '#94a3b8'} />
+          <span>AI Doctor</span>
+        </button>
+
+        <button
+          type="button"
+          className={`nav-tab-btn ${activeTab === 'comparator' ? 'active' : ''}`}
+          onClick={() => setActiveTab('comparator')}
+          title="Before vs After Plan A/B Differential Benchmark"
+        >
+          <GitCompare size={13} color={activeTab === 'comparator' ? '#38bdf8' : '#94a3b8'} />
+          <span>Compare</span>
+        </button>
+
+        <button
+          type="button"
+          className={`nav-tab-btn ${activeTab === 'playbook' ? 'active' : ''}`}
+          onClick={() => setActiveTab('playbook')}
+          title="DBA Anti-Pattern Guide & Relational Join Physics"
+        >
+          <BookOpen size={13} color={activeTab === 'playbook' ? '#c084fc' : '#94a3b8'} />
+          <span>Playbook</span>
+        </button>
+
+        <button
+          type="button"
+          className={`nav-tab-btn ${activeTab === 'deadlock' ? 'active active-deadlock' : ''}`}
+          onClick={() => setActiveTab('deadlock')}
+          title="Interactive Deadlock Graph (.xdl) Cycle Visualizer"
+        >
+          <ShieldAlert size={13} color={activeTab === 'deadlock' ? '#f43f5e' : '#94a3b8'} />
+          <span>Deadlocks (.xdl)</span>
+        </button>
+      </nav>
+
+      {/* RIGHT: Action Buttons (Same Row) */}
+      <div className="nav-right-actions">
+        <button
+          type="button"
+          className="btn btn-primary btn-sm nav-action-btn"
           onClick={onOpenFile}
           disabled={isLoading}
-          title="Open .sqlplan or .xml from disk"
+          title="Open .sqlplan, .xml, or .xdl from disk"
         >
-          <FolderOpen size={15} />
+          <Upload size={13} />
           <span>Open File</span>
         </button>
 
         <button
-          className="btn btn-secondary"
+          type="button"
+          className="btn btn-secondary btn-sm nav-action-btn"
           onClick={onOpenPasteModal}
           disabled={isLoading}
-          title="Paste raw XML ShowPlan"
+          title="Paste ShowPlan XML or Deadlock XML"
         >
-          <Upload size={15} />
+          <Code2 size={13} />
           <span>Paste XML</span>
         </button>
 
         <button
-          className="btn btn-primary"
+          type="button"
+          className="btn btn-secondary btn-sm nav-action-btn"
           onClick={onLoadSample}
           disabled={isLoading}
-          title="Load bundled 2.5MB stored procedure plan"
+          title="Load demo sample execution plan"
         >
-          <FileCode2 size={15} />
-          <span>Load explan.xml</span>
+          <FileCode2 size={13} />
+          <span>Sample Plan</span>
         </button>
 
         {plan && onExportReport && (
           <button
-            className="btn btn-secondary"
+            type="button"
+            className="btn btn-secondary btn-sm nav-action-btn"
             onClick={onExportReport}
-            title="Export diagnostic report as standalone HTML"
+            title="Export diagnostic report to standalone HTML"
           >
-            <Download size={15} color="#34d399" />
-            <span>Export Report</span>
+            <Download size={13} />
+            <span>Export</span>
           </button>
         )}
 
         <button
-          className="btn btn-ghost"
+          type="button"
+          className="btn btn-secondary btn-sm nav-action-btn"
           onClick={onOpenSettings}
-          title="Configure AI API keys & models"
+          title="Configure AI API Key & Models"
+          style={{ padding: '0 8px' }}
         >
-          <Cpu size={16} />
+          <Settings size={13} color="#38bdf8" />
+          <span>Settings</span>
         </button>
       </div>
     </header>

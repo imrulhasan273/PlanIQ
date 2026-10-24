@@ -13,6 +13,7 @@ import {
 import { PlanComparison } from '../types/plan';
 import { ComparePlans } from '../../wailsjs/go/main/App';
 import { parseShowPlanXMLClient, comparePlansClient } from '../utils/clientPlanParser';
+import { DiagnosticTooltip } from './DiagnosticTooltip';
 
 export const PlanComparatorTab: React.FC = () => {
   const [comparison, setComparison] = useState<PlanComparison | null>(null);
@@ -64,6 +65,7 @@ export const PlanComparatorTab: React.FC = () => {
           <div className="section-title-row">
             <GitCompare size={18} color="#38bdf8" />
             <h2 className="section-title">Execution Plan Comparator ("Before vs After")</h2>
+            <DiagnosticTooltip guideKey="planComparator" />
             <span className="badge badge-info">A / B Benchmark</span>
           </div>
           <p className="text-muted" style={{ fontSize: '12px', marginTop: '4px' }}>

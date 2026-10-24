@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { KeyRound, Copy, Check, Search, Database, Layers, Sparkles, Zap, ShieldCheck } from 'lucide-react';
+import { KeyRound, Copy, Check, Search, Database, Layers, Zap, ShieldCheck } from 'lucide-react';
 import { PlanAnalysis, MissingIndexInfo, ConsolidatedIndex } from '../types/plan';
+import { DiagnosticTooltip } from './DiagnosticTooltip';
 
 interface MissingIndexesTabProps {
   plan: PlanAnalysis;
@@ -12,27 +13,36 @@ export const MissingIndexesTab: React.FC<MissingIndexesTabProps> = ({ plan }) =>
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [copiedAll, setCopiedAll] = useState<boolean>(false);
 
-  const consolidatedList: ConsolidatedIndex[] = plan.diagnostics?.consolidatedIndexes || [];
+  const rawIndexes: MissingIndexInfo[] = plan?.allMissingIndexes || [];
+  const consolidatedList: ConsolidatedIndex[] = plan?.diagnostics?.consolidatedIndexes || [];
 
-  const filteredRawIndexes = plan.allMissingIndexes.filter((idx) => {
-    const text = `${idx.table} ${idx.schema} ${idx.equalityColumns.join(' ')} ${idx.includeColumns.join(' ')}`.toLowerCase();
+  const filteredRawIndexes = rawIndexes.filter((idx) => {
+    if (!idx) return false;
+    const eq = (idx.equalityColumns || []).join(' ');
+    const ineq = (idx.inequalityColumns || []).join(' ');
+    const inc = (idx.includeColumns || []).join(' ');
+    const text = `${idx.table || ''} ${idx.schema || ''} ${eq} ${ineq} ${inc}`.toLowerCase();
     return text.includes(searchTerm.toLowerCase());
   });
 
   const filteredConsolidated = consolidatedList.filter((idx) => {
-    const text = `${idx.table} ${idx.schema} ${idx.equalityColumns.join(' ')} ${idx.includeColumns.join(' ')}`.toLowerCase();
+    if (!idx) return false;
+    const eq = (idx.equalityColumns || []).join(' ');
+    const ineq = (idx.inequalityColumns || []).join(' ');
+    const inc = (idx.includeColumns || []).join(' ');
+    const text = `${idx.table || ''} ${idx.schema || ''} ${eq} ${ineq} ${inc}`.toLowerCase();
     return text.includes(searchTerm.toLowerCase());
   });
 
   const handleCopySingle = (ddl: string, index: number) => {
-    navigator.clipboard.writeText(ddl);
+    navigator.clipboard.writeText(ddl || '');
     setCopiedIdx(index);
     setTimeout(() => setCopiedIdx(null), 2000);
   };
 
   const handleCopyAllRaw = () => {
     const allDDL = filteredRawIndexes
-      .map((idx, i) => `-- Index #${i + 1} for ${idx.schema}.${idx.table} (Impact: ${idx.impact.toFixed(1)}%)\n${idx.suggestedDdl}`)
+      .map((idx, i) => `-- Index #${i + 1} for ${idx.schema || 'dbo'}.${idx.table || ''} (Impact: ${(idx.impact || 0).toFixed(1)}%)\n${idx.suggestedDdl || ''}`)
       .join('\n\n');
     navigator.clipboard.writeText(allDDL);
     setCopiedAll(true);
@@ -41,7 +51,7 @@ export const MissingIndexesTab: React.FC<MissingIndexesTabProps> = ({ plan }) =>
 
   const handleCopyAllConsolidated = () => {
     const allDDL = filteredConsolidated
-      .map((idx, i) => `-- Consolidated Index #${i + 1} on ${idx.schema}.${idx.table} (Replaces ${idx.combinedFromCount} recommendations)\n${idx.suggestedDdl}`)
+      .map((idx, i) => `-- Consolidated Index #${i + 1} on ${idx.schema || 'dbo'}.${idx.table || ''} (Replaces ${idx.combinedFromCount || 1} recommendations)\n${idx.suggestedDdl || ''}`)
       .join('\n\n');
     navigator.clipboard.writeText(allDDL);
     setCopiedAll(true);
@@ -57,9 +67,10 @@ export const MissingIndexesTab: React.FC<MissingIndexesTabProps> = ({ plan }) =>
             <div className="consolidator-tag">
               <Zap size={15} color="#34d399" />
               <span>Smart Index Consolidator</span>
+              <DiagnosticTooltip guideKey="consolidatedIndexesTab" />
             </div>
             <h3 className="consolidator-title">
-              Consolidated {plan.allMissingIndexes.length} Raw Suggestions ➔ {consolidatedList.length} Composite Covering Indexes
+              Consolidated {rawIndexes.length} Raw Suggestions ➔ {consolidatedList.length} Composite Covering Indexes
             </h3>
             <p className="consolidator-desc">
               SQL Server generates isolated missing index recommendations per query without cross-table deduplication. PlanIQ merges overlapping EQUALITY and INCLUDE columns to prevent excessive index write penalties.
@@ -79,7 +90,7 @@ export const MissingIndexesTab: React.FC<MissingIndexesTabProps> = ({ plan }) =>
               onClick={() => setViewMode('raw')}
             >
               <Layers size={14} />
-              <span>Raw SQL Server Hints ({plan.allMissingIndexes.length})</span>
+              <span>Raw SQL Server Hints ({rawIndexes.length})</span>
             </button>
           </div>
         </div>
@@ -99,6 +110,7 @@ export const MissingIndexesTab: React.FC<MissingIndexesTabProps> = ({ plan }) =>
         </div>
 
         <div className="indexes-meta-actions">
+          <DiagnosticTooltip guideKey={viewMode === 'consolidated' ? 'consolidatedIndexesTab' : 'rawMissingIndexes'} />
           <span className="badge badge-success">
             {viewMode === 'consolidated' ? `${filteredConsolidated.length} Consolidated Indexes` : `${filteredRawIndexes.length} Raw Hints`}
           </span>
@@ -118,15 +130,18 @@ export const MissingIndexesTab: React.FC<MissingIndexesTabProps> = ({ plan }) =>
           <div className="indexes-grid">
             {filteredConsolidated.map((idx, i) => {
               const isCopied = copiedIdx === i;
+              const eqCols = idx.equalityColumns || [];
+              const ineqCols = idx.inequalityColumns || [];
+              const incCols = idx.includeColumns || [];
               return (
                 <div key={i} className="index-card glass-panel consolidated-border">
                   <div className="index-card-header">
                     <div className="index-table-row">
                       <Database size={16} color="#38bdf8" />
                       <span className="index-table-title">
-                        {idx.schema ? `${idx.schema}.${idx.table}` : idx.table}
+                        {idx.schema ? `${idx.schema}.${idx.table || ''}` : (idx.table || '')}
                       </span>
-                      {idx.combinedFromCount > 1 && (
+                      {(idx.combinedFromCount || 1) > 1 && (
                         <span className="badge badge-success" style={{ fontSize: '11px' }}>
                           ⚡ Replaces {idx.combinedFromCount} Raw Queries
                         </span>
@@ -134,43 +149,45 @@ export const MissingIndexesTab: React.FC<MissingIndexesTabProps> = ({ plan }) =>
                     </div>
                     <div className="index-impact-badge">
                       <span className="impact-label">Avg Impact:</span>
-                      <span className="impact-value">{idx.averageImpact > 0 ? `${idx.averageImpact.toFixed(1)}%` : 'High'}</span>
+                      <span className="impact-value">{(idx.averageImpact || 0) > 0 ? `${(idx.averageImpact || 0).toFixed(1)}%` : 'High'}</span>
                     </div>
                   </div>
 
-                  <div className="consolidated-benefit-line">
-                    <ShieldCheck size={13} color="#34d399" />
-                    <span>{idx.storageBenefit}</span>
-                  </div>
+                  {idx.storageBenefit && (
+                    <div className="consolidated-benefit-line">
+                      <ShieldCheck size={13} color="#34d399" />
+                      <span>{idx.storageBenefit}</span>
+                    </div>
+                  )}
 
                   <div className="index-columns-breakdown">
-                    {idx.equalityColumns.length > 0 && (
+                    {eqCols.length > 0 && (
                       <div className="column-group-row">
                         <span className="col-type-label">Equality:</span>
                         <div className="cols-list">
-                          {idx.equalityColumns.map((c, ci) => (
+                          {eqCols.map((c, ci) => (
                             <span key={ci} className="col-tag equality-col">{c}</span>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {idx.inequalityColumns.length > 0 && (
+                    {ineqCols.length > 0 && (
                       <div className="column-group-row">
                         <span className="col-type-label">Inequality:</span>
                         <div className="cols-list">
-                          {idx.inequalityColumns.map((c, ci) => (
+                          {ineqCols.map((c, ci) => (
                             <span key={ci} className="col-tag inequality-col">{c}</span>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {idx.includeColumns.length > 0 && (
+                    {incCols.length > 0 && (
                       <div className="column-group-row">
                         <span className="col-type-label">Include:</span>
                         <div className="cols-list">
-                          {idx.includeColumns.map((c, ci) => (
+                          {incCols.map((c, ci) => (
                             <span key={ci} className="col-tag include-col">{c}</span>
                           ))}
                         </div>
@@ -180,10 +197,10 @@ export const MissingIndexesTab: React.FC<MissingIndexesTabProps> = ({ plan }) =>
 
                   {/* Formatted DDL Code Block */}
                   <div className="ddl-block-wrapper">
-                    <pre className="sql-code-block">{idx.suggestedDdl}</pre>
+                    <pre className="sql-code-block">{idx.suggestedDdl || ''}</pre>
                     <button
                       className="btn-copy-code"
-                      onClick={() => handleCopySingle(idx.suggestedDdl, i)}
+                      onClick={() => handleCopySingle(idx.suggestedDdl || '', i)}
                       title="Copy Index DDL"
                     >
                       {isCopied ? <Check size={13} color="#34d399" /> : <Copy size={13} />}
@@ -207,14 +224,17 @@ export const MissingIndexesTab: React.FC<MissingIndexesTabProps> = ({ plan }) =>
           <div className="indexes-grid">
             {filteredRawIndexes.map((idx, i) => {
               const isCopied = copiedIdx === i;
-              const isTempTable = idx.table.startsWith('[#');
+              const isTempTable = (idx.table || '').startsWith('[#') || (idx.table || '').startsWith('#');
+              const eqCols = idx.equalityColumns || [];
+              const ineqCols = idx.inequalityColumns || [];
+              const incCols = idx.includeColumns || [];
               return (
                 <div key={i} className="index-card glass-panel">
                   <div className="index-card-header">
                     <div className="index-table-row">
                       <Database size={16} color="#38bdf8" />
                       <span className="index-table-title">
-                        {idx.schema ? `${idx.schema}.${idx.table}` : idx.table}
+                        {idx.schema ? `${idx.schema}.${idx.table || ''}` : (idx.table || '')}
                       </span>
                       {isTempTable && (
                         <span className="badge badge-high" style={{ fontSize: '10px' }}>
@@ -224,38 +244,38 @@ export const MissingIndexesTab: React.FC<MissingIndexesTabProps> = ({ plan }) =>
                     </div>
                     <div className="index-impact-badge">
                       <span className="impact-label">Impact:</span>
-                      <span className="impact-value">{idx.impact > 0 ? `${idx.impact.toFixed(1)}%` : 'High'}</span>
+                      <span className="impact-value">{(idx.impact || 0) > 0 ? `${(idx.impact || 0).toFixed(1)}%` : 'High'}</span>
                     </div>
                   </div>
 
                   <div className="index-columns-breakdown">
-                    {idx.equalityColumns.length > 0 && (
+                    {eqCols.length > 0 && (
                       <div className="column-group-row">
                         <span className="col-type-label">Equality:</span>
                         <div className="cols-list">
-                          {idx.equalityColumns.map((c, ci) => (
+                          {eqCols.map((c, ci) => (
                             <span key={ci} className="col-tag equality-col">{c}</span>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {idx.inequalityColumns.length > 0 && (
+                    {ineqCols.length > 0 && (
                       <div className="column-group-row">
                         <span className="col-type-label">Inequality:</span>
                         <div className="cols-list">
-                          {idx.inequalityColumns.map((c, ci) => (
+                          {ineqCols.map((c, ci) => (
                             <span key={ci} className="col-tag inequality-col">{c}</span>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {idx.includeColumns.length > 0 && (
+                    {incCols.length > 0 && (
                       <div className="column-group-row">
                         <span className="col-type-label">Include:</span>
                         <div className="cols-list">
-                          {idx.includeColumns.map((c, ci) => (
+                          {incCols.map((c, ci) => (
                             <span key={ci} className="col-tag include-col">{c}</span>
                           ))}
                         </div>
@@ -264,10 +284,10 @@ export const MissingIndexesTab: React.FC<MissingIndexesTabProps> = ({ plan }) =>
                   </div>
 
                   <div className="ddl-block-wrapper">
-                    <pre className="sql-code-block">{idx.suggestedDdl}</pre>
+                    <pre className="sql-code-block">{idx.suggestedDdl || ''}</pre>
                     <button
                       className="btn-copy-code"
-                      onClick={() => handleCopySingle(idx.suggestedDdl, i)}
+                      onClick={() => handleCopySingle(idx.suggestedDdl || '', i)}
                       title="Copy Index DDL"
                     >
                       {isCopied ? <Check size={13} color="#34d399" /> : <Copy size={13} />}
@@ -276,7 +296,7 @@ export const MissingIndexesTab: React.FC<MissingIndexesTabProps> = ({ plan }) =>
                   </div>
 
                   <div className="index-footer-meta">
-                    <span className="text-dim">From Stmt #{idx.statementId}</span>
+                    <span className="text-dim">From Stmt #{idx.statementId || '1'}</span>
                   </div>
                 </div>
               );

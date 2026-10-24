@@ -107,6 +107,142 @@ export interface CardinalityEstimationEngine {
   remedy: string;
 }
 
+export type FindingSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO' | string;
+
+export interface KeyLookupFinding {
+  statementId: string;
+  nodeId: number;
+  lookupKind: string;
+  schema: string;
+  table: string;
+  lookupIndex: string;
+  seekIndex: string;
+  estimateRows: number;
+  lookupCount: number;
+  hasActualRows: boolean;
+  costPercent: number;
+  fetchedColumns: string[];
+  includeClause: string;
+  severity: FindingSeverity;
+  description: string;
+  remedy: string;
+}
+
+export interface SpoolFinding {
+  statementId: string;
+  nodeId: number;
+  physicalOp: string;
+  logicalOp: string;
+  kind: string;
+  purpose: string;
+  table: string;
+  estimateRows: number;
+  estimateRebinds: number;
+  estimateRewinds: number;
+  actualRows: number;
+  actualRebinds: number;
+  actualRewinds: number;
+  hasActualRows: boolean;
+  costPercent: number;
+  severity: FindingSeverity;
+  description: string;
+  remedy: string;
+}
+
+export interface MissingStatsFinding {
+  statementId: string;
+  nodeId: number;
+  database: string;
+  schema: string;
+  table: string;
+  columns: string[];
+  severity: FindingSeverity;
+  description: string;
+  remedy: string;
+  suggestedDdl: string;
+}
+
+export interface SniffedParameter {
+  name: string;
+  dataType: string;
+  compiledValue: string;
+  runtimeValue: string;
+  hasRuntime: boolean;
+  mismatch: boolean;
+}
+
+export interface ParameterSniffingFinding {
+  affectedStatements: string[];
+  parameters: SniffedParameter[];
+  hasRuntimeValues: boolean;
+  hasMismatch: boolean;
+  hasEstimateImpact: boolean;
+  mitigation: string;
+  severity: FindingSeverity;
+  description: string;
+  remedy: string;
+}
+
+export interface NonSargableFinding {
+  statementId: string;
+  nodeId: number;
+  physicalOp: string;
+  table: string;
+  index: string;
+  functions: string[];
+  leadingWildcard: boolean;
+  predicate: string;
+  tableCardinality: number;
+  costPercent: number;
+  severity: FindingSeverity;
+  description: string;
+  remedy: string;
+}
+
+export interface RowGoalFinding {
+  statementId: string;
+  nodeId: number;
+  physicalOp: string;
+  source: string;
+  estimateRows: number;
+  estimateRowsWithoutGoal: number;
+  actualRows: number;
+  hasActualRows: boolean;
+  reductionFactor: number;
+  misfired: boolean;
+  severity: FindingSeverity;
+  description: string;
+  remedy: string;
+}
+
+export interface AdaptiveJoinFinding {
+  statementId: string;
+  nodeId: number;
+  thresholdRows: number;
+  hasThreshold: boolean;
+  estimatedJoinType: string;
+  actualJoinType: string;
+  estimateRows: number;
+  actualRows: number;
+  hasActualRows: boolean;
+  description: string;
+}
+
+export interface IQPFeature {
+  name: string;
+  status: 'Active' | 'Eligible' | 'Not Applicable' | 'Unknown' | string;
+  detail: string;
+}
+
+export interface AdaptiveProcessing {
+  adaptiveJoins: AdaptiveJoinFinding[];
+  batchModeOperators: number;
+  totalOperators: number;
+  batchOnRowstore: boolean;
+  features: IQPFeature[];
+  summary: string;
+}
+
 export interface AdvancedDiagnostics {
   memoryGrant?: MemoryGrantHealth;
   parallelismSkew?: ParallelismSkew;
@@ -114,6 +250,13 @@ export interface AdvancedDiagnostics {
   consolidatedIndexes: ConsolidatedIndex[];
   scalarUdfWarnings: ScalarUDFWarning[];
   cardinalityEngine?: CardinalityEstimationEngine;
+  keyLookups?: KeyLookupFinding[];
+  spools?: SpoolFinding[];
+  missingStatistics?: MissingStatsFinding[];
+  parameterSniffing?: ParameterSniffingFinding[];
+  nonSargable?: NonSargableFinding[];
+  rowGoals?: RowGoalFinding[];
+  adaptive?: AdaptiveProcessing;
   healthScore: number;
   scoreGrade: string;
 }
@@ -140,5 +283,22 @@ export type AIRequest = advisor.AIRequest & {
   sanitizeBeforeAI?: boolean;
 };
 
-export type AIResponse = advisor.AIResponse;
+export type TechnicalSuggestion = advisor.TechnicalSuggestion;
+export type RewriteStrategy = advisor.RewriteStrategy;
+
+export interface AIResponse {
+  summary: string;
+  rootCause: string;
+  recommendedRewrite: string;
+  rewriteExplanation: string;
+  alternativeRewrite?: string;
+  tuningStrategies?: string[];
+  technicalSuggestions?: TechnicalSuggestion[];
+  strategies?: RewriteStrategy[];
+  indexRecommendations: string[];
+  serverConfigTips: string[];
+  implementationChecklist?: string[];
+  estimatedGains?: Record<string, string>;
+  providerUsed: string;
+}
 

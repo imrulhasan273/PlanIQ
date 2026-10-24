@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"sqlplan-advisor/pkg/advisor"
@@ -44,17 +45,22 @@ func (a *App) LoadSamplePlan() (*sqlplan.PlanAnalysis, error) {
 			return nil, fmt.Errorf("sample plan not found: %w", err)
 		}
 	}
-	return sqlplan.ParseXML(string(bytes), "explan.xml (InsertDailyOperationalReport)")
+	return sqlplan.ParseBytes(bytes, "explan.xml (InsertDailyOperationalReport)")
 }
 
-// OpenFilePicker opens a native file dialog for selecting a .sqlplan or .xml file
-func (a *App) OpenFilePicker() (string, string, error) {
+// OpenFileAndParse opens a native file dialog, parses the plan directly on disk,
+// and returns the parsed PlanAnalysis struct without sending large raw XML across IPC.
+func (a *App) OpenFileAndParse() (*sqlplan.PlanAnalysis, error) {
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select SQL Server Execution Plan (.sqlplan, .xml)",
+		Title: "Select SQL Server Execution Plan or Deadlock (.sqlplan, .xml, .xdl)",
 		Filters: []runtime.FileFilter{
 			{
-				DisplayName: "Execution Plans (*.sqlplan;*.xml)",
-				Pattern:     "*.sqlplan;*.xml",
+				DisplayName: "Execution Plans & Deadlocks (*.sqlplan;*.xml;*.xdl)",
+				Pattern:     "*.sqlplan;*.xml;*.xdl",
+			},
+			{
+				DisplayName: "Deadlock Graphs (*.xdl)",
+				Pattern:     "*.xdl",
 			},
 			{
 				DisplayName: "All Files (*.*)",
@@ -63,18 +69,63 @@ func (a *App) OpenFilePicker() (string, string, error) {
 		},
 	})
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	if selection == "" {
-		return "", "", nil // user cancelled
+		return nil, nil // user cancelled
+	}
+
+	return sqlplan.ParseFile(selection, "")
+}
+
+// SelectedPlanFile holds the path, name, and decoded content of a chosen file
+type SelectedPlanFile struct {
+	Path    string `json:"path"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
+}
+
+// OpenFilePicker opens a native file dialog for selecting a .sqlplan, .xml, or .xdl file
+func (a *App) OpenFilePicker() (*SelectedPlanFile, error) {
+	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select SQL Server Plan or Deadlock (.sqlplan, .xml, .xdl)",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "Execution Plans & Deadlocks (*.sqlplan;*.xml;*.xdl)",
+				Pattern:     "*.sqlplan;*.xml;*.xdl",
+			},
+			{
+				DisplayName: "Deadlock Graphs (*.xdl)",
+				Pattern:     "*.xdl",
+			},
+			{
+				DisplayName: "All Files (*.*)",
+				Pattern:     "*.*",
+			},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if selection == "" {
+		return nil, nil // user cancelled
 	}
 
 	bytes, err := os.ReadFile(selection)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to read file: %w", err)
+		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	return selection, string(bytes), nil
+	utf8Bytes, err := sqlplan.DecodeToUTF8(bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode file charset: %w", err)
+	}
+
+	return &SelectedPlanFile{
+		Path:    selection,
+		Name:    filepath.Base(selection),
+		Content: string(utf8Bytes),
+	}, nil
 }
 
 // GetAIAdvice requests optimization recommendations from the AI Advisor

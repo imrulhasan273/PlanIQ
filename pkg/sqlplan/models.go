@@ -220,6 +220,150 @@ type CardinalityEstimationEngine struct {
 	Remedy       string `json:"remedy"`
 }
 
+// KeyLookupFinding describes a Key Lookup / RID Lookup (bookmark lookup) operator
+type KeyLookupFinding struct {
+	StatementID    string   `json:"statementId"`
+	NodeID         int      `json:"nodeId"`
+	LookupKind     string   `json:"lookupKind"` // "Key Lookup" or "RID Lookup"
+	Schema         string   `json:"schema"`
+	Table          string   `json:"table"`
+	LookupIndex    string   `json:"lookupIndex"` // clustered index (or empty for heap) being probed
+	SeekIndex      string   `json:"seekIndex"`   // non-clustered index driving the lookup
+	EstimateRows   float64  `json:"estimateRows"`
+	LookupCount    float64  `json:"lookupCount"` // total lookups (actual if available, otherwise estimated)
+	HasActualRows  bool     `json:"hasActualRows"`
+	CostPercent    float64  `json:"costPercent"`
+	FetchedColumns []string `json:"fetchedColumns"`
+	IncludeClause  string   `json:"includeClause"`
+	Severity       string   `json:"severity"`
+	Description    string   `json:"description"`
+	Remedy         string   `json:"remedy"`
+}
+
+// SpoolFinding describes a Table/Index/Row Count/Window Spool operator
+type SpoolFinding struct {
+	StatementID     string  `json:"statementId"`
+	NodeID          int     `json:"nodeId"`
+	PhysicalOp      string  `json:"physicalOp"`
+	LogicalOp       string  `json:"logicalOp"`
+	Kind            string  `json:"kind"`    // Eager, Lazy, Row Count, Window
+	Purpose         string  `json:"purpose"` // Halloween Protection, Temporary Index, ...
+	Table           string  `json:"table"`
+	EstimateRows    float64 `json:"estimateRows"`
+	EstimateRebinds float64 `json:"estimateRebinds"`
+	EstimateRewinds float64 `json:"estimateRewinds"`
+	ActualRows      float64 `json:"actualRows"`
+	ActualRebinds   float64 `json:"actualRebinds"`
+	ActualRewinds   float64 `json:"actualRewinds"`
+	HasActualRows   bool    `json:"hasActualRows"`
+	CostPercent     float64 `json:"costPercent"`
+	Severity        string  `json:"severity"`
+	Description     string  `json:"description"`
+	Remedy          string  `json:"remedy"`
+}
+
+// MissingStatsFinding represents <ColumnsWithNoStatistics> optimizer warnings
+type MissingStatsFinding struct {
+	StatementID  string   `json:"statementId"`
+	NodeID       int      `json:"nodeId"`
+	Database     string   `json:"database"`
+	Schema       string   `json:"schema"`
+	Table        string   `json:"table"`
+	Columns      []string `json:"columns"`
+	Severity     string   `json:"severity"`
+	Description  string   `json:"description"`
+	Remedy       string   `json:"remedy"`
+	SuggestedDDL string   `json:"suggestedDdl"`
+}
+
+// SniffedParameter is one entry of a plan's <ParameterList>
+type SniffedParameter struct {
+	Name          string `json:"name"`
+	DataType      string `json:"dataType"`
+	CompiledValue string `json:"compiledValue"`
+	RuntimeValue  string `json:"runtimeValue"`
+	HasRuntime    bool   `json:"hasRuntime"`
+	Mismatch      bool   `json:"mismatch"`
+}
+
+// ParameterSniffingFinding reports compile-time (sniffed) vs runtime parameter values
+type ParameterSniffingFinding struct {
+	AffectedStatements []string            `json:"affectedStatements"`
+	Parameters         []*SniffedParameter `json:"parameters"`
+	HasRuntimeValues   bool                `json:"hasRuntimeValues"`
+	HasMismatch        bool                `json:"hasMismatch"`
+	HasEstimateImpact  bool                `json:"hasEstimateImpact"`
+	Mitigation         string              `json:"mitigation"`
+	Severity           string              `json:"severity"`
+	Description        string              `json:"description"`
+	Remedy             string              `json:"remedy"`
+}
+
+// NonSargableFinding describes predicates that prevent an index seek
+type NonSargableFinding struct {
+	StatementID      string   `json:"statementId"`
+	NodeID           int      `json:"nodeId"`
+	PhysicalOp       string   `json:"physicalOp"`
+	Table            string   `json:"table"`
+	Index            string   `json:"index"`
+	Functions        []string `json:"functions"`
+	LeadingWildcard  bool     `json:"leadingWildcard"`
+	Predicate        string   `json:"predicate"`
+	TableCardinality float64  `json:"tableCardinality"`
+	CostPercent      float64  `json:"costPercent"`
+	Severity         string   `json:"severity"`
+	Description      string   `json:"description"`
+	Remedy           string   `json:"remedy"`
+}
+
+// RowGoalFinding describes TOP / FAST N / EXISTS row-goal optimizations and their pitfalls
+type RowGoalFinding struct {
+	StatementID               string  `json:"statementId"`
+	NodeID                    int     `json:"nodeId"`
+	PhysicalOp                string  `json:"physicalOp"`
+	Source                    string  `json:"source"` // TOP, FAST N hint, EXISTS / IN semi-join, Optimizer row goal
+	EstimateRows              float64 `json:"estimateRows"`
+	EstimateRowsWithoutGoal   float64 `json:"estimateRowsWithoutGoal"`
+	ActualRows                float64 `json:"actualRows"` // per-execution average
+	HasActualRows             bool    `json:"hasActualRows"`
+	ReductionFactor           float64 `json:"reductionFactor"`
+	Misfired                  bool    `json:"misfired"`
+	Severity                  string  `json:"severity"`
+	Description               string  `json:"description"`
+	Remedy                    string  `json:"remedy"`
+}
+
+// AdaptiveJoinFinding describes a batch-mode Adaptive Join operator (SQL Server 2017+)
+type AdaptiveJoinFinding struct {
+	StatementID       string  `json:"statementId"`
+	NodeID            int     `json:"nodeId"`
+	ThresholdRows     float64 `json:"thresholdRows"`
+	HasThreshold      bool    `json:"hasThreshold"`
+	EstimatedJoinType string  `json:"estimatedJoinType"`
+	ActualJoinType    string  `json:"actualJoinType"`
+	EstimateRows      float64 `json:"estimateRows"`
+	ActualRows        float64 `json:"actualRows"`
+	HasActualRows     bool    `json:"hasActualRows"`
+	Description       string  `json:"description"`
+}
+
+// IQPFeature is the state of one Intelligent Query Processing feature in this plan
+type IQPFeature struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // Active, Eligible, Not Applicable, Unknown
+	Detail string `json:"detail"`
+}
+
+// AdaptiveProcessing bundles Adaptive Joins, batch mode usage and IQP feature states
+type AdaptiveProcessing struct {
+	AdaptiveJoins      []*AdaptiveJoinFinding `json:"adaptiveJoins"`
+	BatchModeOperators int                    `json:"batchModeOperators"`
+	TotalOperators     int                    `json:"totalOperators"`
+	BatchOnRowstore    bool                   `json:"batchOnRowstore"`
+	Features           []*IQPFeature          `json:"features"`
+	Summary            string                 `json:"summary"`
+}
+
 // AdvancedDiagnostics bundles all high-level engine root cause diagnostics
 type AdvancedDiagnostics struct {
 	MemoryGrant         *MemoryGrantHealth           `json:"memoryGrant,omitempty"`
@@ -228,6 +372,13 @@ type AdvancedDiagnostics struct {
 	ConsolidatedIndexes []*ConsolidatedIndex         `json:"consolidatedIndexes"`
 	ScalarUDFWarnings   []*ScalarUDFWarning          `json:"scalarUdfWarnings"`
 	CardinalityEngine   *CardinalityEstimationEngine `json:"cardinalityEngine,omitempty"`
+	KeyLookups          []*KeyLookupFinding          `json:"keyLookups"`
+	Spools              []*SpoolFinding              `json:"spools"`
+	MissingStatistics   []*MissingStatsFinding       `json:"missingStatistics"`
+	ParameterSniffing   []*ParameterSniffingFinding  `json:"parameterSniffing"`
+	NonSargable         []*NonSargableFinding        `json:"nonSargable"`
+	RowGoals            []*RowGoalFinding            `json:"rowGoals"`
+	Adaptive            *AdaptiveProcessing          `json:"adaptive,omitempty"`
 	HealthScore         int                          `json:"healthScore"`
 	ScoreGrade          string                       `json:"scoreGrade"`
 }

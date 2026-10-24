@@ -20,9 +20,21 @@ import {
   AlertCircle,
   FileCode2,
   Copy,
-  Check
+  Check,
+  Search,
+  Disc,
+  BarChart3,
+  Sliders,
+  Code2,
+  Target,
+  GitFork,
+  Filter
 } from 'lucide-react';
-import { PlanAnalysis, StatementAnalysis } from '../types/plan';
+import { PlanAnalysis, StatementAnalysis, SniffedParameter, IQPFeature } from '../types/plan';
+import { DiagnosticTooltip } from './DiagnosticTooltip';
+import { QueryPreviewCell } from './QueryPreviewModal';
+import { ParameterSniffingModal } from './ParameterSniffingModal';
+import { AdaptiveJoinsModal } from './AdaptiveJoinsModal';
 
 interface OverviewTabProps {
   plan: PlanAnalysis;
@@ -41,6 +53,45 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
     (s) => s.statementId === verdict?.culpritStatementId
   );
 
+  const [diagCategory, setDiagCategory] = React.useState<'all' | 'engine' | 'indexes' | 'predicates'>('all');
+  const [onlyIssues, setOnlyIssues] = React.useState<boolean>(false);
+  const [copiedId, setCopiedId] = React.useState<string | null>(null);
+  const [isParamSniffingOpen, setIsParamSniffingOpen] = React.useState<boolean>(false);
+  const [isAdaptiveOpen, setIsAdaptiveOpen] = React.useState<boolean>(false);
+
+  const handleCopy = (text: string, id: string) => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
+  };
+
+  // Compute issue status for each of the 13 diagnostic detectors
+  const hasIssues = {
+    memoryGrant: !!(diag?.memoryGrant?.hasSpills || diag?.memoryGrant?.isBloated),
+    cardinalityEngine: !!diag?.cardinalityEngine?.isLegacy,
+    parallelismSkew: !!(diag?.parallelismSkew?.hasSkew || plan.maxDopReason === 'MaxDOPSetToOne'),
+    rowGoals: (diag?.rowGoals || []).some((r) => r.misfired || r.reductionFactor >= 10),
+    adaptive: (diag?.adaptive?.adaptiveJoins || []).length > 0,
+    keyLookups: (diag?.keyLookups?.length || 0) > 0,
+    spools: (diag?.spools?.length || 0) > 0,
+    missingStatistics: (diag?.missingStatistics?.length || 0) > 0,
+    consolidatedIndexes: (diag?.consolidatedIndexes?.length || 0) > 0,
+    nonSargable: (diag?.nonSargable?.length || 0) > 0,
+    parameterSniffing: (diag?.parameterSniffing || []).some((p) => p.hasMismatch || p.hasEstimateImpact),
+    implicitConversions: (diag?.implicitConversions?.length || 0) > 0,
+    scalarUdfWarnings: (diag?.scalarUdfWarnings?.length || 0) > 0,
+  };
+
+  const totalIssuesCount = Object.values(hasIssues).filter(Boolean).length;
+
+  const shouldRenderCard = (category: 'engine' | 'indexes' | 'predicates', hasCardIssue: boolean) => {
+    if (diagCategory !== 'all' && diagCategory !== category) return false;
+    if (onlyIssues && !hasCardIssue) return false;
+    return true;
+  };
+
   return (
     <div className="tab-scroll-container">
       {/* 10-Second Executive Root Cause Verdict Banner */}
@@ -50,6 +101,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             <div className="verdict-title-tag">
               <Zap size={16} color="#38bdf8" />
               <span>10-Second Executive Root Cause Verdict</span>
+              <DiagnosticTooltip guideKey="executiveVerdict" />
             </div>
             <span className="badge badge-critical" style={{ fontSize: '11px' }}>
               Culprit: Stmt #{verdict.culpritStatementId} ({verdict.costPercentage}% Cost)
@@ -99,7 +151,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               </div>
               <h3 className="diagnostics-headline">Root Cause Engine Health Analysis</h3>
               <p className="diagnostics-subtext">
-                Evaluates Cardinality Estimator version, RAM memory grants, TempDB spills, scalar UDF penalties, implicit conversions, and parallelism skew.
+                Evaluates Key Lookups, Spool Operators, Missing Statistics, Parameter Sniffing, Non-Sargable Predicates, Row Goals, Adaptive Joins/IQP, RAM Grants, Spills, and Parallelism.
               </p>
             </div>
 
@@ -116,244 +168,863 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             </div>
           </div>
 
-          {/* 6 Advanced Root Cause Diagnostic Cards */}
+          {/* Interactive Diagnostic Category Filter Bar */}
+          <div className="diag-filter-bar">
+            <div className="diag-filter-group">
+              <button
+                className={`diag-filter-pill ${diagCategory === 'all' ? 'active' : ''}`}
+                onClick={() => setDiagCategory('all')}
+              >
+                <span>All Detectors</span>
+                <span className="badge badge-info" style={{ fontSize: '10px', padding: '1px 5px' }}>13</span>
+              </button>
+              <button
+                className={`diag-filter-pill ${diagCategory === 'engine' ? 'active' : ''}`}
+                onClick={() => setDiagCategory('engine')}
+              >
+                <Cpu size={12} />
+                <span>Engine & Memory</span>
+                <span className="badge badge-info" style={{ fontSize: '10px', padding: '1px 5px' }}>5</span>
+              </button>
+              <button
+                className={`diag-filter-pill ${diagCategory === 'indexes' ? 'active' : ''}`}
+                onClick={() => setDiagCategory('indexes')}
+              >
+                <KeyRound size={12} />
+                <span>Indexes & Operators</span>
+                <span className="badge badge-info" style={{ fontSize: '10px', padding: '1px 5px' }}>4</span>
+              </button>
+              <button
+                className={`diag-filter-pill ${diagCategory === 'predicates' ? 'active' : ''}`}
+                onClick={() => setDiagCategory('predicates')}
+              >
+                <Sliders size={12} />
+                <span>Query & Predicates</span>
+                <span className="badge badge-info" style={{ fontSize: '10px', padding: '1px 5px' }}>4</span>
+              </button>
+            </div>
+
+            <button
+              className={`diag-filter-toggle ${onlyIssues ? 'active' : ''}`}
+              onClick={() => setOnlyIssues(!onlyIssues)}
+              title="Filter to only cards with detected bottlenecks or warnings"
+            >
+              <AlertTriangle size={12} />
+              <span>Only Show Issues ({totalIssuesCount})</span>
+            </button>
+          </div>
+
+          {/* 13 Advanced Root Cause Diagnostic Cards */}
           <div className="diagnostics-cards-grid">
-            {/* 1. Memory Grant & TempDB Spill Inspector */}
-            <div className="diag-card glass-panel">
-              <div className="diag-card-header">
-                <div className="diag-icon-title">
-                  <Database size={16} color="#a855f7" />
-                  <span className="diag-title">Memory Grant & Spills</span>
-                </div>
-                {diag.memoryGrant?.hasSpills ? (
-                  <span className="badge badge-critical">Spill Warning</span>
-                ) : diag.memoryGrant?.isBloated ? (
-                  <span className="badge badge-high">Bloated Grant</span>
-                ) : (
-                  <span className="badge badge-success">Healthy Grant</span>
-                )}
-              </div>
-              <div className="diag-card-body">
-                {diag.memoryGrant ? (
-                  <>
-                    <div className="diag-metric-row">
-                      <span className="diag-metric-label">Granted / Max Used:</span>
-                      <strong className="diag-metric-val">
-                        {(diag.memoryGrant.grantedMemoryKb / 1024).toFixed(1)} MB / {(diag.memoryGrant.maxUsedMemoryKb / 1024).toFixed(1)} MB
-                      </strong>
-                    </div>
-                    {diag.memoryGrant.serialDesiredKb > 0 && (
-                      <div className="diag-metric-row">
-                        <span className="diag-metric-label">Serial Desired Memory:</span>
-                        <span className="text-dim">{diag.memoryGrant.serialDesiredKb.toLocaleString()} KB</span>
-                      </div>
-                    )}
-                    {diag.memoryGrant.isBloated && (
-                      <div className="diag-alert-line warning">
-                        ⚠️ Over-allocated: {diag.memoryGrant.wastedPercent}% unused ({diag.memoryGrant.wastedMemoryMb} MB RAM reserved but unconsumed).
-                      </div>
-                    )}
-                    {diag.memoryGrant.hasSpills && (
-                      <div className="diag-alert-line danger">
-                        🚨 {diag.memoryGrant.spillDetails || 'Data spilled to TempDB during Hash/Sort operations.'}
-                      </div>
-                    )}
-                    <p className="diag-remedy"><strong>Fix:</strong> {diag.memoryGrant.remedy}</p>
-                  </>
-                ) : (
-                  <div className="diag-empty-text">
-                    ✓ No memory grant allocated (all operations executed within stream buffers).
+            {/* 1. Key Lookup / Bookmark Lookup Detector */}
+            {shouldRenderCard('indexes', hasIssues.keyLookups) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <Search size={16} color="#f43f5e" />
+                    <span className="diag-title">Key & Bookmark Lookups</span>
+                    <DiagnosticTooltip guideKey="keyLookups" />
                   </div>
-                )}
-              </div>
-            </div>
-
-            {/* 2. Cardinality Estimation Model Version */}
-            <div className="diag-card glass-panel">
-              <div className="diag-card-header">
-                <div className="diag-icon-title">
-                  <Cpu size={16} color="#38bdf8" />
-                  <span className="diag-title">Cardinality Estimator (CE)</span>
+                  {diag.keyLookups && diag.keyLookups.length > 0 ? (
+                    <span className={`badge badge-${diag.keyLookups.some(k => k.severity === 'CRITICAL') ? 'critical' : diag.keyLookups.some(k => k.severity === 'HIGH') ? 'high' : 'medium'}`}>
+                      {diag.keyLookups.length} {diag.keyLookups.length === 1 ? 'Lookup' : 'Lookups'} Detected
+                    </span>
+                  ) : (
+                    <span className="badge badge-success">Clean (0 Lookups)</span>
+                  )}
                 </div>
-                {diag.cardinalityEngine?.isLegacy ? (
-                  <span className="badge badge-high">Legacy CE (v{diag.cardinalityEngine.modelVersion})</span>
-                ) : (
-                  <span className="badge badge-success">Modern CE (v{diag.cardinalityEngine?.modelVersion || '120+'})</span>
-                )}
-              </div>
-              <div className="diag-card-body">
-                {diag.cardinalityEngine ? (
-                  <>
-                    <div className="diag-metric-row">
-                      <span className="diag-metric-label">CE Engine Version:</span>
-                      <strong className="diag-metric-val">
-                        Version {diag.cardinalityEngine.modelVersion} {diag.cardinalityEngine.isLegacy ? '(SQL Server 2000-2012 legacy algorithm)' : '(SQL 2014+ Modern Estimator)'}
-                      </strong>
-                    </div>
-                    <p className="diag-desc-text">{diag.cardinalityEngine.description}</p>
-                    <p className="diag-remedy"><strong>Action:</strong> {diag.cardinalityEngine.remedy}</p>
-                  </>
-                ) : (
-                  <div className="diag-empty-text">Default Cardinality Estimator active.</div>
-                )}
-              </div>
-            </div>
-
-            {/* 3. Implicit Data Type Conversions (Sargability) */}
-            <div className="diag-card glass-panel">
-              <div className="diag-card-header">
-                <div className="diag-icon-title">
-                  <AlertTriangle size={16} color="#f43f5e" />
-                  <span className="diag-title">Implicit Conversions</span>
-                </div>
-                {diag.implicitConversions.length > 0 ? (
-                  <span className="badge badge-critical">{diag.implicitConversions.length} Non-Sargable</span>
-                ) : (
-                  <span className="badge badge-success">Clean Sargability</span>
-                )}
-              </div>
-              <div className="diag-card-body">
-                {diag.implicitConversions.length > 0 ? (
-                  <>
-                    <div className="diag-items-list">
-                      {diag.implicitConversions.slice(0, 3).map((conv, i) => (
-                        <div key={i} className="diag-sub-item">
-                          <span className="diag-sub-tag">Stmt #{conv.statementId}</span>
-                          <span className="diag-sub-code" title={conv.expression}>{conv.expression || conv.convertIssue}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="diag-remedy">
-                      <strong>Fix:</strong> Parameter and variable data types do not match column types, invalidating Index Seeks. Match types exactly.
-                    </p>
-                  </>
-                ) : (
-                  <div className="diag-empty-text">✓ No CONVERT_IMPLICIT performance penalties detected.</div>
-                )}
-              </div>
-            </div>
-
-            {/* 4. Scalar UDF (RBAR) Penalty */}
-            <div className="diag-card glass-panel">
-              <div className="diag-card-header">
-                <div className="diag-icon-title">
-                  <FunctionSquare size={16} color="#fbbf24" />
-                  <span className="diag-title">Scalar UDF (RBAR) Penalty</span>
-                </div>
-                {diag.scalarUdfWarnings.length > 0 ? (
-                  <span className="badge badge-critical">{diag.scalarUdfWarnings.length} UDF Detected</span>
-                ) : (
-                  <span className="badge badge-success">No Scalar UDFs</span>
-                )}
-              </div>
-              <div className="diag-card-body">
-                {diag.scalarUdfWarnings.length > 0 ? (
-                  <>
-                    <div className="diag-items-list">
-                      {diag.scalarUdfWarnings.map((udf, i) => (
-                        <div key={i} className="diag-sub-item danger-border">
-                          <span className="diag-sub-tag">Stmt #{udf.statementId}</span>
-                          <code className="diag-sub-code">{udf.functionName}</code>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="diag-remedy">
-                      <strong>Fix:</strong> Scalar UDFs force Row-By-Agonizing-Row evaluation and suppress parallelism. Convert to an <code>Inline Table-Valued Function (iTVF)</code> or enable SQL 2019+ Scalar Inlining.
-                    </p>
-                  </>
-                ) : (
-                  <div className="diag-empty-text">✓ No scalar user-defined functions suppressing parallelism.</div>
-                )}
-              </div>
-            </div>
-
-            {/* 5. Parallelism & Worker Thread Skew */}
-            <div className="diag-card glass-panel">
-              <div className="diag-card-header">
-                <div className="diag-icon-title">
-                  <SplitSquareVertical size={16} color="#34d399" />
-                  <span className="diag-title">Parallel Worker Distribution</span>
-                </div>
-                {diag.parallelismSkew?.hasSkew ? (
-                  <span className="badge badge-critical">{diag.parallelismSkew.skewRatio}x Skew</span>
-                ) : plan.maxDopReason === 'MaxDOPSetToOne' ? (
-                  <span className="badge badge-high">MaxDOP 1 Forced</span>
-                ) : (
-                  <span className="badge badge-success">Balanced</span>
-                )}
-              </div>
-              <div className="diag-card-body">
-                {diag.parallelismSkew?.hasSkew ? (
-                  <>
-                    <div className="diag-metric-row">
-                      <span className="diag-metric-label">Thread Imbalance:</span>
-                      <strong className="diag-metric-val">{diag.parallelismSkew.skewRatio}x Skew Ratio</strong>
-                    </div>
-                    <div className="thread-bars-container">
-                      {diag.parallelismSkew.threads.map((t) => (
-                        <div key={t.threadId} className="thread-bar-row">
-                          <span className="thread-name">T#{t.threadId}</span>
-                          <div className="thread-track">
-                            <div className="thread-fill" style={{ width: `${t.percentage}%` }} />
+                <div className="diag-card-body">
+                  {diag.keyLookups && diag.keyLookups.length > 0 ? (
+                    <>
+                      <div className="diag-metric-row">
+                        <span className="diag-metric-label">Total Bookmark Lookups:</span>
+                        <strong className="diag-metric-val">
+                          {diag.keyLookups.reduce((acc, k) => acc + k.lookupCount, 0).toLocaleString()} Executions
+                        </strong>
+                      </div>
+                      <div className="diag-items-list">
+                        {diag.keyLookups.slice(0, 3).map((kl, i) => (
+                          <div key={i} className="diag-sub-item danger-border" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                              <span className="diag-sub-tag">Stmt #{kl.statementId} ({kl.lookupKind})</span>
+                              <span className="text-dim" style={{ fontSize: '10px' }}>~{kl.lookupCount.toLocaleString()} lookups</span>
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#e2e8f0', fontWeight: 600 }}>
+                              {kl.schema ? `[${kl.schema}].` : ''}[{kl.table}]
+                            </div>
+                            {kl.seekIndex && (
+                              <div style={{ fontSize: '10px', color: '#94a3b8' }}>
+                                Driving Index: <code style={{ color: '#38bdf8' }}>{kl.seekIndex}</code>
+                              </div>
+                            )}
+                            {kl.fetchedColumns.length > 0 && (
+                              <div className="diag-chips-wrap" style={{ marginTop: '2px' }}>
+                                {kl.fetchedColumns.slice(0, 5).map((col: string, cIdx: number) => (
+                                  <span key={cIdx} className="diag-chip">[{col}]</span>
+                                ))}
+                                {kl.fetchedColumns.length > 5 && (
+                                  <span className="diag-chip">+{kl.fetchedColumns.length - 5} more</span>
+                                )}
+                              </div>
+                            )}
+                            {kl.includeClause && (
+                              <div style={{ marginTop: '4px', width: '100%', display: 'flex', justifyContent: 'flex-end' }}>
+                                <button
+                                  className={`diag-copy-btn ${copiedId === `kl-${i}` ? 'copied' : ''}`}
+                                  onClick={() => handleCopy(kl.includeClause, `kl-${i}`)}
+                                  title="Copy suggested INCLUDE clause"
+                                >
+                                  {copiedId === `kl-${i}` ? <Check size={11} /> : <Copy size={11} />}
+                                  <span>{copiedId === `kl-${i}` ? 'Copied INCLUDE' : 'Copy INCLUDE'}</span>
+                                </button>
+                              </div>
+                            )}
                           </div>
-                          <span className="thread-pct">{t.percentage}%</span>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
+                      <p className="diag-remedy">
+                        <strong>Fix:</strong> Add fetched columns to the driving nonclustered index using <code>INCLUDE (...)</code> to convert bookmark lookups into efficient covering index seeks.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#34d399" />
+                      </div>
+                      <span className="diag-clean-title">100% Covering Index Seeks</span>
+                      <p className="diag-clean-desc">No Key or RID bookmark lookups detected. All required columns exist in driving indexes.</p>
                     </div>
-                    <p className="diag-remedy"><strong>Fix:</strong> {diag.parallelismSkew.remedy}</p>
-                  </>
-                ) : plan.maxDopReason === 'MaxDOPSetToOne' ? (
-                  <>
-                    <div className="diag-alert-line warning">
-                      ⚠️ Single-threaded execution forced: Query plan is restricted to MAXDOP 1 at server or query level.
-                    </div>
-                    <p className="diag-remedy"><strong>Fix:</strong> Review Cost Threshold for Parallelism (recommended: 50) and MAXDOP settings.</p>
-                  </>
-                ) : (
-                  <div className="diag-empty-text">✓ Multi-threaded parallel execution is balanced.</div>
-                )}
-              </div>
-            </div>
-
-            {/* 6. Smart Missing Index Consolidation */}
-            <div className="diag-card glass-panel">
-              <div className="diag-card-header">
-                <div className="diag-icon-title">
-                  <KeyRound size={16} color="#34d399" />
-                  <span className="diag-title">Missing Index Consolidator</span>
+                  )}
                 </div>
-                <span className="badge badge-success">
-                  {diag.consolidatedIndexes.length} Composite Targets
-                </span>
               </div>
-              <div className="diag-card-body">
-                {diag.consolidatedIndexes.length > 0 ? (
-                  <>
-                    <div className="diag-metric-row">
-                      <span className="diag-metric-label">Redundancy Reduction:</span>
-                      <strong className="diag-metric-val">
-                        {plan.allMissingIndexes.length} Raw Hints ➔ {diag.consolidatedIndexes.length} Composite Indexes
-                      </strong>
+            )}
+
+            {/* 2. Table Spool & Eager/Lazy Spool Detector */}
+            {shouldRenderCard('indexes', hasIssues.spools) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <Disc size={16} color="#f97316" />
+                    <span className="diag-title">TempDB Spool Operators</span>
+                    <DiagnosticTooltip guideKey="spools" />
+                  </div>
+                  {diag.spools && diag.spools.length > 0 ? (
+                    <span className={`badge badge-${diag.spools.some(s => s.severity === 'CRITICAL' || s.physicalOp === 'Index Spool') ? 'critical' : 'high'}`}>
+                      {diag.spools.length} {diag.spools.length === 1 ? 'Spool' : 'Spools'} Active
+                    </span>
+                  ) : (
+                    <span className="badge badge-success">No Spools</span>
+                  )}
+                </div>
+                <div className="diag-card-body">
+                  {diag.spools && diag.spools.length > 0 ? (
+                    <>
+                      <div className="diag-metric-row">
+                        <span className="diag-metric-label">Spool Allocations:</span>
+                        <strong className="diag-metric-val">{diag.spools.length} Operator(s) writing to TempDB</strong>
+                      </div>
+                      <div className="diag-items-list">
+                        {diag.spools.slice(0, 3).map((sp, i) => (
+                          <div key={i} className="diag-sub-item danger-border" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '3px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                              <span className="diag-sub-tag">Stmt #{sp.statementId} (Node #{sp.nodeId})</span>
+                              <span className="badge badge-medium" style={{ fontSize: '9px', padding: '1px 5px' }}>{sp.kind} Spool</span>
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#fed7aa', fontWeight: 600 }}>
+                              {sp.physicalOp} {sp.table ? `on [${sp.table}]` : ''}
+                            </div>
+                            <div style={{ fontSize: '10px', color: '#94a3b8' }}>
+                              Purpose: <span style={{ color: '#cbd5e1' }}>{sp.purpose}</span>
+                            </div>
+                            {sp.costPercent > 0 && (
+                              <div style={{ fontSize: '10px', color: '#fdba74' }}>
+                                Cost: {sp.costPercent.toFixed(1)}% of statement
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <p className="diag-remedy">
+                        <strong>Fix:</strong> {diag.spools[0]?.remedy || 'Create permanent indexes on the inner join keys or materialize intermediate results in explicit indexed temp tables.'}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#34d399" />
+                      </div>
+                      <span className="diag-clean-title">Zero TempDB Spool Overhead</span>
+                      <p className="diag-clean-desc">No intermediate Table, Index, or Window spool operators materializing rows into TempDB.</p>
                     </div>
-                    <p className="diag-desc-text">
-                      Merges overlapping EQUALITY, INEQUALITY, and INCLUDE columns across identical tables to prevent index sprawl and save write IOPS.
-                    </p>
-                    {onNavigateTab && (
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        style={{ marginTop: '8px', width: '100%' }}
-                        onClick={() => onNavigateTab('indexes')}
-                      >
-                        <KeyRound size={13} color="#34d399" />
-                        <span>Inspect Smart Consolidated Indexes ({diag.consolidatedIndexes.length})</span>
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <div className="diag-empty-text">✓ No missing index consolidation required.</div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* 3. Missing Statistics Warning (<ColumnsWithNoStatistics>) */}
+            {shouldRenderCard('indexes', hasIssues.missingStatistics) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <BarChart3 size={16} color="#ec4899" />
+                    <span className="diag-title">Missing Column Statistics</span>
+                    <DiagnosticTooltip guideKey="missingStatistics" />
+                  </div>
+                  {diag.missingStatistics && diag.missingStatistics.length > 0 ? (
+                    <span className="badge badge-critical">
+                      {diag.missingStatistics.length} {diag.missingStatistics.length === 1 ? 'Table' : 'Tables'} Blind
+                    </span>
+                  ) : (
+                    <span className="badge badge-success">Statistics Complete</span>
+                  )}
+                </div>
+                <div className="diag-card-body">
+                  {diag.missingStatistics && diag.missingStatistics.length > 0 ? (
+                    <>
+                      <div className="diag-alert-line danger">
+                        🚨 Optimizer compiled query without column statistics. Cardinality estimates and memory sizing are unreliable.
+                      </div>
+                      <div className="diag-items-list">
+                        {diag.missingStatistics.slice(0, 3).map((ms, i) => (
+                          <div key={i} className="diag-sub-item danger-border" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                              <span className="diag-sub-tag">Stmt #{ms.statementId}</span>
+                              <strong style={{ fontSize: '11px', color: '#ffffff' }}>
+                                {ms.schema ? `[${ms.schema}].` : ''}[{ms.table}]
+                              </strong>
+                            </div>
+                            <div className="diag-chips-wrap">
+                              {ms.columns.map((c: string, cIdx: number) => (
+                                <span key={cIdx} className="diag-chip">[{c}]</span>
+                              ))}
+                            </div>
+                            {ms.suggestedDdl && (
+                              <div style={{ marginTop: '4px', width: '100%', display: 'flex', justifyContent: 'flex-end' }}>
+                                <button
+                                  className={`diag-copy-btn ${copiedId === `ms-${i}` ? 'copied' : ''}`}
+                                  onClick={() => handleCopy(ms.suggestedDdl, `ms-${i}`)}
+                                  title="Copy CREATE STATISTICS DDL"
+                                >
+                                  {copiedId === `ms-${i}` ? <Check size={11} /> : <Copy size={11} />}
+                                  <span>{copiedId === `ms-${i}` ? 'Copied DDL' : 'Copy CREATE STATISTICS'}</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <p className="diag-remedy">
+                        <strong>Fix:</strong> Enable <code>AUTO_CREATE_STATISTICS</code> on the database and create missing statistics using <code>CREATE STATISTICS ... WITH FULLSCAN;</code>.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#34d399" />
+                      </div>
+                      <span className="diag-clean-title">Statistics Complete</span>
+                      <p className="diag-clean-desc">No missing column statistics warnings. Optimizer had valid distribution histograms for all evaluated columns.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 4. Parameter Sniffing & Parameter List Inspector */}
+            {shouldRenderCard('predicates', hasIssues.parameterSniffing) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <Sliders size={16} color="#8b5cf6" />
+                    <span className="diag-title">Parameter Sniffing & Values</span>
+                    <DiagnosticTooltip guideKey="parameterSniffing" />
+                  </div>
+                  {diag.parameterSniffing && diag.parameterSniffing.some(p => p.hasMismatch && p.hasEstimateImpact) ? (
+                    <span className="badge badge-critical">Sniffing Impact</span>
+                  ) : diag.parameterSniffing && diag.parameterSniffing.some(p => p.hasMismatch) ? (
+                    <span className="badge badge-high">Value Mismatch</span>
+                  ) : diag.parameterSniffing && diag.parameterSniffing.length > 0 ? (
+                    <span className="badge badge-info">{diag.parameterSniffing.reduce((acc, p) => acc + p.parameters.length, 0)} Sniffed</span>
+                  ) : (
+                    <span className="badge badge-success">No Parameters</span>
+                  )}
+                </div>
+                <div className="diag-card-body">
+                  {diag.parameterSniffing && diag.parameterSniffing.length > 0 ? (
+                    <>
+                      <div className="diag-metric-row">
+                        <span className="diag-metric-label">Sniffed Parameter Sets:</span>
+                        <strong className="diag-metric-val">{diag.parameterSniffing.length} Definition(s)</strong>
+                      </div>
+                      <div className="diag-items-list">
+                        {diag.parameterSniffing.slice(0, 2).map((ps, i) => (
+                          <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            {ps.parameters.map((p: SniffedParameter, pIdx: number) => (
+                              <div key={pIdx} className="param-compare-card">
+                                <div className="param-name-row">
+                                  <div className="param-title-wrap">
+                                    <span className="param-name-text">{p.name}</span>
+                                    {p.dataType && <span className="param-type-badge">{p.dataType}</span>}
+                                  </div>
+                                  {p.mismatch ? (
+                                    <span className="badge badge-critical" style={{ fontSize: '9px', padding: '1px 6px' }}>
+                                      Mismatch
+                                    </span>
+                                  ) : p.hasRuntime ? (
+                                    <span className="badge badge-success" style={{ fontSize: '9px', padding: '1px 6px' }}>
+                                      Matched
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="param-compare-grid">
+                                  <div className="param-col">
+                                    <span className="param-col-label">Compiled Plan</span>
+                                    <code className="param-val-compiled" title={p.compiledValue || '<null>'}>
+                                      {p.compiledValue || '<null>'}
+                                    </code>
+                                  </div>
+                                  {p.hasRuntime && (
+                                    <div className="param-col">
+                                      <span className="param-col-label">Actual Runtime</span>
+                                      <code className={`param-val-runtime ${p.mismatch ? 'mismatch' : ''}`} title={p.runtimeValue || '<null>'}>
+                                        {p.runtimeValue || '<null>'}
+                                      </code>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                            {ps.mitigation && (
+                              <div style={{ fontSize: '10px', color: '#34d399', background: 'rgba(52, 211, 153, 0.1)', padding: '3px 6px', borderRadius: '4px' }}>
+                                Active Mitigation: <code>{ps.mitigation}</code>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <p className="diag-remedy">
+                        <strong>Fix:</strong> {diag.parameterSniffing[0]?.remedy || 'Use OPTION (RECOMPILE) for volatile parameters, OPTION (OPTIMIZE FOR UNKNOWN) for stable plans, or SQL 2022 PSP optimization.'}
+                      </p>
+                      <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: '3px 10px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                          onClick={() => setIsParamSniffingOpen(true)}
+                        >
+                          <Sliders size={12} color="#8b5cf6" />
+                          <span>Parameter Sniffing Deep Dive & Fixes</span>
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#34d399" />
+                      </div>
+                      <span className="diag-clean-title">Clean Parameter Alignment</span>
+                      <p className="diag-clean-desc">No query parameters recorded in plan or compiled values match runtime execution values.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 5. Non-Sargable Function Calls in WHERE */}
+            {shouldRenderCard('predicates', hasIssues.nonSargable) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <Code2 size={16} color="#f43f5e" />
+                    <span className="diag-title">Non-Sargable Predicates</span>
+                    <DiagnosticTooltip guideKey="nonSargable" />
+                  </div>
+                  {diag.nonSargable && diag.nonSargable.length > 0 ? (
+                    <span className="badge badge-critical">
+                      {diag.nonSargable.length} {diag.nonSargable.length === 1 ? 'Expression' : 'Expressions'}
+                    </span>
+                  ) : (
+                    <span className="badge badge-success">Sargable Predicates</span>
+                  )}
+                </div>
+                <div className="diag-card-body">
+                  {diag.nonSargable && diag.nonSargable.length > 0 ? (
+                    <>
+                      <div className="diag-alert-line danger">
+                        🚨 Functions wrapped around indexed columns prevent B-Tree Index Seeks and force per-row evaluations.
+                      </div>
+                      <div className="diag-items-list">
+                        {diag.nonSargable.slice(0, 3).map((ns, i) => (
+                          <div key={i} className="diag-sub-item danger-border" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '3px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                              <span className="diag-sub-tag">Stmt #{ns.statementId} (Node #{ns.nodeId})</span>
+                              <div className="diag-chips-wrap">
+                                {ns.functions.map((fn: string, fIdx: number) => (
+                                  <span key={fIdx} className="badge badge-critical" style={{ fontSize: '9px', padding: '1px 5px' }}>{fn}</span>
+                                ))}
+                                {ns.leadingWildcard && (
+                                  <span className="badge badge-critical" style={{ fontSize: '9px', padding: '1px 5px' }}>LIKE '%...'</span>
+                                )}
+                              </div>
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#ffffff', fontWeight: 600 }}>
+                              {ns.table ? `[${ns.table}] ` : ''}({ns.physicalOp})
+                            </div>
+                            <div className="diag-sub-code" style={{ width: '100%' }} title={ns.predicate}>
+                              {ns.predicate}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="diag-remedy">
+                        <strong>Fix:</strong> {diag.nonSargable[0]?.remedy || 'Rewrite predicate to compare the bare column to computed date ranges or constants, or add an indexed computed column.'}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#34d399" />
+                      </div>
+                      <span className="diag-clean-title">100% Sargable Predicates</span>
+                      <p className="diag-clean-desc">No functions wrapping indexed columns in WHERE or JOIN predicates. All searches can seek directly on B-Trees.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 6. Row Goal / TOP / FAST N Pitfalls */}
+            {shouldRenderCard('engine', hasIssues.rowGoals) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <Target size={16} color="#06b6d4" />
+                    <span className="diag-title">Row Goal & TOP Pitfalls</span>
+                    <DiagnosticTooltip guideKey="rowGoals" />
+                  </div>
+                  {diag.rowGoals && diag.rowGoals.some(r => r.misfired) ? (
+                    <span className="badge badge-critical">Goal Misfired</span>
+                  ) : diag.rowGoals && diag.rowGoals.length > 0 ? (
+                    <span className="badge badge-info">{diag.rowGoals.length} Row Goals</span>
+                  ) : (
+                    <span className="badge badge-success">No Row Goals</span>
+                  )}
+                </div>
+                <div className="diag-card-body">
+                  {diag.rowGoals && diag.rowGoals.length > 0 ? (
+                    <>
+                      <div className="diag-items-list">
+                        {diag.rowGoals.slice(0, 2).map((rg, i) => (
+                          <div key={i} className={`diag-sub-item ${rg.misfired ? 'danger-border' : ''}`} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '3px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                              <span className="diag-sub-tag">Stmt #{rg.statementId} ({rg.source})</span>
+                              {rg.reductionFactor > 0 && (
+                                <span className="badge badge-medium" style={{ fontSize: '9px', padding: '1px 5px' }}>
+                                  {rg.reductionFactor.toFixed(1)}x Row Reduction
+                                </span>
+                              )}
+                            </div>
+                            <div className="diag-metric-row" style={{ width: '100%', marginTop: '3px' }}>
+                              <span className="diag-metric-label">Estimated With Goal:</span>
+                              <strong className="diag-metric-val">{rg.estimateRows.toLocaleString()} rows</strong>
+                            </div>
+                            {rg.estimateRowsWithoutGoal > 0 && (
+                              <div className="diag-metric-row" style={{ width: '100%' }}>
+                                <span className="diag-metric-label">Without Goal (Base):</span>
+                                <span className="text-dim">{rg.estimateRowsWithoutGoal.toLocaleString()} rows</span>
+                              </div>
+                            )}
+                            {rg.misfired && (
+                              <div className="diag-alert-line danger" style={{ width: '100%', marginTop: '2px' }}>
+                                🚨 Misfired: Produced ~{rg.actualRows.toLocaleString()} actual rows vs {rg.estimateRows.toLocaleString()} estimated.
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <p className="diag-remedy">
+                        <strong>Fix:</strong> {diag.rowGoals[0]?.remedy || "Use OPTION (USE HINT('DISABLE_OPTIMIZER_ROWGOAL')) if the early-exit plan turns into a full table scan."}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#34d399" />
+                      </div>
+                      <span className="diag-clean-title">No Row Goal Distortion</span>
+                      <p className="diag-clean-desc">No TOP, FAST N, or EXISTS cardinality reductions altering the optimizer cost model.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 7. Adaptive Joins & Intelligent Query Processing (SQL Server 2017+) */}
+            {shouldRenderCard('engine', hasIssues.adaptive) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <GitFork size={16} color="#10b981" />
+                    <span className="diag-title">Adaptive Joins & IQP (2017+)</span>
+                    <DiagnosticTooltip guideKey="adaptive" />
+                  </div>
+                  {diag.adaptive && diag.adaptive.adaptiveJoins.length > 0 ? (
+                    <span className="badge badge-success">
+                      {diag.adaptive.adaptiveJoins.length} Adaptive Joins
+                    </span>
+                  ) : diag.adaptive && diag.adaptive.batchModeOperators > 0 ? (
+                    <span className="badge badge-info">
+                      {diag.adaptive.batchModeOperators} Batch Ops
+                    </span>
+                  ) : (
+                    <span className="badge badge-info">IQP Status</span>
+                  )}
+                </div>
+                <div className="diag-card-body">
+                  {diag.adaptive ? (
+                    <>
+                      {diag.adaptive.adaptiveJoins.length > 0 && (
+                        <div className="diag-alert-line warning" style={{ marginBottom: '4px' }}>
+                          ⚡ Adaptive Join: Switches from Nested Loops to Hash Match at <strong>{diag.adaptive.adaptiveJoins[0].thresholdRows} rows</strong>.
+                          {diag.adaptive.adaptiveJoins[0].actualJoinType && (
+                            <span> Resolved to <strong>{diag.adaptive.adaptiveJoins[0].actualJoinType}</strong> at runtime.</span>
+                          )}
+                        </div>
+                      )}
+                      <div className="diag-metric-row">
+                        <span className="diag-metric-label">Execution Mode:</span>
+                        <strong className="diag-metric-val">
+                          {diag.adaptive.batchModeOperators} / {diag.adaptive.totalOperators} Operators in Batch Mode
+                          {diag.adaptive.batchOnRowstore ? ' (Batch on Rowstore)' : ''}
+                        </strong>
+                      </div>
+                      <div className="diag-chips-wrap" style={{ marginTop: '4px' }}>
+                        {diag.adaptive.features.slice(0, 5).map((f: IQPFeature, i: number) => (
+                          <span
+                            key={i}
+                            className={`diag-chip ${f.status === 'Active' ? 'chip-active' : f.status === 'Eligible' ? 'chip-eligible' : 'chip-na'}`}
+                            title={f.detail}
+                          >
+                            {f.name}: {f.status}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="diag-desc-text" style={{ marginTop: '4px' }}>
+                        {diag.adaptive.summary}
+                      </p>
+                      <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: '3px 10px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                          onClick={() => setIsAdaptiveOpen(true)}
+                        >
+                          <GitFork size={12} color="#10b981" />
+                          <span>Adaptive Joins & Batch Mode Deep Dive</span>
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#38bdf8" />
+                      </div>
+                      <span className="diag-clean-title">Standard Execution Mode</span>
+                      <p className="diag-clean-desc">Intelligent Query Processing status not recorded or standard row-mode execution in effect.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 8. Memory Grant & TempDB Spill Inspector */}
+            {shouldRenderCard('engine', hasIssues.memoryGrant) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <Database size={16} color="#a855f7" />
+                    <span className="diag-title">Memory Grant & Spills</span>
+                    <DiagnosticTooltip guideKey="memoryGrant" />
+                  </div>
+                  {diag.memoryGrant?.hasSpills ? (
+                    <span className="badge badge-critical">Spill Warning</span>
+                  ) : diag.memoryGrant?.isBloated ? (
+                    <span className="badge badge-high">Bloated Grant</span>
+                  ) : (
+                    <span className="badge badge-success">Healthy Grant</span>
+                  )}
+                </div>
+                <div className="diag-card-body">
+                  {diag.memoryGrant ? (
+                    <>
+                      <div className="diag-metric-row">
+                        <span className="diag-metric-label">Granted / Max Used:</span>
+                        <strong className="diag-metric-val">
+                          {(diag.memoryGrant.grantedMemoryKb / 1024).toFixed(1)} MB / {(diag.memoryGrant.maxUsedMemoryKb / 1024).toFixed(1)} MB
+                        </strong>
+                      </div>
+                      {diag.memoryGrant.serialDesiredKb > 0 && (
+                        <div className="diag-metric-row">
+                          <span className="diag-metric-label">Serial Desired Memory:</span>
+                          <span className="text-dim">{diag.memoryGrant.serialDesiredKb.toLocaleString()} KB</span>
+                        </div>
+                      )}
+                      {diag.memoryGrant.isBloated && (
+                        <div className="diag-alert-line warning">
+                          ⚠️ Over-allocated: {diag.memoryGrant.wastedPercent}% unused ({diag.memoryGrant.wastedMemoryMb} MB RAM reserved but unconsumed).
+                        </div>
+                      )}
+                      {diag.memoryGrant.hasSpills && (
+                        <div className="diag-alert-line danger">
+                          🚨 {diag.memoryGrant.spillDetails || 'Data spilled to TempDB during Hash/Sort operations.'}
+                        </div>
+                      )}
+                      <p className="diag-remedy"><strong>Fix:</strong> {diag.memoryGrant.remedy}</p>
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#34d399" />
+                      </div>
+                      <span className="diag-clean-title">Optimal Streaming Buffers</span>
+                      <p className="diag-clean-desc">No memory grant required. All operations executed directly within stream buffers with zero TempDB spills.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 9. Cardinality Estimation Model Version */}
+            {shouldRenderCard('engine', hasIssues.cardinalityEngine) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <Cpu size={16} color="#38bdf8" />
+                    <span className="diag-title">Cardinality Estimator (CE)</span>
+                    <DiagnosticTooltip guideKey="cardinalityEngine" />
+                  </div>
+                  {diag.cardinalityEngine?.isLegacy ? (
+                    <span className="badge badge-high">Legacy CE (v{diag.cardinalityEngine.modelVersion})</span>
+                  ) : (
+                    <span className="badge badge-success">Modern CE (v{diag.cardinalityEngine?.modelVersion || '120+'})</span>
+                  )}
+                </div>
+                <div className="diag-card-body">
+                  {diag.cardinalityEngine ? (
+                    <>
+                      <div className="diag-metric-row">
+                        <span className="diag-metric-label">CE Engine Version:</span>
+                        <strong className="diag-metric-val">
+                          Version {diag.cardinalityEngine.modelVersion} {diag.cardinalityEngine.isLegacy ? '(SQL Server 2000-2012 legacy algorithm)' : '(SQL 2014+ Modern Estimator)'}
+                        </strong>
+                      </div>
+                      <p className="diag-desc-text">{diag.cardinalityEngine.description}</p>
+                      <p className="diag-remedy"><strong>Action:</strong> {diag.cardinalityEngine.remedy}</p>
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#34d399" />
+                      </div>
+                      <span className="diag-clean-title">Modern Estimator Active</span>
+                      <p className="diag-clean-desc">Query compiled with modern SQL Server Cardinality Estimation model.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 10. Parallelism & Worker Thread Skew */}
+            {shouldRenderCard('engine', hasIssues.parallelismSkew) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <SplitSquareVertical size={16} color="#34d399" />
+                    <span className="diag-title">Parallel Worker Distribution</span>
+                    <DiagnosticTooltip guideKey="parallelismSkew" />
+                  </div>
+                  {diag.parallelismSkew?.hasSkew ? (
+                    <span className="badge badge-critical">{diag.parallelismSkew.skewRatio}x Skew</span>
+                  ) : plan.maxDopReason === 'MaxDOPSetToOne' ? (
+                    <span className="badge badge-high">MaxDOP 1 Forced</span>
+                  ) : (
+                    <span className="badge badge-success">Balanced</span>
+                  )}
+                </div>
+                <div className="diag-card-body">
+                  {diag.parallelismSkew?.hasSkew ? (
+                    <>
+                      <div className="diag-metric-row">
+                        <span className="diag-metric-label">Thread Imbalance:</span>
+                        <strong className="diag-metric-val">{diag.parallelismSkew.skewRatio}x Skew Ratio</strong>
+                      </div>
+                      <div className="thread-bars-container">
+                        {diag.parallelismSkew.threads.map((t) => (
+                          <div key={t.threadId} className="thread-bar-row">
+                            <span className="thread-name">T#{t.threadId}</span>
+                            <div className="thread-track">
+                              <div className="thread-fill" style={{ width: `${t.percentage}%` }} />
+                            </div>
+                            <span className="thread-pct">{t.percentage}%</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="diag-remedy"><strong>Fix:</strong> {diag.parallelismSkew.remedy}</p>
+                    </>
+                  ) : plan.maxDopReason === 'MaxDOPSetToOne' ? (
+                    <>
+                      <div className="diag-alert-line warning">
+                        ⚠️ Single-threaded execution forced: Query plan is restricted to MAXDOP 1 at server or query level.
+                      </div>
+                      <p className="diag-remedy"><strong>Fix:</strong> Review Cost Threshold for Parallelism (recommended: 50) and MAXDOP settings.</p>
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#34d399" />
+                      </div>
+                      <span className="diag-clean-title">Balanced Thread Distribution</span>
+                      <p className="diag-clean-desc">Worker threads processed an evenly distributed volume of rows with zero thread starvation.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 11. Smart Missing Index Consolidation */}
+            {shouldRenderCard('indexes', hasIssues.consolidatedIndexes) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <KeyRound size={16} color="#34d399" />
+                    <span className="diag-title">Missing Index Consolidator</span>
+                    <DiagnosticTooltip guideKey="consolidatedIndexes" />
+                  </div>
+                  <span className="badge badge-success">
+                    {diag.consolidatedIndexes.length} Composite Targets
+                  </span>
+                </div>
+                <div className="diag-card-body">
+                  {diag.consolidatedIndexes.length > 0 ? (
+                    <>
+                      <div className="diag-metric-row">
+                        <span className="diag-metric-label">Redundancy Reduction:</span>
+                        <strong className="diag-metric-val">
+                          {(plan.allMissingIndexes || []).length} Raw Hints ➔ {diag.consolidatedIndexes.length} Composite Indexes
+                        </strong>
+                      </div>
+                      <p className="diag-desc-text">
+                        Merges overlapping EQUALITY, INEQUALITY, and INCLUDE columns across identical tables to prevent index sprawl and save write IOPS.
+                      </p>
+                      {onNavigateTab && (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          style={{ marginTop: '8px', width: '100%' }}
+                          onClick={() => onNavigateTab('indexes')}
+                        >
+                          <KeyRound size={13} color="#34d399" />
+                          <span>Inspect Smart Consolidated Indexes ({diag.consolidatedIndexes.length})</span>
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#34d399" />
+                      </div>
+                      <span className="diag-clean-title">No Redundant Index Sprawl</span>
+                      <p className="diag-clean-desc">All missing index recommendations are unique or no index suggestions were generated.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 12. Implicit Data Type Conversions (Sargability) */}
+            {shouldRenderCard('predicates', hasIssues.implicitConversions) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <AlertTriangle size={16} color="#f43f5e" />
+                    <span className="diag-title">Implicit Conversions</span>
+                    <DiagnosticTooltip guideKey="implicitConversions" />
+                  </div>
+                  {diag.implicitConversions.length > 0 ? (
+                    <span className="badge badge-critical">{diag.implicitConversions.length} Non-Sargable</span>
+                  ) : (
+                    <span className="badge badge-success">Clean Sargability</span>
+                  )}
+                </div>
+                <div className="diag-card-body">
+                  {diag.implicitConversions.length > 0 ? (
+                    <>
+                      <div className="diag-items-list">
+                        {diag.implicitConversions.slice(0, 3).map((conv, i) => (
+                          <div key={i} className="diag-sub-item">
+                            <span className="diag-sub-tag">Stmt #{conv.statementId}</span>
+                            <span className="diag-sub-code" title={conv.expression}>{conv.expression || conv.convertIssue}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="diag-remedy">
+                        <strong>Fix:</strong> Parameter and variable data types do not match column types, invalidating Index Seeks. Match types exactly.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#34d399" />
+                      </div>
+                      <span className="diag-clean-title">Clean Data Types</span>
+                      <p className="diag-clean-desc">No CONVERT_IMPLICIT conversions detected on indexed table columns.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 13. Scalar UDF (RBAR) Penalty */}
+            {shouldRenderCard('predicates', hasIssues.scalarUdfWarnings) && (
+              <div className="diag-card glass-panel">
+                <div className="diag-card-header">
+                  <div className="diag-icon-title">
+                    <FunctionSquare size={16} color="#fbbf24" />
+                    <span className="diag-title">Scalar UDF (RBAR) Penalty</span>
+                    <DiagnosticTooltip guideKey="scalarUdfWarnings" />
+                  </div>
+                  {diag.scalarUdfWarnings.length > 0 ? (
+                    <span className="badge badge-critical">{diag.scalarUdfWarnings.length} UDF Detected</span>
+                  ) : (
+                    <span className="badge badge-success">No Scalar UDFs</span>
+                  )}
+                </div>
+                <div className="diag-card-body">
+                  {diag.scalarUdfWarnings.length > 0 ? (
+                    <>
+                      <div className="diag-items-list">
+                        {diag.scalarUdfWarnings.map((udf, i) => (
+                          <div key={i} className="diag-sub-item danger-border">
+                            <span className="diag-sub-tag">Stmt #{udf.statementId}</span>
+                            <code className="diag-sub-code">{udf.functionName}</code>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="diag-remedy">
+                        <strong>Fix:</strong> Scalar UDFs force Row-By-Agonizing-Row evaluation and suppress parallelism. Convert to an <code>Inline Table-Valued Function (iTVF)</code> or enable SQL 2019+ Scalar Inlining.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="diag-clean-state">
+                      <div className="diag-clean-icon">
+                        <CheckCircle2 size={20} color="#34d399" />
+                      </div>
+                      <span className="diag-clean-title">Zero Scalar UDF Penalties</span>
+                      <p className="diag-clean-desc">No Row-By-Agonizing-Row (RBAR) scalar functions detected in execution plan.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -363,7 +1034,10 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
         <div className="metric-card glass-panel">
           <div className="metric-header">
             <span className="metric-label">Total Subtree Cost</span>
-            <TrendingUp size={18} color="#38bdf8" />
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <DiagnosticTooltip guideKey="totalSubtreeCost" />
+              <TrendingUp size={18} color="#38bdf8" />
+            </div>
           </div>
           <div className="metric-value">{plan.totalSubTreeCost.toFixed(2)}</div>
           <div className="metric-subtext">Sum of all statement execution estimates</div>
@@ -372,7 +1046,10 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
         <div className="metric-card glass-panel">
           <div className="metric-header">
             <span className="metric-label">Total Statements</span>
-            <Layers size={18} color="#818cf8" />
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <DiagnosticTooltip guideKey="totalStatements" />
+              <Layers size={18} color="#818cf8" />
+            </div>
           </div>
           <div className="metric-value">{plan.totalStatements}</div>
           <div className="metric-subtext">Stored Procedure / Batch query blocks</div>
@@ -381,7 +1058,10 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
         <div className="metric-card glass-panel">
           <div className="metric-header">
             <span className="metric-label">Missing Indexes</span>
-            <KeyRound size={18} color="#34d399" />
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <DiagnosticTooltip guideKey="missingIndexesMetric" />
+              <KeyRound size={18} color="#34d399" />
+            </div>
           </div>
           <div className="metric-value">{plan.allMissingIndexes.length}</div>
           <div className="metric-subtext">
@@ -394,10 +1074,15 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
         <div className="metric-card glass-panel">
           <div className="metric-header">
             <span className="metric-label">Parallelism Status</span>
-            <Cpu size={18} color="#fbbf24" />
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <DiagnosticTooltip guideKey="parallelismStatus" />
+              <Cpu size={18} color="#fbbf24" />
+            </div>
           </div>
           <div className="metric-value" style={{ fontSize: '18px', marginTop: '6px' }}>
-            {plan.maxDopReason || 'Parallel Enabled'}
+            {plan.maxDopReason === 'MaxDOPSetToOne'
+              ? 'MaxDOP = 1 (Serial)'
+              : (plan.maxDopReason || 'Parallel Enabled')}
           </div>
           <div className="metric-subtext">
             {plan.maxDopReason === 'MaxDOPSetToOne'
@@ -413,18 +1098,21 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           <div className="section-title-row">
             <Clock size={18} color="#fbbf24" />
             <h2 className="section-title">Query Wait Statistics (Bottleneck Breakdown)</h2>
+            <DiagnosticTooltip guideKey="waitStats" />
             <span className="badge badge-high">{plan.waitStats.length} Waits Recorded</span>
           </div>
 
           <div className="wait-stats-grid">
             {plan.waitStats.map((ws, idx) => (
               <div key={idx} className="wait-stat-card glass-panel">
-                <div className="wait-stat-top">
-                  <div className="wait-type-name">
+                <div className="wait-stat-header">
+                  <div className="wait-stat-name-row" title={ws.waitType}>
                     {getWaitIcon(ws.category)}
-                    <span>{ws.waitType}</span>
+                    <span className="wait-name-full">{ws.waitType}</span>
                   </div>
-                  <span className="badge badge-info">{ws.category}</span>
+                  <div className="wait-category-row">
+                    <span className="badge badge-info">{ws.category}</span>
+                  </div>
                 </div>
                 <div className="wait-metric-row">
                   <div className="wait-num">
@@ -484,6 +1172,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
         <div className="section-title-row">
           <Layers size={18} color="#38bdf8" />
           <h2 className="section-title">Statement Cost Leaderboard (Top Spenders)</h2>
+          <DiagnosticTooltip guideKey="costliestStatements" />
           <span className="section-subtitle">Ranked by SubTree Cost descending</span>
         </div>
 
@@ -514,9 +1203,11 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                       <span className="stmt-type-tag">{stmt.statementType}</span>
                     </td>
                     <td>
-                      <div className="stmt-text-cell" title={stmt.statementText}>
-                        {stmt.statementText || '<No query text available>'}
-                      </div>
+                      <QueryPreviewCell
+                        statement={stmt}
+                        onInspectPlan={(s) => onSelectStatement(s, 'visualizer')}
+                        onOptimizeAI={(s) => onSelectStatement(s, 'advisor')}
+                      />
                     </td>
                     <td className="text-muted">
                       {stmt.statementEstRows > 0 ? stmt.statementEstRows.toLocaleString() : '-'}
@@ -579,6 +1270,18 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </table>
         </div>
       </div>
+
+      <ParameterSniffingModal
+        isOpen={isParamSniffingOpen}
+        onClose={() => setIsParamSniffingOpen(false)}
+        finding={diag?.parameterSniffing?.[0]}
+      />
+
+      <AdaptiveJoinsModal
+        isOpen={isAdaptiveOpen}
+        onClose={() => setIsAdaptiveOpen(false)}
+        adaptive={diag?.adaptive}
+      />
     </div>
   );
 };
