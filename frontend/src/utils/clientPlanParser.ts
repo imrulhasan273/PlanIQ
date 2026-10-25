@@ -21,8 +21,12 @@ import {
 } from './extraDiagnostics';
 
 export function parseShowPlanXMLClient(xmlString: string, planName: string = 'Execution Plan'): PlanAnalysis {
-  // Normalize XML declaration to avoid browser DOMParser rejection when string specifies utf-16
-  const cleanXml = xmlString.replace(/<\?xml([^>]+)encoding=["']utf-16["']([^>]*)>/i, '<?xml$1encoding="utf-8"$2>');
+  // Normalize XML: strip namespaces and declarations so browser DOMParser handles any encoding & querySelector matches tags directly
+  const cleanXml = xmlString
+    .replace(/xmlns="[^"]*"/gi, '')
+    .replace(/xmlns:[a-zA-Z0-9]+="[^"]*"/gi, '')
+    .replace(/<\?xml[^>]*\?>/gi, '')
+    .trim();
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(cleanXml, 'text/xml');
 
@@ -146,6 +150,45 @@ export function parseShowPlanXMLClient(xmlString: string, planName: string = 'Ex
       }
     }
 
+    // QueryTimeStats & Runtime Counters
+    const qts = stmtElem.querySelector('QueryTimeStats') || stmtElem.getElementsByTagName('QueryTimeStats')[0];
+    let actualCpuMs = qts ? parseInt(qts.getAttribute('CpuTime') || '0', 10) : 0;
+    let actualElapsedMs = qts ? parseInt(qts.getAttribute('ElapsedTime') || '0', 10) : 0;
+
+    let stmtLogicalReads = 0;
+    let stmtPhysicalReads = 0;
+    let stmtReadAheads = 0;
+    let stmtLobLogicalReads = 0;
+    let stmtLobPhysicalReads = 0;
+    let stmtScans = 0;
+    let hasActualMetrics = actualCpuMs > 0 || actualElapsedMs > 0;
+
+    const runtimeCounters = stmtElem.querySelectorAll('RunTimeCountersPerThread');
+    runtimeCounters.forEach((rc) => {
+      hasActualMetrics = true;
+      stmtLogicalReads += parseInt(rc.getAttribute('ActualLogicalReads') || '0', 10) || 0;
+      stmtPhysicalReads += parseInt(rc.getAttribute('ActualPhysicalReads') || '0', 10) || 0;
+      stmtReadAheads += parseInt(rc.getAttribute('ActualReadAheads') || '0', 10) || 0;
+      stmtLobLogicalReads += parseInt(rc.getAttribute('ActualLobLogicalReads') || '0', 10) || 0;
+      stmtLobPhysicalReads += parseInt(rc.getAttribute('ActualLobPhysicalReads') || '0', 10) || 0;
+      stmtScans += parseInt(rc.getAttribute('ActualScans') || '0', 10) || 0;
+      if (!qts) {
+        actualCpuMs += parseInt(rc.getAttribute('ActualCPUms') || '0', 10) || 0;
+        const el = parseInt(rc.getAttribute('ActualElapsedms') || '0', 10) || 0;
+        if (el > actualElapsedMs) actualElapsedMs = el;
+      }
+    });
+
+    // Single-statement plan fallback: if statement didn't wrap QueryTimeStats but plan has it
+    if (!qts && actualCpuMs === 0 && actualElapsedMs === 0 && stmtNodes.length === 1) {
+      const globalQts = xmlDoc.querySelector('QueryTimeStats');
+      if (globalQts) {
+        actualCpuMs = parseInt(globalQts.getAttribute('CpuTime') || '0', 10) || 0;
+        actualElapsedMs = parseInt(globalQts.getAttribute('ElapsedTime') || '0', 10) || 0;
+        if (actualCpuMs > 0 || actualElapsedMs > 0) hasActualMetrics = true;
+      }
+    }
+
     const stmtAnalysis = {
       statementId: stmtId,
       statementCompId: stmtCompId,
@@ -163,6 +206,13 @@ export function parseShowPlanXMLClient(xmlString: string, planName: string = 'Ex
       warnings,
       missingIndexes: stmtMissingIndexes,
       painPointsCount: 0,
+      actualCpuMs,
+      actualElapsedMs,
+      actualLogicalReads: stmtLogicalReads,
+      actualLogicalReadsMb: Math.round((stmtLogicalReads / 128) * 10) / 10,
+      actualPhysicalReads: stmtPhysicalReads,
+      actualReadAheads: stmtReadAheads,
+      hasActualMetrics,
     } as unknown as StatementAnalysis;
 
     statements.push(stmtAnalysis);
@@ -182,6 +232,164 @@ export function parseShowPlanXMLClient(xmlString: string, planName: string = 'Ex
   // Global properties
   const qpGlobal = xmlDoc.querySelector('QueryPlan');
   const maxDopReason = qpGlobal?.getAttribute('NonParallelPlanReason') || '';
+
+  // Aggregate global Hardware Metrics
+  let totalLogicalReads = 0;
+  let totalPhysicalReads = 0;
+  let totalReadAheads = 0;
+  let totalLobLogicalReads = 0;
+  let totalLobPhysicalReads = 0;
+  let totalActualCpuMs = 0;
+  let totalActualElapsedMs = 0;
+  let hasRuntimeMetrics = false;
+
+  statements.forEach((s) => {
+    if (s.hasActualMetrics) hasRuntimeMetrics = true;
+    totalLogicalReads += (s.actualLogicalReads || 0);
+    totalPhysicalReads += (s.actualPhysicalReads || 0);
+    totalReadAheads += (s.actualReadAheads || 0);
+    totalActualCpuMs += (s.actualCpuMs || 0);
+    totalActualElapsedMs += (s.actualElapsedMs || 0);
+  });
+
+  // Fallback: If statements missed RunTimeCounters (e.g. non-standard Stmt structure), aggregate directly from document
+  if (totalLogicalReads === 0 && totalActualCpuMs === 0) {
+    xmlDoc.querySelectorAll('RunTimeCountersPerThread').forEach((rc) => {
+      hasRuntimeMetrics = true;
+      totalLogicalReads += parseInt(rc.getAttribute('ActualLogicalReads') || '0', 10) || 0;
+      totalPhysicalReads += parseInt(rc.getAttribute('ActualPhysicalReads') || '0', 10) || 0;
+      totalReadAheads += parseInt(rc.getAttribute('ActualReadAheads') || '0', 10) || 0;
+      totalLobLogicalReads += parseInt(rc.getAttribute('ActualLobLogicalReads') || '0', 10) || 0;
+      totalLobPhysicalReads += parseInt(rc.getAttribute('ActualLobPhysicalReads') || '0', 10) || 0;
+      totalActualCpuMs += parseInt(rc.getAttribute('ActualCPUms') || '0', 10) || 0;
+      const el = parseInt(rc.getAttribute('ActualElapsedms') || '0', 10) || 0;
+      if (el > totalActualElapsedMs) totalActualElapsedMs = el;
+    });
+
+    const globalQts = xmlDoc.querySelector('QueryTimeStats');
+    if (globalQts) {
+      const cpu = parseInt(globalQts.getAttribute('CpuTime') || '0', 10) || 0;
+      const el = parseInt(globalQts.getAttribute('ElapsedTime') || '0', 10) || 0;
+      if (cpu > 0) totalActualCpuMs = cpu;
+      if (el > 0) totalActualElapsedMs = el;
+      if (cpu > 0 || el > 0) hasRuntimeMetrics = true;
+    }
+  }
+
+  let grantedMemoryKb = 0;
+  let maxUsedMemoryKb = 0;
+  let requestedMemoryKb = 0;
+  let memoryGrantWaitTimeMs = 0;
+  let isMemoryGrantFeedbackAdjusted = 'None';
+
+  xmlDoc.querySelectorAll('MemoryGrantInfo').forEach((mg) => {
+    const g = parseInt(mg.getAttribute('GrantedMemory') || '0', 10);
+    if (g > grantedMemoryKb) grantedMemoryKb = g;
+    const u = parseInt(mg.getAttribute('MaxUsedMemory') || '0', 10);
+    if (u > maxUsedMemoryKb) maxUsedMemoryKb = u;
+    const r = parseInt(mg.getAttribute('RequestedMemory') || '0', 10);
+    if (r > requestedMemoryKb) requestedMemoryKb = r;
+    const w = parseInt(mg.getAttribute('GrantWaitTime') || '0', 10);
+    if (w > memoryGrantWaitTimeMs) memoryGrantWaitTimeMs = w;
+    const fb = mg.getAttribute('IsMemoryGrantFeedbackAdjusted');
+    if (fb && isMemoryGrantFeedbackAdjusted === 'None') isMemoryGrantFeedbackAdjusted = fb;
+  });
+
+  let estimatedAvailableMemoryKb = 0;
+  let estimatedPagesCached = 0;
+  const optProps = xmlDoc.querySelector('OptimizerHardwareDependentProperties');
+  if (optProps) {
+    estimatedAvailableMemoryKb = parseInt(optProps.getAttribute('EstimatedAvailableMemoryGrant') || '0', 10) || 0;
+    estimatedPagesCached = parseInt(optProps.getAttribute('EstimatedPagesCached') || '0', 10) || 0;
+  }
+
+  // Build Table-by-Table I/O Leaderboard
+  interface TableStats {
+    database: string;
+    schema: string;
+    table: string;
+    logicalReads: number;
+    physicalReads: number;
+    readAheads: number;
+    ops: Set<string>;
+    indexes: Set<string>;
+  }
+  const tableMap = new Map<string, TableStats>();
+
+  const collectTableIO = (node: PlanNode | undefined) => {
+    if (!node) return;
+    if (node.table) {
+      const key = `${node.database || ''}.${node.schema || ''}.${node.table}`;
+      let ts = tableMap.get(key);
+      if (!ts) {
+        ts = {
+          database: node.database || '',
+          schema: node.schema || '',
+          table: node.table,
+          logicalReads: 0,
+          physicalReads: 0,
+          readAheads: 0,
+          ops: new Set<string>(),
+          indexes: new Set<string>(),
+        };
+        tableMap.set(key, ts);
+      }
+      ts.logicalReads += (node.actualLogicalReads || 0);
+      ts.physicalReads += (node.actualPhysicalReads || 0);
+      ts.readAheads += (node.actualReadAheads || 0);
+      if (node.physicalOp) ts.ops.add(node.physicalOp);
+      if (node.index) ts.indexes.add(node.index);
+    }
+    if (node.children) {
+      node.children.forEach(collectTableIO);
+    }
+  };
+
+  statements.forEach((s) => collectTableIO(s.rootNode));
+
+  const topIoLeaders = Array.from(tableMap.values())
+    .sort((a, b) => b.logicalReads - a.logicalReads)
+    .map((ts, idx) => ({
+      rank: idx + 1,
+      database: ts.database,
+      schema: ts.schema,
+      table: ts.table,
+      logicalReads: ts.logicalReads,
+      logicalReadsMb: Math.round((ts.logicalReads / 128) * 10) / 10,
+      physicalReads: ts.physicalReads,
+      physicalReadsMb: Math.round((ts.physicalReads / 128) * 10) / 10,
+      readAheads: ts.readAheads,
+      readAheadsMb: Math.round((ts.readAheads / 128) * 10) / 10,
+      readPercent: totalLogicalReads > 0 ? Math.round((ts.logicalReads / totalLogicalReads) * 1000) / 10 : 0,
+      accessOperations: Array.from(ts.ops),
+      indexesUsed: Array.from(ts.indexes),
+    }));
+
+  const hardwareMetrics = {
+    hasRuntimeMetrics,
+    totalLogicalReads,
+    totalLogicalReadsMb: Math.round((totalLogicalReads / 128) * 10) / 10,
+    totalPhysicalReads,
+    totalPhysicalReadsMb: Math.round((totalPhysicalReads / 128) * 10) / 10,
+    totalReadAheads,
+    totalReadAheadsMb: Math.round((totalReadAheads / 128) * 10) / 10,
+    totalLobLogicalReads,
+    totalLobPhysicalReads,
+    cacheHitRatioPercent: totalLogicalReads > 0 ? Math.max(0, Math.min(100, Math.round(((totalLogicalReads - totalPhysicalReads) / totalLogicalReads) * 1000) / 10)) : 100,
+    totalActualCpuMs,
+    totalActualElapsedMs,
+    cpuUtilizationRatio: totalActualElapsedMs > 0 ? Math.round((totalActualCpuMs / totalActualElapsedMs) * 1000) / 10 : 100,
+    waitTimeMs: totalActualElapsedMs > totalActualCpuMs ? totalActualElapsedMs - totalActualCpuMs : 0,
+    memoryGrantWaitTimeMs,
+    requestedMemoryKb,
+    grantedMemoryKb,
+    maxUsedMemoryKb,
+    maxQueryMemoryKb: grantedMemoryKb,
+    estimatedAvailableMemoryKb,
+    estimatedPagesCached,
+    isMemoryGrantFeedbackAdjusted,
+    topIoLeaders,
+  };
 
   // Detect anti-patterns
   const antiPatterns = detectAntiPatterns(statements);
@@ -216,6 +424,7 @@ export function parseShowPlanXMLClient(xmlString: string, planName: string = 'Ex
     antiPatterns,
     executiveVerdict,
     diagnostics,
+    hardwareMetrics,
     cachedPlanSizeKb: 0,
     maxCompileMemory: 0,
     globalWarnings: [],
@@ -255,19 +464,46 @@ function parseRelOp(elem: Element, statementCost: number): PlanNode {
     indexKind = obj.getAttribute('IndexKind') || '';
   }
 
-  // Actual Rows
+  // Actual Rows & Runtime Counters
   let hasActualRows = false;
   let actualRows = 0;
+  let actualLogicalReads = 0;
+  let actualPhysicalReads = 0;
+  let actualReadAheads = 0;
+  let actualCpuMs = 0;
+  let actualElapsedMs = 0;
   let hasCardinalitySkew = false;
   let skewRatio = 1;
   let skewReason = '';
   let isPainPoint = false;
   let painReason = '';
 
-  const runtime = elem.querySelector('RunTimeCountersPerThread');
-  if (runtime) {
+  // Direct RunTimeCountersPerThread strictly belonging to this RelOp (not child RelOps)
+  const directCounters: Element[] = [];
+  const findDirectCounters = (curr: Element) => {
+    for (let i = 0; i < curr.children.length; i++) {
+      const child = curr.children[i];
+      if (child.tagName === 'RelOp') continue;
+      if (child.tagName === 'RunTimeCountersPerThread') {
+        directCounters.push(child);
+      } else {
+        findDirectCounters(child);
+      }
+    }
+  };
+  findDirectCounters(elem);
+
+  if (directCounters.length > 0) {
     hasActualRows = true;
-    actualRows = parseFloat(runtime.getAttribute('ActualRows') || '0') || 0;
+    for (const c of directCounters) {
+      actualRows += parseFloat(c.getAttribute('ActualRows') || '0') || 0;
+      actualLogicalReads += parseInt(c.getAttribute('ActualLogicalReads') || '0', 10) || 0;
+      actualPhysicalReads += parseInt(c.getAttribute('ActualPhysicalReads') || '0', 10) || 0;
+      actualReadAheads += parseInt(c.getAttribute('ActualReadAheads') || '0', 10) || 0;
+      actualCpuMs += parseInt(c.getAttribute('ActualCPUms') || '0', 10) || 0;
+      const el = parseInt(c.getAttribute('ActualElapsedms') || '0', 10) || 0;
+      if (el > actualElapsedMs) actualElapsedMs = el;
+    }
     if (estimateRows > 0) {
       skewRatio = actualRows / estimateRows;
       if (skewRatio > 10.0 || (actualRows > 0 && skewRatio < 0.1)) {
@@ -347,6 +583,11 @@ function parseRelOp(elem: Element, statementCost: number): PlanNode {
     indexKind,
     hasActualRows,
     actualRows,
+    actualLogicalReads,
+    actualPhysicalReads,
+    actualReadAheads,
+    actualCpuMs,
+    actualElapsedMs,
     hasCardinalitySkew,
     skewRatio,
     skewReason,

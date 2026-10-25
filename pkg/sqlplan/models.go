@@ -15,6 +15,7 @@ type PlanAnalysis struct {
 	AllMissingIndexes []*MissingIndexInfo  `json:"allMissingIndexes"`
 	AntiPatterns      []*AntiPattern       `json:"antiPatterns"`
 	Diagnostics       *AdvancedDiagnostics `json:"diagnostics,omitempty"`
+	HardwareMetrics   *HardwareMetrics     `json:"hardwareMetrics,omitempty"`
 }
 
 // ExecutiveVerdict is the 10-second instant root cause diagnosis
@@ -49,11 +50,20 @@ type StatementAnalysis struct {
 	CompileCPUMS         int                 `json:"compileCpuMs"`
 	CompileMemoryKB      int                 `json:"compileMemoryKb"`
 	OptimizationLevel    string              `json:"optimizationLevel"`
-	HasQueryPlan         bool                `json:"hasQueryPlan"`
-	RootNode             *PlanNode           `json:"rootNode,omitempty"`
-	Warnings             []*PlanWarning      `json:"warnings"`
-	MissingIndexes       []*MissingIndexInfo `json:"missingIndexes"`
-	PainPointsCount      int                 `json:"painPointsCount"`
+	HasQueryPlan                  bool                `json:"hasQueryPlan"`
+	RootNode                      *PlanNode           `json:"rootNode,omitempty"`
+	Warnings                      []*PlanWarning      `json:"warnings"`
+	MissingIndexes                []*MissingIndexInfo `json:"missingIndexes"`
+	PainPointsCount               int                 `json:"painPointsCount"`
+	ActualCPUms                   int64               `json:"actualCpuMs"`
+	ActualElapsedms               int64               `json:"actualElapsedMs"`
+	ActualLogicalReads            int64               `json:"actualLogicalReads"`
+	ActualLogicalReadsMB          float64             `json:"actualLogicalReadsMb"`
+	ActualPhysicalReads           int64               `json:"actualPhysicalReads"`
+	ActualReadAheads              int64               `json:"actualReadAheads"`
+	HasActualMetrics              bool                `json:"hasActualMetrics"`
+	ExecutionClassification       string              `json:"executionClassification"`       // "IO_BOUND", "CPU_BOUND", "WAIT_BOUND", "BALANCED"
+	ExecutionClassificationReason string              `json:"executionClassificationReason"`
 }
 
 // PlanNode represents an individual operator in the relational tree
@@ -74,6 +84,12 @@ type PlanNode struct {
 	CostPercentage            float64     `json:"costPercentage"`
 	TableCardinality          float64     `json:"tableCardinality"`
 	Parallel                  bool        `json:"parallel"`
+	ActualCPUms               int64       `json:"actualCpuMs"`
+	ActualElapsedms           int64       `json:"actualElapsedMs"`
+	ActualLogicalReads        int64       `json:"actualLogicalReads"`
+	ActualPhysicalReads       int64       `json:"actualPhysicalReads"`
+	ActualReadAheads          int64       `json:"actualReadAheads"`
+	ActualScans               int64       `json:"actualScans"`
 	Database                  string      `json:"database"`
 	Schema                    string      `json:"schema"`
 	Table                     string      `json:"table"`
@@ -148,16 +164,66 @@ type StatementDiff struct {
 
 // MemoryGrantHealth represents RAM allocation vs consumption and TempDB spills
 type MemoryGrantHealth struct {
-	GrantedMemoryKB  int64   `json:"grantedMemoryKb"`
-	MaxUsedMemoryKB  int64   `json:"maxUsedMemoryKb"`
-	SerialRequiredKB int64   `json:"serialRequiredKb"`
-	SerialDesiredKB  int64   `json:"serialDesiredKb"`
-	IsBloated        bool    `json:"isBloated"`
-	WastedMemoryMB   float64 `json:"wastedMemoryMb"`
-	WastedPercent    float64 `json:"wastedPercent"`
-	HasSpills        bool    `json:"hasSpills"`
-	SpillDetails     string  `json:"spillDetails"`
-	Remedy           string  `json:"remedy"`
+	GrantedMemoryKB            int64   `json:"grantedMemoryKb"`
+	MaxUsedMemoryKB            int64   `json:"maxUsedMemoryKb"`
+	SerialRequiredKB           int64   `json:"serialRequiredKb"`
+	SerialDesiredKB            int64   `json:"serialDesiredKb"`
+	RequestedMemoryKB          int64   `json:"requestedMemoryKb"`
+	GrantWaitTimeMS            int64   `json:"grantWaitTimeMs"`
+	MaxQueryMemoryKB           int64   `json:"maxQueryMemoryKb"`
+	FeedbackAdjusted           string  `json:"feedbackAdjusted"`
+	EstimatedAvailableMemoryKB int64   `json:"estimatedAvailableMemoryKb"`
+	EstimatedPagesCached       int64   `json:"estimatedPagesCached"`
+	IsBloated                  bool    `json:"isBloated"`
+	WastedMemoryMB             float64 `json:"wastedMemoryMb"`
+	WastedPercent              float64 `json:"wastedPercent"`
+	HasSpills                  bool    `json:"hasSpills"`
+	SpillDetails               string  `json:"spillDetails"`
+	Remedy                     string  `json:"remedy"`
+}
+
+// TableIOLeader represents an individual table's I/O consumption breakdown
+type TableIOLeader struct {
+	Rank             int      `json:"rank"`
+	Database         string   `json:"database"`
+	Schema           string   `json:"schema"`
+	Table            string   `json:"table"`
+	LogicalReads     int64    `json:"logicalReads"`
+	LogicalReadsMB   float64  `json:"logicalReadsMb"`
+	PhysicalReads    int64    `json:"physicalReads"`
+	PhysicalReadsMB  float64  `json:"physicalReadsMb"`
+	ReadAheads       int64    `json:"readAheads"`
+	ReadAheadsMB     float64  `json:"readAheadsMb"`
+	ReadPercent      float64  `json:"readPercent"`
+	AccessOperations []string `json:"accessOperations"`
+	IndexesUsed      []string `json:"indexesUsed"`
+}
+
+// HardwareMetrics represents actual server hardware resources consumed
+type HardwareMetrics struct {
+	HasRuntimeMetrics             bool             `json:"hasRuntimeMetrics"`
+	TotalLogicalReads             int64            `json:"totalLogicalReads"`
+	TotalLogicalReadsMB           float64          `json:"totalLogicalReadsMb"`
+	TotalPhysicalReads            int64            `json:"totalPhysicalReads"`
+	TotalPhysicalReadsMB          float64          `json:"totalPhysicalReadsMb"`
+	TotalReadAheads               int64            `json:"totalReadAheads"`
+	TotalReadAheadsMB             float64          `json:"totalReadAheadsMb"`
+	TotalLobLogicalReads          int64            `json:"totalLobLogicalReads"`
+	TotalLobPhysicalReads         int64            `json:"totalLobPhysicalReads"`
+	CacheHitRatioPercent          float64          `json:"cacheHitRatioPercent"`
+	TotalActualCPUms              int64            `json:"totalActualCpuMs"`
+	TotalActualElapsedms          int64            `json:"totalActualElapsedMs"`
+	CpuUtilizationRatio           float64          `json:"cpuUtilizationRatio"`
+	WaitTimeMS                    int64            `json:"waitTimeMs"`
+	MemoryGrantWaitTimeMS         int64            `json:"memoryGrantWaitTimeMs"`
+	RequestedMemoryKB             int64            `json:"requestedMemoryKb"`
+	GrantedMemoryKB               int64            `json:"grantedMemoryKb"`
+	MaxUsedMemoryKB               int64            `json:"maxUsedMemoryKb"`
+	MaxQueryMemoryKB              int64            `json:"maxQueryMemoryKb"`
+	EstimatedAvailableMemoryKB    int64            `json:"estimatedAvailableMemoryKb"`
+	EstimatedPagesCached          int64            `json:"estimatedPagesCached"`
+	IsMemoryGrantFeedbackAdjusted string           `json:"isMemoryGrantFeedbackAdjusted"`
+	TopIOLeaders                  []*TableIOLeader `json:"topIoLeaders"`
 }
 
 // ThreadDistribution represents worker thread work breakdown in parallel queries

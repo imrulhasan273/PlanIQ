@@ -172,3 +172,94 @@ func TestNonSargableScanner(t *testing.T) {
 		}
 	}
 }
+
+func TestHardwareMetricsAndClassification(t *testing.T) {
+	xmlPlan := `<?xml version="1.0" encoding="utf-8"?>
+<ShowPlanXML xmlns="http://schemas.microsoft.com/sqlserver/2004/07/showplan" Version="1.5" Build="15.0.2000.5">
+ <BatchSequence><Batch><Statements>
+  <StmtSimple StatementId="1" StatementText="SELECT * FROM dbo.HeavyTable" StatementType="SELECT" StatementSubTreeCost="50" StatementEstRows="100000">
+   <QueryPlan CachedPlanSize="32">
+    <MemoryGrantInfo SerialRequiredMemory="1024" SerialDesiredMemory="8192" RequestedMemory="8192" GrantedMemory="8192" MaxUsedMemory="4096" GrantWaitTime="15" IsMemoryGrantFeedbackAdjusted="Yes: Adjusting" />
+    <RelOp NodeId="0" PhysicalOp="Nested Loops" LogicalOp="Inner Join" EstimateRows="100000" EstimatedTotalSubtreeCost="50">
+     <RunTimeInformation>
+      <RunTimeCountersPerThread Thread="0" ActualRows="100000" ActualCPUms="350" ActualElapsedms="400" ActualLogicalReads="12800" ActualPhysicalReads="0" ActualReadAheads="128" />
+     </RunTimeInformation>
+     <NestedLoops>
+      <RelOp NodeId="1" PhysicalOp="Clustered Index Scan" LogicalOp="Clustered Index Scan" EstimateRows="100000" EstimatedTotalSubtreeCost="30">
+       <RunTimeInformation>
+        <RunTimeCountersPerThread Thread="0" ActualRows="100000" ActualCPUms="200" ActualElapsedms="220" ActualLogicalReads="10240" ActualPhysicalReads="0" ActualReadAheads="64" />
+       </RunTimeInformation>
+       <IndexScan>
+        <Object Database="[AmmsDB]" Schema="[dbo]" Table="[HeavyTable]" Index="[PK_HeavyTable]" />
+       </IndexScan>
+      </RelOp>
+      <RelOp NodeId="2" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1" EstimatedTotalSubtreeCost="20">
+       <RunTimeInformation>
+        <RunTimeCountersPerThread Thread="0" ActualRows="100000" ActualCPUms="150" ActualElapsedms="180" ActualLogicalReads="2560" ActualPhysicalReads="0" ActualReadAheads="64" />
+       </RunTimeInformation>
+       <IndexScan>
+        <Object Database="[AmmsDB]" Schema="[dbo]" Table="[LookupTable]" Index="[IX_Lookup_Key]" />
+       </IndexScan>
+      </RelOp>
+     </NestedLoops>
+    </RelOp>
+   </QueryPlan>
+  </StmtSimple>
+ </Statements></Batch></BatchSequence>
+</ShowPlanXML>`
+
+	plan, err := ParseXML(xmlPlan, "TestHardwareMetricsPlan")
+	if err != nil {
+		t.Fatalf("ParseXML failed: %v", err)
+	}
+
+	if plan.HardwareMetrics == nil {
+		t.Fatalf("expected HardwareMetrics to be populated, got nil")
+	}
+
+	hm := plan.HardwareMetrics
+	if !hm.HasRuntimeMetrics {
+		t.Errorf("expected HasRuntimeMetrics = true")
+	}
+
+	if hm.TotalLogicalReads != 12800+10240+2560 {
+		t.Errorf("expected total logical reads = 25600, got %d", hm.TotalLogicalReads)
+	}
+
+	if hm.TotalLogicalReadsMB != 200.0 {
+		t.Errorf("expected TotalLogicalReadsMB = 200.0 MB, got %0.1f", hm.TotalLogicalReadsMB)
+	}
+
+	if hm.CacheHitRatioPercent != 100.0 {
+		t.Errorf("expected 100%% cache hit, got %0.1f%%", hm.CacheHitRatioPercent)
+	}
+
+	if hm.MemoryGrantWaitTimeMS != 15 {
+		t.Errorf("expected MemoryGrantWaitTimeMS = 15, got %d", hm.MemoryGrantWaitTimeMS)
+	}
+
+	if hm.GrantedMemoryKB != 8192 || hm.MaxUsedMemoryKB != 4096 {
+		t.Errorf("unexpected memory grants: granted %d, used %d", hm.GrantedMemoryKB, hm.MaxUsedMemoryKB)
+	}
+
+	if len(hm.TopIOLeaders) < 2 {
+		t.Fatalf("expected at least 2 table I/O leaders, got %d", len(hm.TopIOLeaders))
+	}
+
+	topTable := hm.TopIOLeaders[0]
+	if topTable.Table != "[HeavyTable]" {
+		t.Errorf("expected top table to be [HeavyTable], got %s", topTable.Table)
+	}
+	if topTable.LogicalReads != 10240 {
+		t.Errorf("expected [HeavyTable] reads = 10240, got %d", topTable.LogicalReads)
+	}
+	if topTable.LogicalReadsMB != 80.0 {
+		t.Errorf("expected [HeavyTable] reads MB = 80.0, got %0.1f", topTable.LogicalReadsMB)
+	}
+
+	stmt := plan.Statements[0]
+	if stmt.ExecutionClassification == "" {
+		t.Errorf("expected statement to have ExecutionClassification")
+	}
+	t.Logf("Statement #1 Classification: %s (%s)", stmt.ExecutionClassification, stmt.ExecutionClassificationReason)
+}

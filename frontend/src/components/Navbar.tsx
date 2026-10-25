@@ -471,7 +471,21 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </div>
 
-          {/* Category 4: Deadlocks (.xdl) (Direct tab button in new row!) */}
+          {/* Category 4: A/B Compare (Direct tab button) */}
+          <div className="nav-dropdown-item-wrap">
+            <button
+              type="button"
+              className={`nav-category-btn ${activeTab === 'comparator' ? 'active' : ''}`}
+              onClick={(e) => handleSelectTab('comparator', e)}
+              title="Side-by-side Before vs After execution plan comparator & benchmark"
+            >
+              <GitCompare size={14} color={activeTab === 'comparator' ? '#38bdf8' : '#94a3b8'} />
+              <span className="category-title">A/B Compare</span>
+              <span className="category-offline-pill" style={{ background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8' }}>Diff</span>
+            </button>
+          </div>
+
+          {/* Category 5: Deadlocks (.xdl) (Direct tab button in new row!) */}
           <div className="nav-dropdown-item-wrap">
             <button
               type="button"

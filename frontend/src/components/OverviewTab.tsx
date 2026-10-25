@@ -901,16 +901,16 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                     <DiagnosticTooltip guideKey="consolidatedIndexes" />
                   </div>
                   <span className="badge badge-success">
-                    {diag.consolidatedIndexes.length} Composite Targets
+                    {(diag.consolidatedIndexes || []).length} Composite Targets
                   </span>
                 </div>
                 <div className="diag-card-body">
-                  {diag.consolidatedIndexes.length > 0 ? (
+                  {(diag.consolidatedIndexes || []).length > 0 ? (
                     <>
                       <div className="diag-metric-row">
                         <span className="diag-metric-label">Redundancy Reduction:</span>
                         <strong className="diag-metric-val">
-                          {(plan.allMissingIndexes || []).length} Raw Hints ➔ {diag.consolidatedIndexes.length} Composite Indexes
+                          {(plan.allMissingIndexes || []).length} Raw Hints ➔ {(diag.consolidatedIndexes || []).length} Composite Indexes
                         </strong>
                       </div>
                       <p className="diag-desc-text">
@@ -923,7 +923,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                           onClick={() => onNavigateTab('indexes')}
                         >
                           <KeyRound size={13} color="#34d399" />
-                          <span>Inspect Smart Consolidated Indexes ({diag.consolidatedIndexes.length})</span>
+                          <span>Inspect Smart Consolidated Indexes ({(diag.consolidatedIndexes || []).length})</span>
                         </button>
                       )}
                     </>
@@ -949,17 +949,17 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                     <span className="diag-title">Implicit Conversions</span>
                     <DiagnosticTooltip guideKey="implicitConversions" />
                   </div>
-                  {diag.implicitConversions.length > 0 ? (
-                    <span className="badge badge-critical">{diag.implicitConversions.length} Non-Sargable</span>
+                  {(diag.implicitConversions || []).length > 0 ? (
+                    <span className="badge badge-critical">{(diag.implicitConversions || []).length} Non-Sargable</span>
                   ) : (
                     <span className="badge badge-success">Clean Sargability</span>
                   )}
                 </div>
                 <div className="diag-card-body">
-                  {diag.implicitConversions.length > 0 ? (
+                  {(diag.implicitConversions || []).length > 0 ? (
                     <>
                       <div className="diag-items-list">
-                        {diag.implicitConversions.slice(0, 3).map((conv, i) => (
+                        {(diag.implicitConversions || []).slice(0, 3).map((conv, i) => (
                           <div key={i} className="diag-sub-item">
                             <span className="diag-sub-tag">Stmt #{conv.statementId}</span>
                             <span className="diag-sub-code" title={conv.expression}>{conv.expression || conv.convertIssue}</span>
@@ -992,17 +992,17 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                     <span className="diag-title">Scalar UDF (RBAR) Penalty</span>
                     <DiagnosticTooltip guideKey="scalarUdfWarnings" />
                   </div>
-                  {diag.scalarUdfWarnings.length > 0 ? (
-                    <span className="badge badge-critical">{diag.scalarUdfWarnings.length} UDF Detected</span>
+                  {(diag.scalarUdfWarnings || []).length > 0 ? (
+                    <span className="badge badge-critical">{(diag.scalarUdfWarnings || []).length} UDF Detected</span>
                   ) : (
                     <span className="badge badge-success">No Scalar UDFs</span>
                   )}
                 </div>
                 <div className="diag-card-body">
-                  {diag.scalarUdfWarnings.length > 0 ? (
+                  {(diag.scalarUdfWarnings || []).length > 0 ? (
                     <>
                       <div className="diag-items-list">
-                        {diag.scalarUdfWarnings.map((udf, i) => (
+                        {(diag.scalarUdfWarnings || []).map((udf, i) => (
                           <div key={i} className="diag-sub-item danger-border">
                             <span className="diag-sub-tag">Stmt #{udf.statementId}</span>
                             <code className="diag-sub-code">{udf.functionName}</code>
@@ -1063,10 +1063,10 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               <KeyRound size={18} color="#34d399" />
             </div>
           </div>
-          <div className="metric-value">{plan.allMissingIndexes.length}</div>
+          <div className="metric-value">{(plan.allMissingIndexes || []).length}</div>
           <div className="metric-subtext">
-            {diag?.consolidatedIndexes && diag.consolidatedIndexes.length > 0
-              ? `Can be consolidated into ${diag.consolidatedIndexes.length} composite indexes`
+            {(diag?.consolidatedIndexes || []).length > 0
+              ? `Can be consolidated into ${diag?.consolidatedIndexes?.length} composite indexes`
               : 'Engine suggested index recommendations'}
           </div>
         </div>
@@ -1091,6 +1091,226 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Dedicated I/O & Hardware Metrics Widget */}
+      {plan.hardwareMetrics && (
+        <div className="section-block">
+          <div className="section-title-row">
+            <HardDrive size={18} color="#38bdf8" />
+            <h2 className="section-title">Server I/O & Hardware Execution Metrics</h2>
+            <DiagnosticTooltip guideKey="logicalReadsMetric" />
+            <span className="badge badge-info">
+              {plan.hardwareMetrics.hasRuntimeMetrics ? 'Actual Runtime Stats' : 'Estimated Plan Profile'}
+            </span>
+            {plan.hardwareMetrics.cacheHitRatioPercent === 100 && (
+              <span className="badge badge-success" style={{ marginLeft: 'auto' }}>
+                <CheckCircle2 size={12} style={{ marginRight: '4px' }} />
+                100% Buffer Cache Hit (0 Disk I/O)
+              </span>
+            )}
+            {plan.hardwareMetrics.totalPhysicalReads > 0 && (
+              <span className="badge badge-critical" style={{ marginLeft: 'auto' }}>
+                <AlertTriangle size={12} style={{ marginRight: '4px' }} />
+                Disk Reads: {plan.hardwareMetrics.totalPhysicalReadsMb} MB
+              </span>
+            )}
+          </div>
+
+          {/* 4 Dedicated Hardware Metric Cards */}
+          <div className="metrics-grid" style={{ marginBottom: '20px' }}>
+            {/* 1. Total Logical Reads (RAM Touched) */}
+            <div className="metric-card glass-panel hardware-kpi-card">
+              <div className="metric-header">
+                <span className="metric-label">Total Logical Reads (RAM Touched)</span>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <DiagnosticTooltip guideKey="logicalReadsMetric" />
+                  <Database size={18} color="#38bdf8" />
+                </div>
+              </div>
+              <div className="metric-value">
+                {plan.hardwareMetrics.totalLogicalReadsMb > 0
+                  ? `${plan.hardwareMetrics.totalLogicalReadsMb.toLocaleString()} MB`
+                  : `${plan.hardwareMetrics.totalLogicalReads.toLocaleString()} pgs`}
+              </div>
+              <div className="metric-subtext">
+                <strong>{plan.hardwareMetrics.totalLogicalReads.toLocaleString()}</strong> 8KB memory pages read from buffer cache
+              </div>
+            </div>
+
+            {/* 2. Physical Disk Reads */}
+            <div className="metric-card glass-panel hardware-kpi-card">
+              <div className="metric-header">
+                <span className="metric-label">Physical Disk Reads</span>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <DiagnosticTooltip guideKey="physicalReadsMetric" />
+                  <Disc size={18} color={plan.hardwareMetrics.totalPhysicalReads > 0 ? '#f43f5e' : '#34d399'} />
+                </div>
+              </div>
+              <div className="metric-value" style={{ color: plan.hardwareMetrics.totalPhysicalReads > 0 ? '#fda4af' : '#34d399' }}>
+                {plan.hardwareMetrics.totalPhysicalReadsMb} MB
+              </div>
+              <div className="metric-subtext">
+                {plan.hardwareMetrics.totalPhysicalReads === 0 ? (
+                  <span style={{ color: '#34d399' }}>✅ 100% Cache Hit (Zero disk latency)</span>
+                ) : (
+                  <span style={{ color: '#fda4af' }}>
+                    {plan.hardwareMetrics.totalPhysicalReads.toLocaleString()} disk reads ({plan.hardwareMetrics.totalReadAheads.toLocaleString()} read-ahead)
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* 3. CPU vs Elapsed Time */}
+            <div className="metric-card glass-panel hardware-kpi-card">
+              <div className="metric-header">
+                <span className="metric-label">CPU vs. Elapsed Clock</span>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <DiagnosticTooltip guideKey="cpuVsElapsedMetric" />
+                  <Cpu size={18} color="#c084fc" />
+                </div>
+              </div>
+              <div className="metric-value" style={{ fontSize: '18px', marginTop: '4px' }}>
+                {plan.hardwareMetrics.totalActualCpuMs.toLocaleString()} ms CPU / {plan.hardwareMetrics.totalActualElapsedMs.toLocaleString()} ms Clock
+              </div>
+              <div className="metric-subtext">
+                {plan.hardwareMetrics.totalActualElapsedMs > 0 ? (
+                  <>
+                    <strong style={{ color: '#c084fc' }}>{plan.hardwareMetrics.cpuUtilizationRatio}%</strong> CPU active
+                    {plan.hardwareMetrics.waitTimeMs > 0 && (
+                      <span className="text-dim"> ({plan.hardwareMetrics.waitTimeMs} ms wait time)</span>
+                    )}
+                  </>
+                ) : (
+                  <span>Compile CPU: {plan.statements[0]?.compileCpuMs || 0} ms</span>
+                )}
+              </div>
+            </div>
+
+            {/* 4. Memory Grant Wait Time */}
+            <div className="metric-card glass-panel hardware-kpi-card">
+              <div className="metric-header">
+                <span className="metric-label">Memory Grant Wait Time</span>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <DiagnosticTooltip guideKey="memoryGrantWaitMetric" />
+                  <Activity size={18} color={plan.hardwareMetrics.memoryGrantWaitTimeMs > 0 ? '#f43f5e' : '#fbbf24'} />
+                </div>
+              </div>
+              <div className="metric-value" style={{ color: plan.hardwareMetrics.memoryGrantWaitTimeMs > 0 ? '#fda4af' : '#fbbf24' }}>
+                {plan.hardwareMetrics.memoryGrantWaitTimeMs} ms Wait
+              </div>
+              <div className="metric-subtext">
+                {plan.hardwareMetrics.grantedMemoryKb > 0 ? (
+                  <span>
+                    Granted: <strong>{(plan.hardwareMetrics.grantedMemoryKb / 1024).toFixed(1)} MB</strong> (Used: {(plan.hardwareMetrics.maxUsedMemoryKb / 1024).toFixed(1)} MB)
+                  </span>
+                ) : (
+                  <span>Immediate grant (No semaphore queue)</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Table-by-Table I/O Heatmap & Leaderboard */}
+          {plan.hardwareMetrics.topIoLeaders && plan.hardwareMetrics.topIoLeaders.length > 0 && (
+            <div className="glass-panel" style={{ padding: '20px', borderRadius: '12px' }}>
+              <div className="section-title-row" style={{ marginBottom: '14px' }}>
+                <BarChart3 size={16} color="#38bdf8" />
+                <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#f8fafc', margin: 0 }}>
+                  Top I/O Consumers Leaderboard (Table-Level Read Breakdown)
+                </h3>
+                <DiagnosticTooltip guideKey="tableIoLeaderboard" />
+                <span className="text-dim" style={{ fontSize: '12px', marginLeft: 'auto' }}>
+                  Ranked by Logical Read Volume (Pages & MB)
+                </span>
+              </div>
+
+              <div className="table-wrapper">
+                <table className="leaderboard-table io-heatmap-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '70px' }}>Rank</th>
+                      <th style={{ width: '220px' }}>Table Name</th>
+                      <th style={{ width: '160px' }}>Logical Reads (RAM)</th>
+                      <th>I/O Heatmap (% of Query Reads)</th>
+                      <th style={{ width: '150px' }}>Disk & Read-Aheads</th>
+                      <th style={{ width: '200px' }}>Access Operations</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {plan.hardwareMetrics.topIoLeaders.map((item) => {
+                      const isTopLeader = item.rank === 1 && item.readPercent > 30;
+                      return (
+                        <tr key={item.rank} className={isTopLeader ? 'heavy-row' : ''}>
+                          <td>
+                            <span className={`rank-badge rank-${item.rank <= 3 ? item.rank : 'other'}`}>
+                              #{item.rank}
+                            </span>
+                          </td>
+                          <td>
+                            <div className="table-identity">
+                              <span className="table-full-name font-mono" title={`${item.database}.${item.schema}.${item.table}`}>
+                                {item.schema ? `${item.schema}.${item.table}` : item.table}
+                              </span>
+                              {item.indexesUsed && item.indexesUsed.length > 0 && (
+                                <div className="index-tags-stack">
+                                  {item.indexesUsed.map((idxName, i) => (
+                                    <span key={i} className="index-used-tag" title={`Index: ${idxName}`}>
+                                      {idxName}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="reads-volume-cell">
+                              <strong>{item.logicalReads.toLocaleString()}</strong> <span className="text-muted">pgs</span>
+                              <span className="badge badge-info" style={{ fontSize: '11px', padding: '1px 5px' }}>
+                                {item.logicalReadsMb} MB
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="io-progress-cell">
+                              <div className="io-progress-track">
+                                <div
+                                  className={`io-progress-fill ${item.readPercent > 50 ? 'fill-danger' : item.readPercent > 20 ? 'fill-warning' : 'fill-primary'}`}
+                                  style={{ width: `${Math.max(3, Math.min(item.readPercent, 100))}%` }}
+                                />
+                              </div>
+                              <span className="io-pct-label font-mono">
+                                {item.readPercent.toFixed(1)}%
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="disk-reads-cell text-muted" style={{ fontSize: '12px' }}>
+                              <span>{item.physicalReads.toLocaleString()} disk</span>
+                              <span className="text-dim"> / {item.readAheads.toLocaleString()} ahead</span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="ops-badges-stack">
+                              {(item.accessOperations || []).map((op, i) => (
+                                <span
+                                  key={i}
+                                  className={`op-badge ${op.includes('Scan') ? 'op-scan' : op.includes('Seek') ? 'op-seek' : 'op-other'}`}
+                                >
+                                  {op}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Wait Statistics Dashboard (<WaitStats>) */}
       {plan.waitStats && plan.waitStats.length > 0 && (
@@ -1132,16 +1352,16 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
       )}
 
       {/* Anti-Patterns Banner */}
-      {plan.antiPatterns.length > 0 && (
+      {(plan.antiPatterns || []).length > 0 && (
         <div className="section-block">
           <div className="section-title-row">
             <AlertTriangle size={18} color="#f43f5e" />
             <h2 className="section-title">Detected Engine Bottlenecks & Anti-Patterns</h2>
-            <span className="badge badge-critical">{plan.antiPatterns.length} Found</span>
+            <span className="badge badge-critical">{(plan.antiPatterns || []).length} Found</span>
           </div>
 
           <div className="antipatterns-grid">
-            {plan.antiPatterns.map((ap, idx) => (
+            {(plan.antiPatterns || []).map((ap, idx) => (
               <div key={idx} className={`antipattern-card glass-panel border-${ap.severity.toLowerCase()}`}>
                 <div className="antipattern-top">
                   <span className={`badge badge-${ap.severity === 'CRITICAL' ? 'critical' : ap.severity === 'HIGH' ? 'high' : 'info'}`}>
@@ -1153,10 +1373,10 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                 <div className="antipattern-recommendation">
                   <strong>Fix:</strong> {ap.recommendation}
                 </div>
-                {ap.affectedStatements.length > 0 && (
+                {(ap.affectedStatements || []).length > 0 && (
                   <div className="affected-stmts">
                     <span className="affected-label">Affected:</span>
-                    {ap.affectedStatements.map((s, i) => (
+                    {(ap.affectedStatements || []).map((s, i) => (
                       <span key={i} className="affected-badge">{s}</span>
                     ))}
                   </div>
@@ -1180,13 +1400,14 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           <table className="leaderboard-table">
             <thead>
               <tr>
-                <th style={{ width: '80px' }}>Stmt #</th>
-                <th style={{ width: '140px' }}>Type</th>
+                <th style={{ width: '75px' }}>Stmt #</th>
+                <th style={{ width: '130px' }}>Type</th>
                 <th>Query Preview</th>
-                <th style={{ width: '130px' }}>Est. Rows</th>
-                <th style={{ width: '180px' }}>Subtree Cost & %</th>
-                <th style={{ width: '120px' }}>Warnings</th>
-                <th style={{ width: '150px', textAlign: 'right' }}>Actions</th>
+                <th style={{ width: '100px' }}>Est. Rows</th>
+                <th style={{ width: '160px' }}>Profile & Reads</th>
+                <th style={{ width: '170px' }}>Subtree Cost & %</th>
+                <th style={{ width: '110px' }}>Warnings</th>
+                <th style={{ width: '140px', textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1213,6 +1434,40 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                       {stmt.statementEstRows > 0 ? stmt.statementEstRows.toLocaleString() : '-'}
                     </td>
                     <td>
+                      <div className="profile-classification-cell">
+                        {stmt.executionClassification === 'IO_BOUND' && (
+                          <span className="badge badge-io-bound" title={stmt.executionClassificationReason || 'I/O Bound statement'}>
+                            💽 I/O Bound
+                          </span>
+                        )}
+                        {stmt.executionClassification === 'CPU_BOUND' && (
+                          <span className="badge badge-cpu-bound" title={stmt.executionClassificationReason || 'CPU Bound statement'}>
+                            ⚡ CPU Bound
+                          </span>
+                        )}
+                        {stmt.executionClassification === 'WAIT_BOUND' && (
+                          <span className="badge badge-wait-bound" title={stmt.executionClassificationReason || 'Wait Bound statement'}>
+                            ⏳ Wait Bound
+                          </span>
+                        )}
+                        {(stmt.executionClassification === 'BALANCED' || !stmt.executionClassification) && (
+                          <span className="badge badge-balanced" title={stmt.executionClassificationReason || 'Balanced statement'}>
+                            ⚖️ Balanced
+                          </span>
+                        )}
+                        {stmt.actualLogicalReads !== undefined && stmt.actualLogicalReads > 0 && (
+                          <div className="stmt-reads-hint text-dim" title={`${stmt.actualLogicalReads.toLocaleString()} logical reads`}>
+                            📖 {stmt.actualLogicalReadsMb} MB ({stmt.actualLogicalReads.toLocaleString()} pgs)
+                          </div>
+                        )}
+                        {stmt.actualCpuMs !== undefined && stmt.actualCpuMs > 0 && (
+                          <div className="stmt-cpu-hint text-dim" title={`${stmt.actualCpuMs} ms CPU / ${stmt.actualElapsedMs} ms elapsed`}>
+                            ⏱️ {stmt.actualCpuMs} ms CPU
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td>
                       <div className="cost-progress-cell">
                         <div className="cost-numbers">
                           <strong>{stmt.statementSubTreeCost.toFixed(2)}</strong>
@@ -1228,17 +1483,17 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                     </td>
                     <td>
                       <div className="warnings-stack">
-                        {stmt.warnings.length > 0 && (
+                        {(stmt.warnings || []).length > 0 && (
                           <span className="badge badge-critical" title="Warnings detected">
-                            {stmt.warnings.length} Warn
+                            {(stmt.warnings || []).length} Warn
                           </span>
                         )}
-                        {stmt.missingIndexes.length > 0 && (
+                        {(stmt.missingIndexes || []).length > 0 && (
                           <span className="badge badge-success" title="Missing index recommendation">
-                            {stmt.missingIndexes.length} Idx
+                            {(stmt.missingIndexes || []).length} Idx
                           </span>
                         )}
-                        {stmt.warnings.length === 0 && stmt.missingIndexes.length === 0 && (
+                        {(stmt.warnings || []).length === 0 && (stmt.missingIndexes || []).length === 0 && (
                           <span className="text-dim">-</span>
                         )}
                       </div>

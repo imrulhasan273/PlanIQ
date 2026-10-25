@@ -45,12 +45,60 @@ export interface MemoryGrantHealth {
   maxUsedMemoryKb: number;
   serialRequiredKb: number;
   serialDesiredKb: number;
+  requestedMemoryKb?: number;
+  grantWaitTimeMs?: number;
+  maxQueryMemoryKb?: number;
+  feedbackAdjusted?: string;
+  estimatedAvailableMemoryKb?: number;
+  estimatedPagesCached?: number;
   isBloated: boolean;
   wastedMemoryMb: number;
   wastedPercent: number;
   hasSpills: boolean;
   spillDetails: string;
   remedy: string;
+}
+
+export interface TableIOLeader {
+  rank: number;
+  database: string;
+  schema: string;
+  table: string;
+  logicalReads: number;
+  logicalReadsMb: number;
+  physicalReads: number;
+  physicalReadsMb: number;
+  readAheads: number;
+  readAheadsMb: number;
+  readPercent: number;
+  accessOperations: string[];
+  indexesUsed: string[];
+}
+
+export interface HardwareMetrics {
+  hasRuntimeMetrics: boolean;
+  totalLogicalReads: number;
+  totalLogicalReadsMb: number;
+  totalPhysicalReads: number;
+  totalPhysicalReadsMb: number;
+  totalReadAheads: number;
+  totalReadAheadsMb: number;
+  totalLobLogicalReads: number;
+  totalLobPhysicalReads: number;
+  cacheHitRatioPercent: number;
+  totalActualCpuMs: number;
+  totalActualElapsedMs: number;
+  cpuUtilizationRatio: number;
+  waitTimeMs: number;
+  memoryGrantWaitTimeMs: number;
+  requestedMemoryKb: number;
+  grantedMemoryKb: number;
+  maxUsedMemoryKb: number;
+  maxQueryMemoryKb: number;
+  estimatedAvailableMemoryKb: number;
+  estimatedPagesCached: number;
+  isMemoryGrantFeedbackAdjusted: string;
+  topIoLeaders: TableIOLeader[];
 }
 
 export interface ThreadDistribution {
@@ -265,9 +313,20 @@ export type PlanAnalysis = sqlplan.PlanAnalysis & {
   executiveVerdict?: ExecutiveVerdict;
   waitStats?: WaitStat[];
   diagnostics?: AdvancedDiagnostics;
+  hardwareMetrics?: HardwareMetrics;
 };
 
-export type StatementAnalysis = sqlplan.StatementAnalysis;
+export type StatementAnalysis = sqlplan.StatementAnalysis & {
+  actualCpuMs?: number;
+  actualElapsedMs?: number;
+  actualLogicalReads?: number;
+  actualLogicalReadsMb?: number;
+  actualPhysicalReads?: number;
+  actualReadAheads?: number;
+  hasActualMetrics?: boolean;
+  executionClassification?: 'IO_BOUND' | 'CPU_BOUND' | 'WAIT_BOUND' | 'BALANCED' | string;
+  executionClassificationReason?: string;
+};
 
 export type PlanNode = sqlplan.PlanNode & {
   hasCardinalitySkew?: boolean;

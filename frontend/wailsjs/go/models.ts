@@ -664,6 +664,12 @@ export namespace sqlplan {
 	    maxUsedMemoryKb: number;
 	    serialRequiredKb: number;
 	    serialDesiredKb: number;
+	    requestedMemoryKb: number;
+	    grantWaitTimeMs: number;
+	    maxQueryMemoryKb: number;
+	    feedbackAdjusted: string;
+	    estimatedAvailableMemoryKb: number;
+	    estimatedPagesCached: number;
 	    isBloated: boolean;
 	    wastedMemoryMb: number;
 	    wastedPercent: number;
@@ -681,6 +687,12 @@ export namespace sqlplan {
 	        this.maxUsedMemoryKb = source["maxUsedMemoryKb"];
 	        this.serialRequiredKb = source["serialRequiredKb"];
 	        this.serialDesiredKb = source["serialDesiredKb"];
+	        this.requestedMemoryKb = source["requestedMemoryKb"];
+	        this.grantWaitTimeMs = source["grantWaitTimeMs"];
+	        this.maxQueryMemoryKb = source["maxQueryMemoryKb"];
+	        this.feedbackAdjusted = source["feedbackAdjusted"];
+	        this.estimatedAvailableMemoryKb = source["estimatedAvailableMemoryKb"];
+	        this.estimatedPagesCached = source["estimatedPagesCached"];
 	        this.isBloated = source["isBloated"];
 	        this.wastedMemoryMb = source["wastedMemoryMb"];
 	        this.wastedPercent = source["wastedPercent"];
@@ -793,6 +805,116 @@ export namespace sqlplan {
 	        this.actionableFix = source["actionableFix"];
 	    }
 	}
+	export class TableIOLeader {
+	    rank: number;
+	    database: string;
+	    schema: string;
+	    table: string;
+	    logicalReads: number;
+	    logicalReadsMb: number;
+	    physicalReads: number;
+	    physicalReadsMb: number;
+	    readAheads: number;
+	    readAheadsMb: number;
+	    readPercent: number;
+	    accessOperations: string[];
+	    indexesUsed: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new TableIOLeader(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rank = source["rank"];
+	        this.database = source["database"];
+	        this.schema = source["schema"];
+	        this.table = source["table"];
+	        this.logicalReads = source["logicalReads"];
+	        this.logicalReadsMb = source["logicalReadsMb"];
+	        this.physicalReads = source["physicalReads"];
+	        this.physicalReadsMb = source["physicalReadsMb"];
+	        this.readAheads = source["readAheads"];
+	        this.readAheadsMb = source["readAheadsMb"];
+	        this.readPercent = source["readPercent"];
+	        this.accessOperations = source["accessOperations"];
+	        this.indexesUsed = source["indexesUsed"];
+	    }
+	}
+	export class HardwareMetrics {
+	    hasRuntimeMetrics: boolean;
+	    totalLogicalReads: number;
+	    totalLogicalReadsMb: number;
+	    totalPhysicalReads: number;
+	    totalPhysicalReadsMb: number;
+	    totalReadAheads: number;
+	    totalReadAheadsMb: number;
+	    totalLobLogicalReads: number;
+	    totalLobPhysicalReads: number;
+	    cacheHitRatioPercent: number;
+	    totalActualCpuMs: number;
+	    totalActualElapsedMs: number;
+	    cpuUtilizationRatio: number;
+	    waitTimeMs: number;
+	    memoryGrantWaitTimeMs: number;
+	    requestedMemoryKb: number;
+	    grantedMemoryKb: number;
+	    maxUsedMemoryKb: number;
+	    maxQueryMemoryKb: number;
+	    estimatedAvailableMemoryKb: number;
+	    estimatedPagesCached: number;
+	    isMemoryGrantFeedbackAdjusted: string;
+	    topIoLeaders: TableIOLeader[];
+	
+	    static createFrom(source: any = {}) {
+	        return new HardwareMetrics(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.hasRuntimeMetrics = source["hasRuntimeMetrics"];
+	        this.totalLogicalReads = source["totalLogicalReads"];
+	        this.totalLogicalReadsMb = source["totalLogicalReadsMb"];
+	        this.totalPhysicalReads = source["totalPhysicalReads"];
+	        this.totalPhysicalReadsMb = source["totalPhysicalReadsMb"];
+	        this.totalReadAheads = source["totalReadAheads"];
+	        this.totalReadAheadsMb = source["totalReadAheadsMb"];
+	        this.totalLobLogicalReads = source["totalLobLogicalReads"];
+	        this.totalLobPhysicalReads = source["totalLobPhysicalReads"];
+	        this.cacheHitRatioPercent = source["cacheHitRatioPercent"];
+	        this.totalActualCpuMs = source["totalActualCpuMs"];
+	        this.totalActualElapsedMs = source["totalActualElapsedMs"];
+	        this.cpuUtilizationRatio = source["cpuUtilizationRatio"];
+	        this.waitTimeMs = source["waitTimeMs"];
+	        this.memoryGrantWaitTimeMs = source["memoryGrantWaitTimeMs"];
+	        this.requestedMemoryKb = source["requestedMemoryKb"];
+	        this.grantedMemoryKb = source["grantedMemoryKb"];
+	        this.maxUsedMemoryKb = source["maxUsedMemoryKb"];
+	        this.maxQueryMemoryKb = source["maxQueryMemoryKb"];
+	        this.estimatedAvailableMemoryKb = source["estimatedAvailableMemoryKb"];
+	        this.estimatedPagesCached = source["estimatedPagesCached"];
+	        this.isMemoryGrantFeedbackAdjusted = source["isMemoryGrantFeedbackAdjusted"];
+	        this.topIoLeaders = this.convertValues(source["topIoLeaders"], TableIOLeader);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	
 	
 	
@@ -868,6 +990,12 @@ export namespace sqlplan {
 	    costPercentage: number;
 	    tableCardinality: number;
 	    parallel: boolean;
+	    actualCpuMs: number;
+	    actualElapsedMs: number;
+	    actualLogicalReads: number;
+	    actualPhysicalReads: number;
+	    actualReadAheads: number;
+	    actualScans: number;
 	    database: string;
 	    schema: string;
 	    table: string;
@@ -903,6 +1031,12 @@ export namespace sqlplan {
 	        this.costPercentage = source["costPercentage"];
 	        this.tableCardinality = source["tableCardinality"];
 	        this.parallel = source["parallel"];
+	        this.actualCpuMs = source["actualCpuMs"];
+	        this.actualElapsedMs = source["actualElapsedMs"];
+	        this.actualLogicalReads = source["actualLogicalReads"];
+	        this.actualPhysicalReads = source["actualPhysicalReads"];
+	        this.actualReadAheads = source["actualReadAheads"];
+	        this.actualScans = source["actualScans"];
 	        this.database = source["database"];
 	        this.schema = source["schema"];
 	        this.table = source["table"];
@@ -952,6 +1086,15 @@ export namespace sqlplan {
 	    warnings: PlanWarning[];
 	    missingIndexes: MissingIndexInfo[];
 	    painPointsCount: number;
+	    actualCpuMs: number;
+	    actualElapsedMs: number;
+	    actualLogicalReads: number;
+	    actualLogicalReadsMb: number;
+	    actualPhysicalReads: number;
+	    actualReadAheads: number;
+	    hasActualMetrics: boolean;
+	    executionClassification: string;
+	    executionClassificationReason: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new StatementAnalysis(source);
@@ -975,6 +1118,15 @@ export namespace sqlplan {
 	        this.warnings = this.convertValues(source["warnings"], PlanWarning);
 	        this.missingIndexes = this.convertValues(source["missingIndexes"], MissingIndexInfo);
 	        this.painPointsCount = source["painPointsCount"];
+	        this.actualCpuMs = source["actualCpuMs"];
+	        this.actualElapsedMs = source["actualElapsedMs"];
+	        this.actualLogicalReads = source["actualLogicalReads"];
+	        this.actualLogicalReadsMb = source["actualLogicalReadsMb"];
+	        this.actualPhysicalReads = source["actualPhysicalReads"];
+	        this.actualReadAheads = source["actualReadAheads"];
+	        this.hasActualMetrics = source["hasActualMetrics"];
+	        this.executionClassification = source["executionClassification"];
+	        this.executionClassificationReason = source["executionClassificationReason"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1029,6 +1181,7 @@ export namespace sqlplan {
 	    allMissingIndexes: MissingIndexInfo[];
 	    antiPatterns: AntiPattern[];
 	    diagnostics?: AdvancedDiagnostics;
+	    hardwareMetrics?: HardwareMetrics;
 	
 	    static createFrom(source: any = {}) {
 	        return new PlanAnalysis(source);
@@ -1049,6 +1202,7 @@ export namespace sqlplan {
 	        this.allMissingIndexes = this.convertValues(source["allMissingIndexes"], MissingIndexInfo);
 	        this.antiPatterns = this.convertValues(source["antiPatterns"], AntiPattern);
 	        this.diagnostics = this.convertValues(source["diagnostics"], AdvancedDiagnostics);
+	        this.hardwareMetrics = this.convertValues(source["hardwareMetrics"], HardwareMetrics);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1141,6 +1295,7 @@ export namespace sqlplan {
 		    return a;
 		}
 	}
+	
 	
 	
 	

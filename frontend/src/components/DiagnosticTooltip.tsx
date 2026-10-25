@@ -246,6 +246,60 @@ export const DIAGNOSTIC_GUIDES: Record<string, DiagnosticGuideContent> = {
     warningThreshold: 'Plan regression where cost or memory grant increased after code modification.',
     impact: 'Mathematically proves performance improvements before deploying changes to production.',
     howToFix: 'Verify that the new plan eliminates high-cost operators without introducing new spills or warnings.'
+  },
+  logicalReadsMetric: {
+    title: 'Total Logical Reads (RAM Touched)',
+    category: 'Hardware & I/O',
+    definition: 'The total count of 8KB database pages retrieved from the SQL Server buffer pool (memory) to satisfy this query. In SQL Server, 128 logical reads represent exactly 1 MB of memory touched.',
+    healthyRange: '< 5,000 logical reads (< 40 MB). Highly selective index seeks typically touch fewer than 100 pages.',
+    warningThreshold: '> 50,000 logical reads (> 390 MB) is a major memory-churn warning; > 500,000 reads (> 3.9 GB) causes severe buffer pool thrashing and cache flushes.',
+    impact: 'Massive logical reads consume memory bus bandwidth, purge other hot tables from the buffer cache, and drive high CPU consumption.',
+    howToFix: 'Create selective covering indexes with appropriate WHERE filters to transform full scans or wide seeks into narrow index seeks.'
+  },
+  physicalReadsMetric: {
+    title: 'Physical Disk Reads & Cache Hit Ratio',
+    category: 'Hardware & I/O',
+    definition: 'Pages that were NOT found in the SQL Server buffer pool and had to be fetched directly from physical storage (SAN/SSD/NVMe). Cache hit ratio represents the percentage of pages served directly from RAM without disk latency.',
+    healthyRange: '0 Physical Reads (100% Cache Hit). All active working set data resides in memory.',
+    warningThreshold: 'Any physical reads on recurring OLTP queries indicates buffer cache eviction or inadequate server RAM.',
+    impact: 'Physical disk reads are 100x to 1000x slower than RAM reads, causing prolonged query wait states (PAGEIOLATCH_SH / PAGEIOLATCH_EX).',
+    howToFix: 'Add missing indexes to reduce page requirements, increase SQL Server Max Server Memory, or evaluate buffer cache sizing.'
+  },
+  cpuVsElapsedMetric: {
+    title: 'CPU Time vs. Elapsed Clock Time',
+    category: 'Hardware & I/O',
+    definition: 'The ratio of actual processor execution time (CPU burn) compared to total wall-clock duration. In serial execution, Elapsed Time = CPU Time + Wait Time. In parallel execution (MaxDOP > 1), CPU time can exceed Elapsed time across multiple worker threads.',
+    healthyRange: 'Active CPU ratio between 75% and 100% (query is actively crunching without being stalled by external bottlenecks).',
+    warningThreshold: 'Elapsed Time > 2x CPU Time (indicates severe blocking, lock waits, disk I/O latency, or network waits).',
+    impact: 'Differentiates between CPU-bound queries (sorting, hash matching, functions) vs. wait-bound queries (locked tables, slow disks, network delays).',
+    howToFix: 'If CPU is low but elapsed is high, inspect the Wait Statistics tab for CXPACKET, LCK_M, or PAGEIOLATCH waits. If CPU is high, eliminate sort/hash operators.'
+  },
+  memoryGrantWaitMetric: {
+    title: 'Memory Grant Wait Time',
+    category: 'Hardware & I/O',
+    definition: 'The duration in milliseconds that this query was forced to wait in the SQL Server Resource Semaphore queue before receiving its workspace memory grant.',
+    healthyRange: '0 ms (Immediate grant without queueing).',
+    warningThreshold: '> 0 ms indicates server-wide workspace memory exhaustion. Waits > 5,000 ms cause catastrophic query timeouts.',
+    impact: 'Queries stall before even beginning execution (RESOURCE_SEMAPHORE wait), causing connection pile-ups and application thread pool starvation.',
+    howToFix: 'Identify and tune concurrent bloated queries that request excessive RAM grants, update statistics to eliminate cardinality overestimates, or use OPTION (MAX_GRANT_PERCENT = n).'
+  },
+  tableIoLeaderboard: {
+    title: 'Table-by-Table I/O Heatmap & Leaderboard',
+    category: 'Hardware & I/O',
+    definition: 'Ranked breakdown of all database tables accessed during query execution, sorted by the volume of 8KB data pages read from RAM and disk.',
+    healthyRange: 'Top tables consume proportional reads matching their business requirement.',
+    warningThreshold: 'A single table consuming > 80% of total plan reads indicates an un-indexed scan or missing join index.',
+    impact: 'Pinpoints the exact tables responsible for storage engine stress and buffer pool churn.',
+    howToFix: 'Inspect the access operations (Index Seek vs. Clustered Index Scan) for the top ranked tables and apply covering indexes to reduce logical reads.'
+  },
+  executionClassification: {
+    title: 'Statement Execution Classification',
+    category: 'Execution Profile',
+    definition: 'Automated diagnostic categorization of each statement into I/O Bound (storage engine & page read bottleneck), CPU Bound (compute & hash/sort intensity), Wait Bound (locking or resource starvation), or Balanced.',
+    healthyRange: 'Balanced execution with proportional CPU and I/O consumption.',
+    warningThreshold: 'I/O Bound statements with millions of reads, or Wait Bound statements with prolonged thread stalls.',
+    impact: 'Immediately directs the developer to whether tuning should focus on indexing (I/O) or algorithmic rewriting (CPU/Waits).',
+    howToFix: 'For I/O Bound statements, add covering indexes. For CPU Bound statements, eliminate scalar functions and sort operators.'
   }
 };
 

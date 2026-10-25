@@ -14,10 +14,11 @@ import { AISettingsModal } from './components/AISettingsModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PlanAnalysis, StatementAnalysis } from './types/plan';
 import { DeadlockGraph } from './types/deadlock';
-import { isDeadlockXML, parseDeadlockXML } from './utils/deadlockParser';
+import { isDeadlockXML, parseDeadlockXML, readFileAsDecodedText } from './utils/deadlockParser';
 import { LoadSamplePlan, OpenFileAndParse, OpenFilePicker, ParsePlan } from '../wailsjs/go/main/App';
 import { exportDiagnosticReportHTML } from './utils/reportExporter';
 import { parseShowPlanXMLClient } from './utils/clientPlanParser';
+import { sanitizePlan } from './utils/sanitizePlan';
 import { Loader2, Database, Upload, FileCode2, ShieldAlert } from 'lucide-react';
 import './App.css';
 
@@ -107,16 +108,17 @@ export function App() {
           data = samplePlanData as unknown as PlanAnalysis;
         }
       }
-      setPlan(data);
-      if (data.statements.length > 0) {
-        setSelectedStatement(data.statements[0]); // top cost statement
+      const sanitized = sanitizePlan(data);
+      setPlan(sanitized);
+      if (sanitized.statements && sanitized.statements.length > 0) {
+        setSelectedStatement(sanitized.statements[0]); // top cost statement
       }
       setActiveTab('overview');
     } catch (err: any) {
       console.warn('Wails backend LoadSamplePlan not reached, using bundled fallback:', err);
-      const fallbackData = samplePlanData as unknown as PlanAnalysis;
+      const fallbackData = sanitizePlan(samplePlanData as unknown as PlanAnalysis);
       setPlan(fallbackData);
-      if (fallbackData.statements.length > 0) {
+      if (fallbackData.statements && fallbackData.statements.length > 0) {
         setSelectedStatement(fallbackData.statements[0]);
       }
       setActiveTab('overview');
@@ -142,8 +144,9 @@ export function App() {
           await handleParseManual(res.content, res.name || res.path || 'Execution Plan');
         }
       } else if (typeof window !== 'undefined' && (window as any).go?.main?.App?.OpenFileAndParse) {
-        const data = await OpenFileAndParse();
-        if (data) {
+        const rawData = await OpenFileAndParse();
+        if (rawData) {
+          const data = sanitizePlan(rawData);
           setPlan(data);
           if (data.statements && data.statements.length > 0) {
             setSelectedStatement(data.statements[0]);
@@ -155,17 +158,15 @@ export function App() {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = '.sqlplan,.xml,.xdl';
-        input.onchange = (e: any) => {
+        input.onchange = async (e: any) => {
           const file = e.target.files?.[0];
           if (!file) return;
-          const reader = new FileReader();
-          reader.onload = async (evt) => {
-            const content = evt.target?.result as string;
-            if (content) {
-              await handleParseManual(content, file.name);
-            }
-          };
-          reader.readAsText(file);
+          try {
+            const content = await readFileAsDecodedText(file);
+            await handleParseManual(content, file.name);
+          } catch (err: any) {
+            setErrorMessage(`Failed to read file: ${err?.message || err}`);
+          }
         };
         input.click();
       }
@@ -198,14 +199,12 @@ export function App() {
     if (!files || files.length === 0) return;
 
     const file = files[0];
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      const content = evt.target?.result as string;
-      if (content) {
-        await handleParseManual(content, file.name);
-      }
-    };
-    reader.readAsText(file);
+    try {
+      const content = await readFileAsDecodedText(file);
+      await handleParseManual(content, file.name);
+    } catch (err: any) {
+      setErrorMessage(`Failed to read file: ${err?.message || err}`);
+    }
   };
 
   const handleParseManual = async (xmlContent: string, planName: string) => {
@@ -213,16 +212,17 @@ export function App() {
     setErrorMessage(null);
     try {
       // Check if this is a SQL Server Deadlock Graph (.xdl or deadlock XML)
-      if (isDeadlockXML(xmlContent)) {
+      if (isDeadlockXML(xmlContent, planName)) {
         const deadlocks = parseDeadlockXML(xmlContent);
         setDeadlockGraphs(deadlocks);
         setActiveTab('deadlock');
         return;
       }
 
-      const data = await parsePlanSafely(xmlContent, planName);
+      const rawData = await parsePlanSafely(xmlContent, planName);
+      const data = sanitizePlan(rawData);
       setPlan(data);
-      if (data.statements.length > 0) {
+      if (data.statements && data.statements.length > 0) {
         setSelectedStatement(data.statements[0]);
       }
       setActiveTab('overview');
@@ -357,7 +357,7 @@ export function App() {
               />
             )}
 
-            {activeTab === 'comparator' && <PlanComparatorTab />}
+            {activeTab === 'comparator' && <PlanComparatorTab currentPlan={plan} />}
           </ErrorBoundary>
         ) : (
           /* Blank state when no plan is loaded */

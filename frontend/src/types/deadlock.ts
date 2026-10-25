@@ -21,6 +21,17 @@ export interface DeadlockProcess {
   inputbuf: string;
   isVictim: boolean;
   executionStack: DeadlockStackFrame[];
+  // Deep attributes from ShowPlan/Deadlock XML
+  logUsedBytes?: number;
+  tranCount?: number;
+  lastTranStarted?: string;
+  lastBatchStarted?: string;
+  lastBatchCompleted?: string;
+  xactId?: string;
+  currentDb?: string;
+  kpid?: number;
+  lockTimeout?: string;
+  isParallelWorker?: boolean;
 }
 
 export interface ResourceLockHolder {
@@ -37,6 +48,12 @@ export interface DeadlockResource {
   indexname: string;
   mode: string;
   associatedObjectId?: string;
+  subresource?: string;
+  fileId?: string;
+  pageId?: string;
+  slotId?: string;
+  hobtid?: string;
+  lockGranularity: 'Page Lock' | 'Row / Key Lock' | 'Table / Object Lock' | 'Extent Lock' | 'Exchange Event' | 'Metadata Lock';
   owners: ResourceLockHolder[];
   waiters: ResourceLockHolder[];
 }
@@ -49,6 +66,17 @@ export interface DeadlockCycleStep {
   lockHeld: string;
 }
 
+export interface DeadlockTimelineEvent {
+  stepNumber: number;
+  phase: 'OWN' | 'WAIT' | 'CYCLE' | 'KILL';
+  spid: number;
+  processId: string;
+  isVictim: boolean;
+  resourceName: string;
+  lockMode: string;
+  description: string;
+}
+
 export interface DeadlockGraph {
   id: string;
   timestamp?: string;
@@ -59,9 +87,16 @@ export interface DeadlockGraph {
     | 'Bookmark / Conversion Deadlock'
     | 'Parallelism Exchange Deadlock (CXPACKET)'
     | 'Serializable Range Escalation'
+    | 'Page Lock Contention on Bulk Insert'
     | 'Circular Lock Contention';
   summary: string;
   remedy: string;
+  victimSelectionReason?: string;
+  lockConflictDetails?: string;
+  hasPageLocks?: boolean;
+  hasBulkInsert?: boolean;
+  hasNestedTransactions?: boolean;
+  timeline: DeadlockTimelineEvent[];
   processes: DeadlockProcess[];
   resources: DeadlockResource[];
   cycle: DeadlockCycleStep[];

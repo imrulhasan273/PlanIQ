@@ -772,6 +772,30 @@ export const BatchFlowTab: React.FC<BatchFlowTabProps> = ({
                           <span>{stmt.tempTablesMentioned.join(', ')}</span>
                         </span>
                       )}
+                      {stmt.executionClassification && (
+                        <span
+                          className={`badge ${
+                            stmt.executionClassification === 'IO_BOUND'
+                              ? 'badge-amber'
+                              : stmt.executionClassification === 'CPU_BOUND'
+                              ? 'badge-purple'
+                              : stmt.executionClassification === 'WAIT_BOUND'
+                              ? 'badge-blue'
+                              : 'badge-emerald'
+                          }`}
+                          title={stmt.executionClassificationReason}
+                        >
+                          {stmt.executionClassification === 'IO_BOUND' && '💽 I/O Bound'}
+                          {stmt.executionClassification === 'CPU_BOUND' && '⚡ CPU Bound'}
+                          {stmt.executionClassification === 'WAIT_BOUND' && '⏳ Wait Bound'}
+                          {stmt.executionClassification === 'BALANCED' && '⚖️ Balanced'}
+                        </span>
+                      )}
+                      {(stmt.actualLogicalReadsMb ?? 0) > 0 && (
+                        <span className="badge badge-outline" title={`${(stmt.actualLogicalReads || 0).toLocaleString()} logical pages read`}>
+                          🗄️ {stmt.actualLogicalReadsMb} MB RAM
+                        </span>
+                      )}
                       {stmt.warnings && stmt.warnings.length > 0 && (
                         <span className="badge badge-amber">
                           <AlertTriangle size={11} />

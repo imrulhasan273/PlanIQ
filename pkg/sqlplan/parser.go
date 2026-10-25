@@ -144,6 +144,9 @@ func parsePlanWithDecoder(decoder *xml.Decoder, planName string) (*PlanAnalysis,
 	// Generate Advanced Root Cause Diagnostics
 	analysis.Diagnostics = generateAdvancedDiagnostics(root, analysis)
 
+	// Extract Server Hardware & I/O Metrics (Total reads, RAM touched, CPU vs Clock, Table I/O Leaderboard)
+	analysis.HardwareMetrics = extractHardwareMetrics(root, analysis)
+
 	return analysis, nil
 }
 
@@ -416,7 +419,104 @@ func parseStatement(elem *xmlElement) *StatementAnalysis {
 		}
 	}
 
+	// Aggregate statement hardware metrics and compute execution classification
+	aggregateStatementMetrics(stmt)
+
 	return stmt
+}
+
+func aggregateStatementMetrics(stmt *StatementAnalysis) {
+	if stmt.RootNode == nil {
+		classifyStatement(stmt)
+		return
+	}
+
+	var sumLogicalReads, sumPhysicalReads, sumReadAheads int64
+	var maxCPU, maxElapsed int64
+	hasActual := false
+
+	var walk func(node *PlanNode)
+	walk = func(node *PlanNode) {
+		if node == nil {
+			return
+		}
+		if node.HasActualRows || node.ActualLogicalReads > 0 || node.ActualPhysicalReads > 0 || node.ActualCPUms > 0 || node.ActualElapsedms > 0 {
+			hasActual = true
+		}
+		sumLogicalReads += node.ActualLogicalReads
+		sumPhysicalReads += node.ActualPhysicalReads
+		sumReadAheads += node.ActualReadAheads
+		if node.ActualCPUms > maxCPU {
+			maxCPU = node.ActualCPUms
+		}
+		if node.ActualElapsedms > maxElapsed {
+			maxElapsed = node.ActualElapsedms
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	walk(stmt.RootNode)
+
+	stmt.ActualLogicalReads = sumLogicalReads
+	stmt.ActualLogicalReadsMB = math.Round((float64(sumLogicalReads)/128.0)*10) / 10
+	stmt.ActualPhysicalReads = sumPhysicalReads
+	stmt.ActualReadAheads = sumReadAheads
+
+	// Root RelOp typically holds total subtree CPU & elapsed time; fallback to max
+	if stmt.RootNode.ActualCPUms > 0 {
+		stmt.ActualCPUms = stmt.RootNode.ActualCPUms
+	} else {
+		stmt.ActualCPUms = maxCPU
+	}
+
+	if stmt.RootNode.ActualElapsedms > 0 {
+		stmt.ActualElapsedms = stmt.RootNode.ActualElapsedms
+	} else {
+		stmt.ActualElapsedms = maxElapsed
+	}
+
+	stmt.HasActualMetrics = hasActual
+	classifyStatement(stmt)
+}
+
+func classifyStatement(stmt *StatementAnalysis) {
+	if stmt.HasActualMetrics {
+		if stmt.ActualPhysicalReads > 0 || (stmt.ActualLogicalReads >= 5000 && float64(stmt.ActualElapsedms) > float64(stmt.ActualCPUms)*1.25) {
+			stmt.ExecutionClassification = "IO_BOUND"
+			stmt.ExecutionClassificationReason = fmt.Sprintf("I/O Bound: High page reads (%d pages / %0.1f MB) and storage engine operations dominated clock time.", stmt.ActualLogicalReads, stmt.ActualLogicalReadsMB)
+		} else if stmt.ActualCPUms > 0 && float64(stmt.ActualCPUms) >= float64(stmt.ActualElapsedms)*0.70 {
+			stmt.ExecutionClassification = "CPU_BOUND"
+			activePct := 0.0
+			if stmt.ActualElapsedms > 0 {
+				activePct = (float64(stmt.ActualCPUms) / float64(stmt.ActualElapsedms)) * 100.0
+			}
+			stmt.ExecutionClassificationReason = fmt.Sprintf("CPU Bound: Compute active for %d ms (%0.0f%% of %d ms clock time) processing joins, sorting, or aggregates.", stmt.ActualCPUms, activePct, stmt.ActualElapsedms)
+		} else if stmt.ActualElapsedms > stmt.ActualCPUms*2 && stmt.ActualElapsedms > 50 {
+			stmt.ExecutionClassification = "WAIT_BOUND"
+			stmt.ExecutionClassificationReason = fmt.Sprintf("Wait Bottleneck: Spent %d ms waiting on locks, synchronization, or worker scheduling (%d ms CPU vs %d ms elapsed).", stmt.ActualElapsedms-stmt.ActualCPUms, stmt.ActualCPUms, stmt.ActualElapsedms)
+		} else {
+			stmt.ExecutionClassification = "BALANCED"
+			stmt.ExecutionClassificationReason = fmt.Sprintf("Balanced Execution: Resource utilization well-proportioned (%d ms CPU, %d ms elapsed, %d reads).", stmt.ActualCPUms, stmt.ActualElapsedms, stmt.ActualLogicalReads)
+		}
+	} else if stmt.RootNode != nil {
+		// Estimated plan fallback
+		ioCost := stmt.RootNode.EstimateIO
+		cpuCost := stmt.RootNode.EstimateCPU
+		if ioCost > cpuCost*1.5 && ioCost > 0.5 {
+			stmt.ExecutionClassification = "IO_BOUND"
+			stmt.ExecutionClassificationReason = fmt.Sprintf("Estimated I/O Bound: Estimated I/O cost (%0.2f) significantly exceeds CPU cost (%0.2f).", ioCost, cpuCost)
+		} else if cpuCost > ioCost*1.5 && cpuCost > 0.5 {
+			stmt.ExecutionClassification = "CPU_BOUND"
+			stmt.ExecutionClassificationReason = fmt.Sprintf("Estimated CPU Bound: Estimated CPU cost (%0.2f) significantly exceeds I/O cost (%0.2f).", cpuCost, ioCost)
+		} else {
+			stmt.ExecutionClassification = "BALANCED"
+			stmt.ExecutionClassificationReason = fmt.Sprintf("Estimated Balanced: Proportional estimated CPU (%0.2f) and I/O (%0.2f).", cpuCost, ioCost)
+		}
+	} else {
+		stmt.ExecutionClassification = "BALANCED"
+		stmt.ExecutionClassificationReason = "Control statement or DDL."
+	}
 }
 
 func parseMissingIndex(elem *xmlElement, stmtID string, impact float64) *MissingIndexInfo {
@@ -527,8 +627,28 @@ func parseRelOp(elem *xmlElement, stmtTotalCost float64) *PlanNode {
 		node.CostPercentage = (subCost / stmtTotalCost) * 100.0
 	}
 
-	// Find Object element (Table, Index, IndexKind)
-	if obj := elem.findFirst("Object"); obj != nil {
+	// Helper to find first matching descendant without crossing into child RelOp elements
+	findDirectFirst := func(e *xmlElement, name string) *xmlElement {
+		var search func(curr *xmlElement) *xmlElement
+		search = func(curr *xmlElement) *xmlElement {
+			for _, child := range curr.Children {
+				if child.Name == "RelOp" {
+					continue // Do not enter child RelOp operators!
+				}
+				if child.Name == name {
+					return child
+				}
+				if found := search(child); found != nil {
+					return found
+				}
+			}
+			return nil
+		}
+		return search(e)
+	}
+
+	// Find Object element (Table, Index, IndexKind) strictly belonging to this RelOp
+	if obj := findDirectFirst(elem, "Object"); obj != nil {
 		node.Database = obj.Attr("Database")
 		node.Schema = obj.Attr("Schema")
 		node.Table = obj.Attr("Table")
@@ -536,11 +656,60 @@ func parseRelOp(elem *xmlElement, stmtTotalCost float64) *PlanNode {
 		node.IndexKind = obj.Attr("IndexKind")
 	}
 
-	// Check for RunTimeCountersPerThread (Actual rows)
-	if runtime := elem.findFirst("RunTimeCountersPerThread"); runtime != nil {
+	// Check for RunTimeCountersPerThread (Actual rows and hardware metrics) strictly belonging to this RelOp
+	var counters []*xmlElement
+	var findDirectRuntimeCounters func(curr *xmlElement)
+	findDirectRuntimeCounters = func(curr *xmlElement) {
+		for _, child := range curr.Children {
+			if child.Name == "RelOp" {
+				continue // Do not enter child RelOp operators!
+			}
+			if child.Name == "RunTimeCountersPerThread" {
+				counters = append(counters, child)
+			} else {
+				findDirectRuntimeCounters(child)
+			}
+		}
+	}
+	findDirectRuntimeCounters(elem)
+
+	if len(counters) > 0 {
 		node.HasActualRows = true
-		actRows, _ := strconv.ParseFloat(runtime.Attr("ActualRows"), 64)
-		node.ActualRows = actRows
+		var totalActRows float64
+		var totalLogReads, totalPhysReads, totalReadAheads, totalScans int64
+		var totalCPU, maxElapsed int64
+		for _, c := range counters {
+			if r, err := strconv.ParseFloat(c.Attr("ActualRows"), 64); err == nil {
+				totalActRows += r
+			}
+			if lr, err := strconv.ParseInt(c.Attr("ActualLogicalReads"), 10, 64); err == nil {
+				totalLogReads += lr
+			}
+			if pr, err := strconv.ParseInt(c.Attr("ActualPhysicalReads"), 10, 64); err == nil {
+				totalPhysReads += pr
+			}
+			if ra, err := strconv.ParseInt(c.Attr("ActualReadAheads"), 10, 64); err == nil {
+				totalReadAheads += ra
+			}
+			if sc, err := strconv.ParseInt(c.Attr("ActualScans"), 10, 64); err == nil {
+				totalScans += sc
+			}
+			if cpu, err := strconv.ParseInt(c.Attr("ActualCPUms"), 10, 64); err == nil {
+				totalCPU += cpu
+			}
+			if el, err := strconv.ParseInt(c.Attr("ActualElapsedms"), 10, 64); err == nil {
+				if el > maxElapsed {
+					maxElapsed = el
+				}
+			}
+		}
+		node.ActualRows = totalActRows
+		node.ActualLogicalReads = totalLogReads
+		node.ActualPhysicalReads = totalPhysReads
+		node.ActualReadAheads = totalReadAheads
+		node.ActualScans = totalScans
+		node.ActualCPUms = totalCPU
+		node.ActualElapsedms = maxElapsed
 
 		// Calculate Cardinality Skew
 		if node.EstimateRows > 0 {
@@ -554,8 +723,8 @@ func parseRelOp(elem *xmlElement, stmtTotalCost float64) *PlanNode {
 		}
 	}
 
-	// Output List
-	if outList := elem.findFirst("OutputList"); outList != nil {
+	// Output List strictly belonging to this RelOp
+	if outList := findDirectFirst(elem, "OutputList"); outList != nil {
 		for _, col := range outList.findAll("ColumnReference") {
 			cName := col.Attr("Column")
 			if cName != "" {
@@ -564,13 +733,13 @@ func parseRelOp(elem *xmlElement, stmtTotalCost float64) *PlanNode {
 		}
 	}
 
-	// Predicates
-	if pred := elem.findFirst("Predicate"); pred != nil {
+	// Predicates strictly belonging to this RelOp
+	if pred := findDirectFirst(elem, "Predicate"); pred != nil {
 		if scalar := pred.findFirst("ScalarOperator"); scalar != nil {
 			node.Predicate = scalar.Attr("ScalarString")
 		}
 	}
-	if seekPred := elem.findFirst("SeekPredicates"); seekPred != nil {
+	if seekPred := findDirectFirst(elem, "SeekPredicates"); seekPred != nil {
 		if scalar := seekPred.findFirst("ScalarOperator"); scalar != nil {
 			node.SeekPredicates = scalar.Attr("ScalarString")
 		}
@@ -770,6 +939,16 @@ func generateAdvancedDiagnostics(root *xmlElement, analysis *PlanAnalysis) *Adva
 	// non-sargable predicates, row goals, adaptive joins / IQP
 	populateExtraDiagnostics(root, analysis, diag)
 
+	if diag.ImplicitConversions == nil {
+		diag.ImplicitConversions = make([]*ImplicitConversion, 0)
+	}
+	if diag.ConsolidatedIndexes == nil {
+		diag.ConsolidatedIndexes = make([]*ConsolidatedIndex, 0)
+	}
+	if diag.ScalarUDFWarnings == nil {
+		diag.ScalarUDFWarnings = make([]*ScalarUDFWarning, 0)
+	}
+
 	diag.HealthScore, diag.ScoreGrade = calculateHealthScore(diag, analysis)
 
 	appendFindingAntiPatterns(analysis, diag)
@@ -790,12 +969,18 @@ func extractMemoryGrant(root *xmlElement, analysis *PlanAnalysis) *MemoryGrantHe
 		hasSpills = true
 	}
 
-	var maxGranted, maxUsed, maxReq, maxDes int64
+	var maxGranted, maxUsed, maxReq, maxDes, maxRequested, maxQueryMem, maxWaitTime int64
+	var feedback string
 	for _, elem := range root.findAll("MemoryGrantInfo") {
 		g, _ := strconv.ParseInt(elem.Attr("GrantedMemory"), 10, 64)
 		u, _ := strconv.ParseInt(elem.Attr("MaxUsedMemory"), 10, 64)
 		r, _ := strconv.ParseInt(elem.Attr("SerialRequiredMemory"), 10, 64)
 		d, _ := strconv.ParseInt(elem.Attr("SerialDesiredMemory"), 10, 64)
+		req, _ := strconv.ParseInt(elem.Attr("RequestedMemory"), 10, 64)
+		qm, _ := strconv.ParseInt(elem.Attr("MaxQueryMemory"), 10, 64)
+		wt, _ := strconv.ParseInt(elem.Attr("GrantWaitTime"), 10, 64)
+		fb := elem.Attr("IsMemoryGrantFeedbackAdjusted")
+
 		if g > maxGranted {
 			maxGranted = g
 		}
@@ -808,6 +993,24 @@ func extractMemoryGrant(root *xmlElement, analysis *PlanAnalysis) *MemoryGrantHe
 		if d > maxDes {
 			maxDes = d
 		}
+		if req > maxRequested {
+			maxRequested = req
+		}
+		if qm > maxQueryMem {
+			maxQueryMem = qm
+		}
+		if wt > maxWaitTime {
+			maxWaitTime = wt
+		}
+		if fb != "" && feedback == "" {
+			feedback = fb
+		}
+	}
+
+	var estAvailMem, estPagesCached int64
+	if optProps := root.findFirst("OptimizerHardwareDependentProperties"); optProps != nil {
+		estAvailMem, _ = strconv.ParseInt(optProps.Attr("EstimatedAvailableMemoryGrant"), 10, 64)
+		estPagesCached, _ = strconv.ParseInt(optProps.Attr("EstimatedPagesCached"), 10, 64)
 	}
 
 	if maxGranted == 0 && maxDes == 0 && !hasSpills {
@@ -815,11 +1018,17 @@ func extractMemoryGrant(root *xmlElement, analysis *PlanAnalysis) *MemoryGrantHe
 	}
 
 	mg := &MemoryGrantHealth{
-		GrantedMemoryKB:  maxGranted,
-		MaxUsedMemoryKB:  maxUsed,
-		SerialRequiredKB: maxReq,
-		SerialDesiredKB:  maxDes,
-		HasSpills:        hasSpills,
+		GrantedMemoryKB:            maxGranted,
+		MaxUsedMemoryKB:            maxUsed,
+		SerialRequiredKB:           maxReq,
+		SerialDesiredKB:            maxDes,
+		RequestedMemoryKB:          maxRequested,
+		GrantWaitTimeMS:            maxWaitTime,
+		MaxQueryMemoryKB:           maxQueryMem,
+		FeedbackAdjusted:           feedback,
+		EstimatedAvailableMemoryKB: estAvailMem,
+		EstimatedPagesCached:       estPagesCached,
+		HasSpills:                  hasSpills,
 	}
 
 	if maxGranted > 0 {
@@ -845,6 +1054,193 @@ func extractMemoryGrant(root *xmlElement, analysis *PlanAnalysis) *MemoryGrantHe
 	}
 
 	return mg
+}
+
+func extractHardwareMetrics(root *xmlElement, analysis *PlanAnalysis) *HardwareMetrics {
+	hm := &HardwareMetrics{
+		TopIOLeaders: make([]*TableIOLeader, 0),
+	}
+
+	var totalLogReads, totalPhysReads, totalReadAheads int64
+	var totalLobLogReads, totalLobPhysReads int64
+	var totalCPU, totalElapsed int64
+	hasRuntime := false
+
+	// Aggregate from statements
+	for _, stmt := range analysis.Statements {
+		if stmt.HasActualMetrics {
+			hasRuntime = true
+		}
+		totalLogReads += stmt.ActualLogicalReads
+		totalPhysReads += stmt.ActualPhysicalReads
+		totalReadAheads += stmt.ActualReadAheads
+		totalCPU += stmt.ActualCPUms
+		totalElapsed += stmt.ActualElapsedms
+	}
+
+	hm.HasRuntimeMetrics = hasRuntime
+	hm.TotalLogicalReads = totalLogReads
+	hm.TotalLogicalReadsMB = math.Round((float64(totalLogReads)/128.0)*10) / 10
+	hm.TotalPhysicalReads = totalPhysReads
+	hm.TotalPhysicalReadsMB = math.Round((float64(totalPhysReads)/128.0)*10) / 10
+	hm.TotalReadAheads = totalReadAheads
+	hm.TotalReadAheadsMB = math.Round((float64(totalReadAheads)/128.0)*10) / 10
+	hm.TotalLobLogicalReads = totalLobLogReads
+	hm.TotalLobPhysicalReads = totalLobPhysReads
+	hm.TotalActualCPUms = totalCPU
+	hm.TotalActualElapsedms = totalElapsed
+
+	if totalElapsed > 0 {
+		hm.CpuUtilizationRatio = math.Round((float64(totalCPU)/float64(totalElapsed))*1000) / 10
+		if totalElapsed > totalCPU {
+			hm.WaitTimeMS = totalElapsed - totalCPU
+		}
+	}
+
+	if totalLogReads > 0 {
+		if totalPhysReads == 0 {
+			hm.CacheHitRatioPercent = 100.0
+		} else {
+			hit := float64(totalLogReads-totalPhysReads) / float64(totalLogReads) * 100.0
+			hm.CacheHitRatioPercent = math.Max(0, math.Min(100.0, math.Round(hit*10)/10))
+		}
+	} else {
+		hm.CacheHitRatioPercent = 100.0
+	}
+
+	// Memory Grant info from root
+	for _, elem := range root.findAll("MemoryGrantInfo") {
+		if g, err := strconv.ParseInt(elem.Attr("GrantedMemory"), 10, 64); err == nil && g > hm.GrantedMemoryKB {
+			hm.GrantedMemoryKB = g
+		}
+		if u, err := strconv.ParseInt(elem.Attr("MaxUsedMemory"), 10, 64); err == nil && u > hm.MaxUsedMemoryKB {
+			hm.MaxUsedMemoryKB = u
+		}
+		if r, err := strconv.ParseInt(elem.Attr("RequestedMemory"), 10, 64); err == nil && r > hm.RequestedMemoryKB {
+			hm.RequestedMemoryKB = r
+		}
+		if qm, err := strconv.ParseInt(elem.Attr("MaxQueryMemory"), 10, 64); err == nil && qm > hm.MaxQueryMemoryKB {
+			hm.MaxQueryMemoryKB = qm
+		}
+		if wt, err := strconv.ParseInt(elem.Attr("GrantWaitTime"), 10, 64); err == nil && wt > hm.MemoryGrantWaitTimeMS {
+			hm.MemoryGrantWaitTimeMS = wt
+		}
+		if fb := elem.Attr("IsMemoryGrantFeedbackAdjusted"); fb != "" && hm.IsMemoryGrantFeedbackAdjusted == "" {
+			hm.IsMemoryGrantFeedbackAdjusted = fb
+		}
+	}
+
+	if optProps := root.findFirst("OptimizerHardwareDependentProperties"); optProps != nil {
+		if em, err := strconv.ParseInt(optProps.Attr("EstimatedAvailableMemoryGrant"), 10, 64); err == nil {
+			hm.EstimatedAvailableMemoryKB = em
+		}
+		if ep, err := strconv.ParseInt(optProps.Attr("EstimatedPagesCached"), 10, 64); err == nil {
+			hm.EstimatedPagesCached = ep
+		}
+	}
+
+	// Build Table-by-Table I/O Leaderboard
+	type tableStats struct {
+		db           string
+		schema       string
+		table        string
+		logicalReads int64
+		physReads    int64
+		readAheads   int64
+		estimateIO   float64
+		ops          map[string]bool
+		indexes      map[string]bool
+	}
+	tableMap := make(map[string]*tableStats)
+
+	var collectTableIO func(node *PlanNode)
+	collectTableIO = func(node *PlanNode) {
+		if node == nil {
+			return
+		}
+		if node.Table != "" {
+			key := fmt.Sprintf("%s.%s.%s", node.Database, node.Schema, node.Table)
+			ts, exists := tableMap[key]
+			if !exists {
+				ts = &tableStats{
+					db:      node.Database,
+					schema:  node.Schema,
+					table:   node.Table,
+					ops:     make(map[string]bool),
+					indexes: make(map[string]bool),
+				}
+				tableMap[key] = ts
+			}
+			ts.logicalReads += node.ActualLogicalReads
+			ts.physReads += node.ActualPhysicalReads
+			ts.readAheads += node.ActualReadAheads
+			ts.estimateIO += node.EstimateIO
+			if node.PhysicalOp != "" {
+				ts.ops[node.PhysicalOp] = true
+			}
+			if node.Index != "" {
+				ts.indexes[node.Index] = true
+			}
+		}
+		for _, child := range node.Children {
+			collectTableIO(child)
+		}
+	}
+
+	for _, stmt := range analysis.Statements {
+		collectTableIO(stmt.RootNode)
+	}
+
+	// Convert to slice and sort
+	var tableList []*tableStats
+	for _, ts := range tableMap {
+		tableList = append(tableList, ts)
+	}
+
+	sort.Slice(tableList, func(i, j int) bool {
+		if hasRuntime && (tableList[i].logicalReads > 0 || tableList[j].logicalReads > 0) {
+			return tableList[i].logicalReads > tableList[j].logicalReads
+		}
+		return tableList[i].estimateIO > tableList[j].estimateIO
+	})
+
+	for i, ts := range tableList {
+		if i >= 15 && ts.logicalReads == 0 && ts.estimateIO < 0.01 {
+			break
+		}
+		opsSlice := make([]string, 0, len(ts.ops))
+		for op := range ts.ops {
+			opsSlice = append(opsSlice, op)
+		}
+		idxSlice := make([]string, 0, len(ts.indexes))
+		for idx := range ts.indexes {
+			idxSlice = append(idxSlice, idx)
+		}
+
+		readPct := 0.0
+		if totalLogReads > 0 {
+			readPct = math.Round((float64(ts.logicalReads)/float64(totalLogReads))*1000) / 10
+		}
+
+		leader := &TableIOLeader{
+			Rank:             i + 1,
+			Database:         ts.db,
+			Schema:           ts.schema,
+			Table:            ts.table,
+			LogicalReads:     ts.logicalReads,
+			LogicalReadsMB:   math.Round((float64(ts.logicalReads)/128.0)*10) / 10,
+			PhysicalReads:    ts.physReads,
+			PhysicalReadsMB:  math.Round((float64(ts.physReads)/128.0)*10) / 10,
+			ReadAheads:       ts.readAheads,
+			ReadAheadsMB:     math.Round((float64(ts.readAheads)/128.0)*10) / 10,
+			ReadPercent:      readPct,
+			AccessOperations: opsSlice,
+			IndexesUsed:      idxSlice,
+		}
+		hm.TopIOLeaders = append(hm.TopIOLeaders, leader)
+	}
+
+	return hm
 }
 
 func extractParallelismSkew(root *xmlElement) *ParallelismSkew {
@@ -918,7 +1314,7 @@ func extractParallelismSkew(root *xmlElement) *ParallelismSkew {
 }
 
 func extractImplicitConversions(root *xmlElement, analysis *PlanAnalysis) []*ImplicitConversion {
-	var list []*ImplicitConversion
+	list := make([]*ImplicitConversion, 0)
 	seen := make(map[string]bool)
 
 	for _, stmt := range analysis.Statements {
@@ -1074,7 +1470,7 @@ func consolidateMissingIndexes(indexes []*MissingIndexInfo) []*ConsolidatedIndex
 }
 
 func extractScalarUDFWarnings(root *xmlElement, analysis *PlanAnalysis) []*ScalarUDFWarning {
-	var warnings []*ScalarUDFWarning
+	warnings := make([]*ScalarUDFWarning, 0)
 	seen := make(map[string]bool)
 
 	for _, stmt := range analysis.Statements {

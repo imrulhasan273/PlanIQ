@@ -120,6 +120,40 @@ function getSsmsProperties(node: PlanNode, statementCost: number): SsmsPropertyI
       category: 'cardinality'
     },
     { name: 'Actual Number of Batches', value: '0', category: 'runtime' },
+    ...(node.hasActualRows || (node.actualLogicalReads ?? 0) > 0 || (node.actualCpuMs ?? 0) > 0 ? [
+      {
+        name: 'Actual Logical Reads',
+        value: `${(node.actualLogicalReads || 0).toLocaleString()} pages (~${(((node.actualLogicalReads || 0) / 128)).toFixed(1)} MB)`,
+        highlight: (node.actualLogicalReads || 0) > 5000 ? ('cost' as const) : ('normal' as const),
+        category: 'runtime' as const,
+      },
+      {
+        name: 'Actual Physical Reads',
+        value: `${(node.actualPhysicalReads || 0).toLocaleString()} pages`,
+        highlight: (node.actualPhysicalReads || 0) > 0 ? ('skew' as const) : ('normal' as const),
+        category: 'runtime' as const,
+      },
+      {
+        name: 'Actual Read-Aheads',
+        value: `${(node.actualReadAheads || 0).toLocaleString()} pages`,
+        category: 'runtime' as const,
+      },
+      {
+        name: 'Actual CPU Time',
+        value: `${(node.actualCpuMs || 0).toLocaleString()} ms`,
+        category: 'runtime' as const,
+      },
+      {
+        name: 'Actual Elapsed Time',
+        value: `${(node.actualElapsedMs || 0).toLocaleString()} ms`,
+        category: 'runtime' as const,
+      },
+      {
+        name: 'Actual Number of Scans',
+        value: `${(node.actualScans || 0).toLocaleString()}`,
+        category: 'runtime' as const,
+      },
+    ] : []),
     {
       name: 'Estimated Operator Cost',
       value: `${ownCost.toFixed(7)} (${costPct.toFixed(1)}%)`,
