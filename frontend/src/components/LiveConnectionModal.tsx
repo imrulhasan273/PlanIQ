@@ -1,0 +1,414 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Server,
+  Database,
+  Shield,
+  ShieldCheck,
+  CheckCircle2,
+  AlertCircle,
+  X,
+  RefreshCw,
+  Lock,
+  Cpu,
+  Zap,
+  Activity,
+  HardDrive
+} from 'lucide-react';
+import { ConnectionConfig, ConnectionStatus } from '../types/livedb';
+import { ConnectLiveDB, DisconnectLiveDB, GetLiveDBStatus } from '../../wailsjs/go/main/App';
+
+interface LiveConnectionModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  status: ConnectionStatus | null;
+  onStatusChange: (status: ConnectionStatus | null) => void;
+}
+
+export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
+  isOpen,
+  onClose,
+  status,
+  onStatusChange,
+}) => {
+  const [config, setConfig] = useState<ConnectionConfig>(() => {
+    const saved = localStorage.getItem('planiq_live_conn');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return {
+      server: 'localhost',
+      port: 1433,
+      database: 'SalesDB',
+      authType: 'sql',
+      username: 'sa',
+      password: '',
+      encrypt: false,
+      trustServerCertificate: true,
+      applicationIntent: 'ReadOnly',
+      timeoutSeconds: 4,
+    };
+  });
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  if (!isOpen) return null;
+
+  const handleSaveConfig = (cfg: ConnectionConfig) => {
+    setConfig(cfg);
+    localStorage.setItem('planiq_live_conn', JSON.stringify(cfg));
+  };
+
+  const handleConnect = async (isDemo = false) => {
+    setIsLoading(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    const targetConfig: ConnectionConfig = isDemo
+      ? {
+          server: 'demo',
+          port: 1433,
+          database: 'SalesDB',
+          authType: 'demo',
+          applicationIntent: 'ReadOnly',
+          timeoutSeconds: 3,
+        }
+      : config;
+
+    try {
+      if (typeof window !== 'undefined' && (window as any).go?.main?.App?.ConnectLiveDB) {
+        const res = await ConnectLiveDB(targetConfig as any);
+        onStatusChange(res);
+        setSuccessMsg(`Successfully connected to ${res.serverName} (${res.databaseName})`);
+        handleSaveConfig(targetConfig);
+        setTimeout(() => {
+          onClose();
+        }, 800);
+      } else {
+        // Fallback demo in browser mode
+        const demoStatus: ConnectionStatus = {
+          connected: true,
+          serverVersion: 'Microsoft SQL Server 2022 (RTM-CU12) Enterprise',
+          serverName: 'PROD-SQL01.corp.internal',
+          databaseName: 'SalesDB',
+          activeSessions: 14,
+          latencyMs: 12,
+          isReadOnly: true,
+          isDemo: true,
+        };
+        onStatusChange(demoStatus);
+        setSuccessMsg('Connected in Demo Sandbox mode!');
+        setTimeout(() => onClose(), 800);
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to connect to SQL Server');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setIsLoading(true);
+    try {
+      if (typeof window !== 'undefined' && (window as any).go?.main?.App?.DisconnectLiveDB) {
+        await DisconnectLiveDB();
+      }
+      onStatusChange(null);
+      setSuccessMsg('Disconnected');
+    } catch (e: any) {
+      setErrorMsg(e?.message || 'Error disconnecting');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal-container glass-panel"
+        style={{ maxWidth: '580px', width: '92%' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '8px',
+                background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(129, 140, 248, 0.2))',
+                border: '1px solid rgba(56, 189, 248, 0.4)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Zap size={20} color="#38bdf8" />
+            </div>
+            <div>
+              <h2 style={{ fontSize: '17px', margin: 0, fontWeight: 700, color: '#f8fafc' }}>
+                Connect to Microsoft SQL Server
+              </h2>
+              <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>
+                Live In-Flight Plans, Query Store Harvesting & Real-Time Deadlocks
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={onClose}
+            style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="modal-body" style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Active status banner if connected */}
+          {status && status.connected ? (
+            <div
+              style={{
+                background: 'rgba(52, 211, 153, 0.1)',
+                border: '1px solid rgba(52, 211, 153, 0.3)',
+                borderRadius: '8px',
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <CheckCircle2 size={18} color="#34d399" />
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#34d399' }}>
+                    Connected to {status.serverName}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                    Database: <strong style={{ color: '#cbd5e1' }}>{status.databaseName}</strong> • Latency: {status.latencyMs}ms {status.isDemo ? '(Demo Mode)' : ''}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleDisconnect}
+                disabled={isLoading}
+                style={{ borderColor: 'rgba(244, 63, 94, 0.4)', color: '#f43f5e' }}
+              >
+                Disconnect
+              </button>
+            </div>
+          ) : null}
+
+          {/* Quick Demo Sandbox Button */}
+          <div
+            style={{
+              background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.08) 0%, rgba(129, 140, 248, 0.08) 100%)',
+              border: '1px solid rgba(56, 189, 248, 0.25)',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div>
+              <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#38bdf8' }}>
+                🚀 Try Live Demo Sandbox
+              </span>
+              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#94a3b8' }}>
+                Instant simulation with blocked sessions, Query Store entries, and system_health deadlocks.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => handleConnect(true)}
+              disabled={isLoading}
+              style={{ background: 'rgba(56, 189, 248, 0.15)', borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+            >
+              Launch Demo
+            </button>
+          </div>
+
+          {/* Connection Form */}
+          <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '12px' }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label style={{ fontSize: '11.5px', color: '#cbd5e1', marginBottom: '4px', display: 'block' }}>
+                Server Host / Instance
+              </label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="localhost, server.domain.com"
+                value={config.server}
+                onChange={(e) => handleSaveConfig({ ...config, server: e.target.value })}
+              />
+            </div>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label style={{ fontSize: '11.5px', color: '#cbd5e1', marginBottom: '4px', display: 'block' }}>
+                Port
+              </label>
+              <input
+                type="number"
+                className="form-input"
+                placeholder="1433"
+                value={config.port}
+                onChange={(e) => handleSaveConfig({ ...config, port: parseInt(e.target.value) || 1433 })}
+              />
+            </div>
+          </div>
+
+          <div className="form-group" style={{ margin: 0 }}>
+            <label style={{ fontSize: '11.5px', color: '#cbd5e1', marginBottom: '4px', display: 'block' }}>
+              Database Name
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="e.g. SalesDB, AdventureWorks"
+              value={config.database}
+              onChange={(e) => handleSaveConfig({ ...config, database: e.target.value })}
+            />
+          </div>
+
+          {/* Auth Type */}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label style={{ fontSize: '11.5px', color: '#cbd5e1', marginBottom: '6px', display: 'block' }}>
+              Authentication
+            </label>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#e2e8f0', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="authType"
+                  checked={config.authType === 'sql'}
+                  onChange={() => handleSaveConfig({ ...config, authType: 'sql' })}
+                />
+                SQL Authentication
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#e2e8f0', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="authType"
+                  checked={config.authType === 'windows'}
+                  onChange={() => handleSaveConfig({ ...config, authType: 'windows' })}
+                />
+                Windows / Integrated
+              </label>
+            </div>
+          </div>
+
+          {config.authType === 'sql' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '11.5px', color: '#cbd5e1', marginBottom: '4px', display: 'block' }}>
+                  Login Username
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="sa"
+                  value={config.username || ''}
+                  onChange={(e) => handleSaveConfig({ ...config, username: e.target.value })}
+                />
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: '11.5px', color: '#cbd5e1', marginBottom: '4px', display: 'block' }}>
+                  Password
+                </label>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder="••••••••"
+                  value={config.password || ''}
+                  onChange={(e) => handleSaveConfig({ ...config, password: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Strict Read-Only & Zero-Lock Enforcement Note */}
+          <div
+            style={{
+              background: 'rgba(15, 23, 42, 0.6)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '6px',
+              padding: '10px 12px',
+              display: 'flex',
+              gap: '10px',
+              alignItems: 'flex-start',
+            }}
+          >
+            <ShieldCheck size={16} color="#34d399" style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div style={{ fontSize: '11.5px', color: '#94a3b8', lineHeight: '1.4' }}>
+              <strong style={{ color: '#e2e8f0' }}>DBA Safety Enforcement:</strong> PlanIQ connects with{' '}
+              <code style={{ color: '#38bdf8' }}>ApplicationIntent=ReadOnly</code> and runs all DMV queries under{' '}
+              <code style={{ color: '#38bdf8' }}>READ UNCOMMITTED</code>. It never creates tables or takes database locks.
+            </div>
+          </div>
+
+          {errorMsg && (
+            <div
+              style={{
+                background: 'rgba(244, 63, 94, 0.15)',
+                border: '1px solid rgba(244, 63, 94, 0.4)',
+                borderRadius: '6px',
+                padding: '8px 12px',
+                color: '#fecdd3',
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <AlertCircle size={15} />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {successMsg && (
+            <div
+              style={{
+                background: 'rgba(52, 211, 153, 0.15)',
+                border: '1px solid rgba(52, 211, 153, 0.4)',
+                borderRadius: '6px',
+                padding: '8px 12px',
+                color: '#a7f3d0',
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <CheckCircle2 size={15} />
+              <span>{successMsg}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={isLoading}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => handleConnect(false)}
+            disabled={isLoading || !config.server || !config.database}
+          >
+            {isLoading ? <RefreshCw size={14} className="spin" /> : <Zap size={14} />}
+            <span>Connect to SQL Server</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};

@@ -6,8 +6,40 @@ export function ComparePlans(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['ComparePlans'](arg1, arg2, arg3, arg4);
 }
 
+export function ConnectLiveDB(arg1) {
+  return window['go']['main']['App']['ConnectLiveDB'](arg1);
+}
+
+export function DisconnectLiveDB() {
+  return window['go']['main']['App']['DisconnectLiveDB']();
+}
+
 export function GetAIAdvice(arg1) {
   return window['go']['main']['App']['GetAIAdvice'](arg1);
+}
+
+export function GetLiveActiveSessions() {
+  return window['go']['main']['App']['GetLiveActiveSessions']();
+}
+
+export function GetLiveDBStatus() {
+  return window['go']['main']['App']['GetLiveDBStatus']();
+}
+
+export function GetLiveDeadlocks(arg1) {
+  return window['go']['main']['App']['GetLiveDeadlocks'](arg1);
+}
+
+export function GetLiveQueryStore(arg1, arg2) {
+  return window['go']['main']['App']['GetLiveQueryStore'](arg1, arg2);
+}
+
+export function GetLiveServerVitals() {
+  return window['go']['main']['App']['GetLiveServerVitals']();
+}
+
+export function GetLiveSessionPlan(arg1) {
+  return window['go']['main']['App']['GetLiveSessionPlan'](arg1);
 }
 
 export function LoadSamplePlan() {

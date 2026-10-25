@@ -9,13 +9,16 @@ import { BatchFlowTab } from './components/BatchFlowTab';
 import { WaitStatsTab } from './components/WaitStatsTab';
 import { TuningPlaybookTab } from './components/TuningPlaybookTab';
 import { DeadlockTab } from './components/DeadlockTab';
+import { LiveRadarTab } from './components/LiveRadarTab';
+import { LiveConnectionModal } from './components/LiveConnectionModal';
 import { PasteModal } from './components/PasteModal';
 import { AISettingsModal } from './components/AISettingsModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PlanAnalysis, StatementAnalysis } from './types/plan';
 import { DeadlockGraph } from './types/deadlock';
+import { ConnectionStatus } from './types/livedb';
 import { isDeadlockXML, parseDeadlockXML, readFileAsDecodedText } from './utils/deadlockParser';
-import { LoadSamplePlan, OpenFileAndParse, OpenFilePicker, ParsePlan } from '../wailsjs/go/main/App';
+import { LoadSamplePlan, OpenFileAndParse, OpenFilePicker, ParsePlan, GetLiveDBStatus } from '../wailsjs/go/main/App';
 import { exportDiagnosticReportHTML } from './utils/reportExporter';
 import { parseShowPlanXMLClient } from './utils/clientPlanParser';
 import { sanitizePlan } from './utils/sanitizePlan';
@@ -33,7 +36,8 @@ export type TabType =
   | 'advisor'
   | 'comparator'
   | 'playbook'
-  | 'deadlock';
+  | 'deadlock'
+  | 'liveradar';
 
 export function App() {
   const [plan, setPlan] = useState<PlanAnalysis | null>(null);
@@ -45,6 +49,8 @@ export function App() {
 
   const [isPasteOpen, setIsPasteOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isLiveConnOpen, setIsLiveConnOpen] = useState<boolean>(false);
+  const [liveStatus, setLiveStatus] = useState<ConnectionStatus | null>(null);
   const [deadlockGraphs, setDeadlockGraphs] = useState<DeadlockGraph[]>([]);
 
   const [aiConfig, setAiConfig] = useState<{
@@ -82,9 +88,14 @@ export function App() {
     localStorage.setItem('planiq_ai_config', JSON.stringify(newConfig));
   };
 
-  // Auto-load explan.xml on first launch
+  // Auto-load explan.xml on first launch and check live connection status
   useEffect(() => {
     handleLoadSample();
+    if (typeof window !== 'undefined' && (window as any).go?.main?.App?.GetLiveDBStatus) {
+      GetLiveDBStatus().then((st) => {
+        if (st && st.connected) setLiveStatus(st);
+      }).catch(() => {});
+    }
   }, []);
 
   const handleLoadSample = async () => {
@@ -269,6 +280,8 @@ export function App() {
         onOpenPasteModal={() => setIsPasteOpen(true)}
         onLoadSample={handleLoadSample}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenLiveModal={() => setIsLiveConnOpen(true)}
+        liveStatus={liveStatus}
         onExportReport={() => plan && exportDiagnosticReportHTML(plan)}
         isLoading={isLoading}
       />
@@ -293,7 +306,20 @@ export function App() {
           </div>
         )}
 
-        {activeTab === 'deadlock' ? (
+        {activeTab === 'liveradar' ? (
+          <ErrorBoundary onReset={() => setActiveTab('overview')}>
+            <LiveRadarTab
+              status={liveStatus}
+              onOpenConnectModal={() => setIsLiveConnOpen(true)}
+              onLoadPlanXML={(xml, name) => handleParseManual(xml, name)}
+              onLoadDeadlockXML={(xml) => {
+                const parsed = parseDeadlockXML(xml);
+                setDeadlockGraphs(parsed);
+                setActiveTab('deadlock');
+              }}
+            />
+          </ErrorBoundary>
+        ) : activeTab === 'deadlock' ? (
           <ErrorBoundary onReset={() => setActiveTab('overview')}>
             <DeadlockTab
               initialDeadlocks={deadlockGraphs}
@@ -409,6 +435,13 @@ export function App() {
         onClose={() => setIsSettingsOpen(false)}
         config={aiConfig}
         onChangeConfig={handleSaveConfig}
+      />
+
+      <LiveConnectionModal
+        isOpen={isLiveConnOpen}
+        onClose={() => setIsLiveConnOpen(false)}
+        status={liveStatus}
+        onStatusChange={(st) => setLiveStatus(st)}
       />
     </div>
   );

@@ -24,6 +24,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { PlanAnalysis } from '../types/plan';
+import { ConnectionStatus } from '../types/livedb';
 
 interface NavbarProps {
   plan: PlanAnalysis | null;
@@ -33,6 +34,8 @@ interface NavbarProps {
   onOpenPasteModal: () => void;
   onLoadSample: () => void;
   onOpenSettings: () => void;
+  onOpenLiveModal: () => void;
+  liveStatus: ConnectionStatus | null;
   onExportReport?: () => void;
   isLoading: boolean;
 }
@@ -45,6 +48,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenPasteModal,
   onLoadSample,
   onOpenSettings,
+  onOpenLiveModal,
+  liveStatus,
   onExportReport,
   isLoading,
 }) => {
@@ -110,10 +115,10 @@ export const Navbar: React.FC<NavbarProps> = ({
     <header className="navbar-wrapper">
       {/* TIER 1: Main Top Header Bar (50px height) */}
       <div className="navbar-top-tier">
-        {/* Left: Brand Identity & Active Plan Metadata */}
+        {/* Left: Brand Identity */}
         <div className="brand-section">
           <div className="logo-badge" title="PlanIQ - High-Performance SQL Server Execution Plan Analyzer">
-            <Database size={18} color="#38bdf8" />
+            <Database size={16} color="#38bdf8" />
           </div>
           <div className="brand-info-wrap">
             <div className="brand-title-row">
@@ -121,68 +126,41 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="brand-version-pill">v2.0 Desktop</span>
             </div>
           </div>
-
-          {/* Active Plan Meta Pills */}
-          {plan && (
-            <div className="plan-meta-row">
-              <span className="plan-meta-pill plan-name-pill" title={`File: ${plan.planName}`}>
-                <FileCode2 size={12} color="#38bdf8" />
-                <span className="plan-name">{plan.planName}</span>
-              </span>
-              <span className="plan-meta-pill" title="Total Statements in Plan">
-                <Layers size={12} color="#818cf8" />
-                <span>{plan.totalStatements} Stmts</span>
-              </span>
-              <span className="plan-meta-pill" title="Total Accumulated Subtree Cost">
-                <Activity size={12} color="#34d399" />
-                <span>Cost: {plan.totalSubTreeCost.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
-              </span>
-              {plan.maxDopReason && (
-                <span
-                  className="plan-meta-pill warning-pill"
-                  title="Query execution is constrained to a single thread by server or resource governor setting"
-                >
-                  <AlertTriangle size={12} color="#fbbf24" />
-                  <span>{formatMaxDop(plan.maxDopReason)}</span>
-                </span>
-              )}
-            </div>
-          )}
         </div>
 
-        {/* Right: Action Buttons Group (In Same Top Row) */}
+        {/* Right: Action Buttons Group (In Same Top Row, Clean & Uncluttered) */}
         <div className="actions-section">
           <div className="actions-group">
             <button
               type="button"
-              className="btn btn-primary btn-sm"
+              className="btn btn-primary btn-sm top-action-btn"
               onClick={onOpenFile}
               disabled={isLoading}
               title="Open .sqlplan or .xml from disk"
             >
-              <Upload size={14} />
+              <Upload size={12} />
               <span>Open File</span>
             </button>
 
             <button
               type="button"
-              className="btn btn-secondary btn-sm"
+              className="btn btn-secondary btn-sm top-action-btn"
               onClick={onOpenPasteModal}
               disabled={isLoading}
               title="Paste ShowPlan XML or Deadlock XML"
             >
-              <Code2 size={14} />
+              <Code2 size={12} />
               <span>Paste XML</span>
             </button>
 
             <button
               type="button"
-              className="btn btn-secondary btn-sm"
+              className="btn btn-secondary btn-sm top-action-btn"
               onClick={onLoadSample}
               disabled={isLoading}
               title="Load demo sample execution plan"
             >
-              <FileCode2 size={14} />
+              <FileCode2 size={12} />
               <span>Sample Plan</span>
             </button>
           </div>
@@ -193,29 +171,103 @@ export const Navbar: React.FC<NavbarProps> = ({
             {plan && onExportReport && (
               <button
                 type="button"
-                className="btn btn-secondary btn-sm"
+                className="btn btn-secondary btn-sm top-action-btn"
                 onClick={onExportReport}
                 title="Export diagnostic report as standalone HTML"
               >
-                <Download size={14} color="#34d399" />
+                <Download size={12} color="#34d399" />
                 <span>Export Report</span>
+              </button>
+            )}
+
+            {liveStatus && liveStatus.connected ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm top-action-btn live-conn-btn"
+                onClick={onOpenLiveModal}
+                title={`Connected to ${liveStatus.serverName} (${liveStatus.databaseName}) - Click to manage`}
+              >
+                <span className="live-status-dot" />
+                <span className="live-server-name">{liveStatus.serverName.split('.')[0]}</span>
+                <span className="live-db-name">({liveStatus.databaseName})</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm top-action-btn"
+                onClick={onOpenLiveModal}
+                title="Connect to live Microsoft SQL Server instance"
+              >
+                <Zap size={12} color="#38bdf8" />
+                <span>Connect DB</span>
               </button>
             )}
 
             <button
               type="button"
-              className="btn btn-secondary btn-sm"
+              className="btn btn-secondary btn-sm top-action-btn"
               onClick={onOpenSettings}
               title="Configure AI API Key (Gemini, OpenAI, Ollama) and Settings"
             >
-              <Settings size={14} color="#38bdf8" />
+              <Settings size={12} color="#38bdf8" />
               <span>AI Settings</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* TIER 2: Workspace Categorized Navigation Ribbon Bar in NEW ROW */}
+      {/* TIER 2: Active Plan Telemetry Bar (NEW DEDICATED COMPACT ROW - 28px, shown when plan is loaded!) */}
+      {plan && (
+        <div className="navbar-plan-context-tier">
+          <div className="plan-context-left">
+            <span className="plan-meta-pill plan-name-pill" title={`File: ${plan.planName}`}>
+              <FileCode2 size={11} color="#38bdf8" />
+              <span className="plan-name">{plan.planName}</span>
+            </span>
+            <span className="plan-meta-pill" title="Total Statements in Plan">
+              <Layers size={11} color="#818cf8" />
+              <span>{plan.totalStatements} Stmts</span>
+            </span>
+            <span className="plan-meta-pill" title="Total Accumulated Subtree Cost">
+              <Activity size={11} color="#34d399" />
+              <span>Cost: {plan.totalSubTreeCost.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
+            </span>
+            {plan.maxDopReason && (
+              <span
+                className="plan-meta-pill warning-pill"
+                title="Query execution is constrained to a single thread by server or resource governor setting"
+              >
+                <AlertTriangle size={11} color="#fbbf24" />
+                <span>{formatMaxDop(plan.maxDopReason)}</span>
+              </span>
+            )}
+          </div>
+
+          <div className="plan-context-right">
+            {verdict && (
+              <div
+                className="ribbon-verdict-pill"
+                onClick={(e) => handleSelectTab('overview', e)}
+                title={`Executive Bottleneck: Stmt #${verdict.culpritStatementId} accounts for ${verdict.costPercentage}% of batch cost`}
+              >
+                <Zap size={11} color="#f43f5e" />
+                <span>Culprit: Stmt #{verdict.culpritStatementId} ({verdict.costPercentage}% Cost)</span>
+              </div>
+            )}
+            {plan?.diagnostics && (
+              <div
+                className={`ribbon-grade-pill grade-${(plan.diagnostics.scoreGrade || 'c').toLowerCase()}`}
+                title="Overall execution plan health grade based on XML diagnostics"
+              >
+                <span>Health: {plan.diagnostics.healthScore}/100</span>
+                <strong className="grade-letter">[{plan.diagnostics.scoreGrade || 'C'}]</strong>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TIER 3: Workspace Categorized Navigation Ribbon Bar */}
       <div className="navbar-ribbon-tier">
         {/* Left: Category Dropdown Controls */}
         <div className="ribbon-categories">
@@ -457,6 +509,37 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </div>
 
+          {/* Category: Live Radar (Direct tab button) */}
+          <div className="nav-dropdown-item-wrap">
+            <button
+              type="button"
+              className={`nav-category-btn ${activeTab === 'liveradar' ? 'active' : ''}`}
+              onClick={(e) => handleSelectTab('liveradar', e)}
+              title="Real-Time Active Sessions, Query Store Harvester & Live Deadlocks"
+            >
+              <Zap size={14} color={activeTab === 'liveradar' ? '#38bdf8' : '#94a3b8'} />
+              <span className="category-title">Live Radar</span>
+              {liveStatus?.connected ? (
+                <span
+                  style={{
+                    fontSize: '9.5px',
+                    fontWeight: 700,
+                    padding: '1px 5px',
+                    borderRadius: '4px',
+                    background: 'rgba(52, 211, 153, 0.2)',
+                    color: '#34d399',
+                  }}
+                >
+                  LIVE
+                </span>
+              ) : (
+                <span className="category-offline-pill" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>
+                  Live
+                </span>
+              )}
+            </button>
+          </div>
+
           {/* Category 3: Tuning Playbook (Direct tab button) */}
           <div className="nav-dropdown-item-wrap">
             <button
@@ -498,29 +581,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="category-offline-pill">100% Offline</span>
             </button>
           </div>
-        </div>
-
-        {/* Right: Ribbon Quick Health Status */}
-        <div className="ribbon-status-area">
-          {verdict && (
-            <div
-              className="ribbon-verdict-pill"
-              onClick={(e) => handleSelectTab('overview', e)}
-              title={`Executive Bottleneck: Stmt #${verdict.culpritStatementId} accounts for ${verdict.costPercentage}% of batch cost`}
-            >
-              <Zap size={13} color="#f43f5e" />
-              <span>Culprit: Stmt #{verdict.culpritStatementId} ({verdict.costPercentage}% Cost)</span>
-            </div>
-          )}
-          {plan?.diagnostics && (
-            <div
-              className={`ribbon-grade-pill grade-${(plan.diagnostics.scoreGrade || 'c').toLowerCase()}`}
-              title="Overall execution plan health grade based on XML diagnostics"
-            >
-              <span>Health: {plan.diagnostics.healthScore}/100</span>
-              <strong className="grade-letter">[{plan.diagnostics.scoreGrade || 'C'}]</strong>
-            </div>
-          )}
         </div>
       </div>
     </header>

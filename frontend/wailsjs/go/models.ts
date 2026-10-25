@@ -142,6 +142,209 @@ export namespace advisor {
 
 }
 
+export namespace livedb {
+	
+	export class ActiveSession {
+	    spid: number;
+	    status: string;
+	    command: string;
+	    databaseName: string;
+	    loginName: string;
+	    hostName: string;
+	    programName: string;
+	    waitType: string;
+	    waitTimeMs: number;
+	    lastWaitType: string;
+	    blockingSpid: number;
+	    cpuTimeMs: number;
+	    totalElapsedTimeMs: number;
+	    logicalReads: number;
+	    writes: number;
+	    grantedMemoryMb: number;
+	    queryText: string;
+	    hasPlan: boolean;
+	    planHandle: string;
+	    sqlHandle: string;
+	    percentComplete: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ActiveSession(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.spid = source["spid"];
+	        this.status = source["status"];
+	        this.command = source["command"];
+	        this.databaseName = source["databaseName"];
+	        this.loginName = source["loginName"];
+	        this.hostName = source["hostName"];
+	        this.programName = source["programName"];
+	        this.waitType = source["waitType"];
+	        this.waitTimeMs = source["waitTimeMs"];
+	        this.lastWaitType = source["lastWaitType"];
+	        this.blockingSpid = source["blockingSpid"];
+	        this.cpuTimeMs = source["cpuTimeMs"];
+	        this.totalElapsedTimeMs = source["totalElapsedTimeMs"];
+	        this.logicalReads = source["logicalReads"];
+	        this.writes = source["writes"];
+	        this.grantedMemoryMb = source["grantedMemoryMb"];
+	        this.queryText = source["queryText"];
+	        this.hasPlan = source["hasPlan"];
+	        this.planHandle = source["planHandle"];
+	        this.sqlHandle = source["sqlHandle"];
+	        this.percentComplete = source["percentComplete"];
+	    }
+	}
+	export class ConnectionConfig {
+	    server: string;
+	    port: number;
+	    database: string;
+	    authType: string;
+	    username: string;
+	    password: string;
+	    encrypt: boolean;
+	    trustServerCertificate: boolean;
+	    applicationIntent: string;
+	    timeoutSeconds: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConnectionConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.server = source["server"];
+	        this.port = source["port"];
+	        this.database = source["database"];
+	        this.authType = source["authType"];
+	        this.username = source["username"];
+	        this.password = source["password"];
+	        this.encrypt = source["encrypt"];
+	        this.trustServerCertificate = source["trustServerCertificate"];
+	        this.applicationIntent = source["applicationIntent"];
+	        this.timeoutSeconds = source["timeoutSeconds"];
+	    }
+	}
+	export class ConnectionStatus {
+	    connected: boolean;
+	    serverVersion: string;
+	    serverName: string;
+	    databaseName: string;
+	    activeSessions: number;
+	    latencyMs: number;
+	    isReadOnly: boolean;
+	    isDemo: boolean;
+	    errorMessage?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConnectionStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.connected = source["connected"];
+	        this.serverVersion = source["serverVersion"];
+	        this.serverName = source["serverName"];
+	        this.databaseName = source["databaseName"];
+	        this.activeSessions = source["activeSessions"];
+	        this.latencyMs = source["latencyMs"];
+	        this.isReadOnly = source["isReadOnly"];
+	        this.isDemo = source["isDemo"];
+	        this.errorMessage = source["errorMessage"];
+	    }
+	}
+	export class LiveDeadlockReport {
+	    timestamp: string;
+	    victimSpid: number;
+	    deadlockGraphXml: string;
+	    processCount: number;
+	    lockedResourceCount: number;
+	    deadlockType: string;
+	    summary: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LiveDeadlockReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.timestamp = source["timestamp"];
+	        this.victimSpid = source["victimSpid"];
+	        this.deadlockGraphXml = source["deadlockGraphXml"];
+	        this.processCount = source["processCount"];
+	        this.lockedResourceCount = source["lockedResourceCount"];
+	        this.deadlockType = source["deadlockType"];
+	        this.summary = source["summary"];
+	    }
+	}
+	export class QueryStoreEntry {
+	    queryId: number;
+	    planId: number;
+	    queryText: string;
+	    executionCount: number;
+	    totalCpuMs: number;
+	    avgCpuMs: number;
+	    totalDurationMs: number;
+	    avgDurationMs: number;
+	    totalLogicalReads: number;
+	    avgLogicalReads: number;
+	    totalPhysicalReads: number;
+	    avgPhysicalReads: number;
+	    totalSpillsMb: number;
+	    lastExecutionTime: string;
+	    planXml?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueryStoreEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.queryId = source["queryId"];
+	        this.planId = source["planId"];
+	        this.queryText = source["queryText"];
+	        this.executionCount = source["executionCount"];
+	        this.totalCpuMs = source["totalCpuMs"];
+	        this.avgCpuMs = source["avgCpuMs"];
+	        this.totalDurationMs = source["totalDurationMs"];
+	        this.avgDurationMs = source["avgDurationMs"];
+	        this.totalLogicalReads = source["totalLogicalReads"];
+	        this.avgLogicalReads = source["avgLogicalReads"];
+	        this.totalPhysicalReads = source["totalPhysicalReads"];
+	        this.avgPhysicalReads = source["avgPhysicalReads"];
+	        this.totalSpillsMb = source["totalSpillsMb"];
+	        this.lastExecutionTime = source["lastExecutionTime"];
+	        this.planXml = source["planXml"];
+	    }
+	}
+	export class ServerVitals {
+	    cpuQueueTasks: number;
+	    signalWaitPct: number;
+	    memoryGrantsPending: number;
+	    availableMemoryMb: number;
+	    tempDbUserObjectsMb: number;
+	    tempDbInternalMb: number;
+	    batchRequestsPerSec: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ServerVitals(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cpuQueueTasks = source["cpuQueueTasks"];
+	        this.signalWaitPct = source["signalWaitPct"];
+	        this.memoryGrantsPending = source["memoryGrantsPending"];
+	        this.availableMemoryMb = source["availableMemoryMb"];
+	        this.tempDbUserObjectsMb = source["tempDbUserObjectsMb"];
+	        this.tempDbInternalMb = source["tempDbInternalMb"];
+	        this.batchRequestsPerSec = source["batchRequestsPerSec"];
+	    }
+	}
+
+}
+
 export namespace main {
 	
 	export class SelectedPlanFile {

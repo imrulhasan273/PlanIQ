@@ -8,6 +8,7 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"sqlplan-advisor/pkg/advisor"
+	"sqlplan-advisor/pkg/livedb"
 	"sqlplan-advisor/pkg/sqlplan"
 )
 
@@ -150,5 +151,53 @@ func (a *App) ComparePlans(xmlA, xmlB, nameA, nameB string) (*sqlplan.PlanCompar
 		return nil, fmt.Errorf("failed to parse Plan B: %w", err)
 	}
 	return sqlplan.ComparePlans(planA, planB), nil
+}
+
+// ConnectLiveDB connects to a live SQL Server instance with read-only safety
+func (a *App) ConnectLiveDB(cfg livedb.ConnectionConfig) (*livedb.ConnectionStatus, error) {
+	client := livedb.GetClient()
+	return client.Connect(a.ctx, cfg)
+}
+
+// DisconnectLiveDB closes the active live SQL Server connection
+func (a *App) DisconnectLiveDB() error {
+	client := livedb.GetClient()
+	return client.Disconnect()
+}
+
+// GetLiveDBStatus returns current connection status
+func (a *App) GetLiveDBStatus() livedb.ConnectionStatus {
+	client := livedb.GetClient()
+	return client.GetStatus()
+}
+
+// GetLiveActiveSessions returns currently running user requests from sys.dm_exec_requests
+func (a *App) GetLiveActiveSessions() ([]livedb.ActiveSession, error) {
+	client := livedb.GetClient()
+	return client.GetActiveSessions(a.ctx)
+}
+
+// GetLiveSessionPlan retrieves ShowPlan XML for an in-flight plan handle
+func (a *App) GetLiveSessionPlan(planHandleHex string) (string, error) {
+	client := livedb.GetClient()
+	return client.GetSessionPlan(a.ctx, planHandleHex)
+}
+
+// GetLiveQueryStore pulls top resource-consuming queries from Query Store
+func (a *App) GetLiveQueryStore(orderBy string, topN int) ([]livedb.QueryStoreEntry, error) {
+	client := livedb.GetClient()
+	return client.GetQueryStoreTop(a.ctx, orderBy, topN)
+}
+
+// GetLiveDeadlocks fetches deadlocks from system_health ring buffer
+func (a *App) GetLiveDeadlocks(limit int) ([]livedb.LiveDeadlockReport, error) {
+	client := livedb.GetClient()
+	return client.GetLiveDeadlocks(a.ctx, limit)
+}
+
+// GetLiveServerVitals returns CPU, memory, and TempDB pressure metrics
+func (a *App) GetLiveServerVitals() (*livedb.ServerVitals, error) {
+	client := livedb.GetClient()
+	return client.GetServerVitals(a.ctx)
 }
 

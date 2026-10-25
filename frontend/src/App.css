@@ -21,40 +21,41 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* Tier 1: Main Header & Actions Bar (50px height) */
+/* Tier 1: Main Header & Actions Bar (38px compact height) */
 .navbar-top-tier {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 18px;
-  height: 50px;
+  padding: 0 16px;
+  height: 38px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .brand-section {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
+  flex-shrink: 0;
 }
 
 .logo-badge {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
   background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(129, 140, 248, 0.15));
   border: 1px solid rgba(56, 189, 248, 0.35);
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.15);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.15);
   flex-shrink: 0;
 }
 
 .brand-info-wrap {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 
@@ -66,7 +67,7 @@
 
 .brand-title {
   font-weight: 800;
-  font-size: 16px;
+  font-size: 15px;
   letter-spacing: -0.02em;
   background: linear-gradient(135deg, #ffffff 40%, #38bdf8 100%);
   -webkit-background-clip: text;
@@ -74,35 +75,133 @@
 }
 
 .brand-version-pill {
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 600;
   color: #38bdf8;
   background: rgba(56, 189, 248, 0.12);
   border: 1px solid rgba(56, 189, 248, 0.25);
-  padding: 1px 6px;
+  padding: 1px 5px;
   border-radius: 4px;
   letter-spacing: 0.02em;
 }
 
-.plan-meta-row {
+/* Actions Section in Top Row (Compact Desktop Sizing) */
+.actions-section {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.actions-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.actions-section .btn,
+.actions-section .btn-sm,
+.actions-section .top-action-btn {
+  height: 24px !important;
+  min-height: 24px !important;
+  max-height: 24px !important;
+  padding: 0 8px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  border-radius: 5px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4.5px !important;
+  white-space: nowrap !important;
+  line-height: 1 !important;
+}
+
+.actions-section .btn svg,
+.actions-section .btn-sm svg,
+.actions-section .top-action-btn svg {
+  flex-shrink: 0;
+}
+
+.actions-section .live-conn-btn {
+  height: 24px !important;
+  min-height: 24px !important;
+  max-height: 24px !important;
+  padding: 0 7px !important;
+  font-size: 11px !important;
+  border-color: rgba(52, 211, 153, 0.45) !important;
+  background: rgba(52, 211, 153, 0.12) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+}
+
+.actions-section .live-conn-btn:hover {
+  background: rgba(52, 211, 153, 0.2) !important;
+  border-color: rgba(52, 211, 153, 0.6) !important;
+}
+
+.live-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 6px #34d399;
+  flex-shrink: 0;
+}
+
+.live-server-name {
+  color: #34d399;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.live-db-name {
+  font-size: 9.5px;
+  color: #94a3b8;
+}
+
+.nav-vertical-divider {
+  width: 1px;
+  height: 15px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 2px;
+}
+
+/* Tier 2: Dedicated Active Plan Telemetry Bar (28px height, only when plan is loaded!) */
+.navbar-plan-context-tier {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  height: 28px;
+  background: rgba(6, 10, 20, 0.85);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+}
+
+.plan-context-left {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  flex-wrap: nowrap;
-  margin-left: 8px;
-  padding-left: 10px;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.plan-context-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .plan-meta-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
+  gap: 4px;
+  padding: 2px 7px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 5px;
+  border-radius: 4px;
   font-size: 11px;
   color: #cbd5e1;
   white-space: nowrap;
@@ -110,7 +209,7 @@
 
 .plan-meta-pill.plan-name-pill {
   color: #38bdf8;
-  max-width: 260px;
+  max-width: 320px;
   background: rgba(56, 189, 248, 0.08);
   border-color: rgba(56, 189, 248, 0.25);
   font-weight: 500;
@@ -129,36 +228,15 @@
   font-weight: 500;
 }
 
-/* Actions Section */
-.actions-section {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.actions-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.nav-vertical-divider {
-  width: 1px;
-  height: 20px;
-  background: rgba(255, 255, 255, 0.1);
-  margin: 0 4px;
-}
-
-/* Tier 2: Categorized Workspace Navigation Ribbon (In NEW Row) */
+/* Tier 3: Categorized Workspace Navigation Ribbon (36px compact height) */
 .navbar-ribbon-tier {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 18px;
-  height: 42px;
-  background: rgba(8, 12, 22, 0.9);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  padding: 0 16px;
+  height: 36px;
+  background: rgba(8, 12, 22, 0.95);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   position: relative;
   overflow: visible;
   z-index: 50;
@@ -168,7 +246,7 @@
 .ribbon-categories {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 /* Dropdown Menu Item Wrapper */
@@ -9587,3 +9665,121 @@
   font-size: 10px;
   white-space: nowrap;
 }
+
+/* ========================================================
+   LIVE RADAR SUB-NAVIGATION TABS & CONTROLS (PILL DESIGN)
+   ======================================================== */
+.radar-subnav-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(10, 15, 29, 0.9);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.radar-subnav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 27px;
+  padding: 0 10px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  user-select: none;
+  white-space: nowrap;
+  outline: none;
+}
+
+.radar-subnav-btn:hover {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.radar-subnav-btn .radar-subnav-icon {
+  flex-shrink: 0;
+  color: inherit;
+  transition: transform 0.15s ease;
+}
+
+.radar-subnav-btn:hover .radar-subnav-icon {
+  transform: scale(1.08);
+}
+
+.radar-subnav-btn.active {
+  font-weight: 600;
+  color: #ffffff;
+  background: rgba(30, 41, 59, 0.95);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.radar-subnav-btn.active.active-sessions {
+  border-color: rgba(56, 189, 248, 0.45);
+  color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.15);
+}
+
+.radar-subnav-btn.active.active-querystore {
+  border-color: rgba(129, 140, 248, 0.45);
+  color: #a5b4fc;
+  box-shadow: 0 0 10px rgba(129, 140, 248, 0.15);
+}
+
+.radar-subnav-btn.active.active-deadlocks {
+  border-color: rgba(244, 63, 94, 0.45);
+  color: #fb7185;
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.15);
+}
+
+.radar-subnav-btn.active.active-vitals {
+  border-color: rgba(52, 211, 153, 0.45);
+  color: #34d399;
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.15);
+}
+
+.radar-count-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  line-height: 1;
+}
+
+.radar-subnav-btn.active.active-sessions .radar-count-pill {
+  background: rgba(56, 189, 248, 0.22);
+  color: #38bdf8;
+}
+
+.radar-blocked-pill {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1.5px 6px;
+  border-radius: 4px;
+  background: #f43f5e;
+  color: #ffffff;
+  line-height: 1;
+  box-shadow: 0 0 8px rgba(244, 63, 94, 0.5);
+}
+
+.radar-ctrl-btn {
+  height: 25px !important;
+  min-height: 25px !important;
+  max-height: 25px !important;
+  padding: 0 8px !important;
+  font-size: 11px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  border-radius: 5px !important;
+}
+
