@@ -250,22 +250,41 @@ type DuplicateIndex struct {
 	DropStatement string `json:"dropStatement"`
 }
 
+// SchedulerActiveTask represents an active query/worker task bound to a SQLOS scheduler (sp_PressureDetector parity)
+type SchedulerActiveTask struct {
+	SchedulerID      int    `json:"schedulerId"`
+	CPUID            int    `json:"cpuId"`
+	ParentNodeID     int    `json:"parentNodeId"`
+	SessionID        int    `json:"sessionId"`
+	RequestID        int    `json:"requestId"`
+	TaskState        string `json:"taskState"` // "RUNNING", "RUNNABLE", "SUSPENDED"
+	CPUTimeMs        int64  `json:"cpuTimeMs"`
+	TotalElapsedTime int64  `json:"totalElapsedTime"`
+	WaitType         string `json:"waitType"`
+	WaitTimeMs       int64  `json:"waitTimeMs"`
+	Command          string `json:"command"`
+	DatabaseName     string `json:"databaseName"`
+	QueryText        string `json:"queryText"`
+}
+
 // CPUSchedulerInfo represents deep scheduler quantum and worker metrics from sys.dm_os_schedulers
 type CPUSchedulerInfo struct {
-	SchedulerID          int    `json:"schedulerId"`
-	CPUID                int    `json:"cpuId"`
-	Status               string `json:"status"`
-	IsOnline             bool   `json:"isOnline"`
-	IsIdle               bool   `json:"isIdle"`
-	CurrentTasksCount    int    `json:"currentTasksCount"`
-	RunnableTasksCount   int    `json:"runnableTasksCount"`
-	ActiveWorkersCount   int    `json:"activeWorkersCount"`
-	WorkQueueCount       int    `json:"workQueueCount"`
-	ContextSwitchesCount int64  `json:"contextSwitchesCount"`
-	YieldCount           int64  `json:"yieldCount"`
-	PreemptiveSwitches   int64  `json:"preemptiveSwitches"`
-	ParentNodeID         int    `json:"parentNodeId"`
-	QuantumHealth        string `json:"quantumHealth"` // "Healthy", "Warning", "Critical"
+	SchedulerID           int     `json:"schedulerId"`
+	CPUID                 int     `json:"cpuId"`
+	Status                string  `json:"status"`
+	IsOnline              bool    `json:"isOnline"`
+	IsIdle                bool    `json:"isIdle"`
+	CurrentTasksCount     int     `json:"currentTasksCount"`
+	RunnableTasksCount    int     `json:"runnableTasksCount"`
+	ActiveWorkersCount    int     `json:"activeWorkersCount"`
+	WorkQueueCount        int     `json:"workQueueCount"`
+	ContextSwitchesCount  int64   `json:"contextSwitchesCount"`
+	YieldCount            int64   `json:"yieldCount"`
+	PreemptiveSwitches    int64   `json:"preemptiveSwitches"`
+	ParentNodeID          int     `json:"parentNodeId"`
+	QuantumHealth         string  `json:"quantumHealth"` // "Healthy", "Warning", "Critical"
+	YieldsPerSec          float64 `json:"yieldsPerSec"`
+	ContextSwitchesPerSec float64 `json:"contextSwitchesPerSec"`
 }
 
 // NUMANodeInfo represents NUMA memory and CPU load balancing from sys.dm_os_nodes and sys.dm_os_memory_nodes
@@ -286,18 +305,20 @@ type NUMANodeInfo struct {
 
 // EngineInternalsReport represents comprehensive CPU scheduler quantum analysis and NUMA hardware memory balancing
 type EngineInternalsReport struct {
-	MaxWorkersCount        int                `json:"maxWorkersCount"`
-	TotalActiveWorkers     int                `json:"totalActiveWorkers"`
-	ThreadPoolUtilization  float64            `json:"threadPoolUtilization"`
-	ThreadPoolStarvation   bool               `json:"threadPoolStarvation"`
-	TotalRunnableTasks     int                `json:"totalRunnableTasks"`
-	QuantumPressureStatus  string             `json:"quantumPressureStatus"`
-	QuantumPressureSummary string             `json:"quantumPressureSummary"`
-	NUMANodesCount         int                `json:"numaNodesCount"`
-	NUMASkewDetected       bool               `json:"numaSkewDetected"`
-	TotalForeignPages      int64              `json:"totalForeignPages"`
-	CrossNUMALatencyRisk   string             `json:"crossNumaLatencyRisk"`
-	Schedulers             []CPUSchedulerInfo `json:"schedulers"`
-	NUMANodes              []NUMANodeInfo     `json:"numaNodes"`
+	MaxWorkersCount        int                   `json:"maxWorkersCount"`
+	TotalActiveWorkers     int                   `json:"totalActiveWorkers"`
+	ThreadPoolUtilization  float64               `json:"threadPoolUtilization"`
+	ThreadPoolStarvation   bool                  `json:"threadPoolStarvation"`
+	TotalRunnableTasks     int                   `json:"totalRunnableTasks"`
+	QuantumPressureStatus  string                `json:"quantumPressureStatus"`
+	QuantumPressureSummary string                `json:"quantumPressureSummary"`
+	NUMANodesCount         int                   `json:"numaNodesCount"`
+	NUMASkewDetected       bool                  `json:"numaSkewDetected"`
+	NUMASkewSummary        string                `json:"numaSkewSummary"`
+	TotalForeignPages      int64                 `json:"totalForeignPages"`
+	CrossNUMALatencyRisk   string                `json:"crossNumaLatencyRisk"`
+	Schedulers             []CPUSchedulerInfo    `json:"schedulers"`
+	ActiveTasks            []SchedulerActiveTask `json:"activeTasks"`
+	NUMANodes              []NUMANodeInfo        `json:"numaNodes"`
 }
 

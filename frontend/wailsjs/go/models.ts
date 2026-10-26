@@ -241,6 +241,8 @@ export namespace livedb {
 	    preemptiveSwitches: number;
 	    parentNodeId: number;
 	    quantumHealth: string;
+	    yieldsPerSec: number;
+	    contextSwitchesPerSec: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new CPUSchedulerInfo(source);
@@ -262,6 +264,8 @@ export namespace livedb {
 	        this.preemptiveSwitches = source["preemptiveSwitches"];
 	        this.parentNodeId = source["parentNodeId"];
 	        this.quantumHealth = source["quantumHealth"];
+	        this.yieldsPerSec = source["yieldsPerSec"];
+	        this.contextSwitchesPerSec = source["contextSwitchesPerSec"];
 	    }
 	}
 	export class ConnectionConfig {
@@ -380,6 +384,42 @@ export namespace livedb {
 	        this.foreignPageRatio = source["foreignPageRatio"];
 	    }
 	}
+	export class SchedulerActiveTask {
+	    schedulerId: number;
+	    cpuId: number;
+	    parentNodeId: number;
+	    sessionId: number;
+	    requestId: number;
+	    taskState: string;
+	    cpuTimeMs: number;
+	    totalElapsedTime: number;
+	    waitType: string;
+	    waitTimeMs: number;
+	    command: string;
+	    databaseName: string;
+	    queryText: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SchedulerActiveTask(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schedulerId = source["schedulerId"];
+	        this.cpuId = source["cpuId"];
+	        this.parentNodeId = source["parentNodeId"];
+	        this.sessionId = source["sessionId"];
+	        this.requestId = source["requestId"];
+	        this.taskState = source["taskState"];
+	        this.cpuTimeMs = source["cpuTimeMs"];
+	        this.totalElapsedTime = source["totalElapsedTime"];
+	        this.waitType = source["waitType"];
+	        this.waitTimeMs = source["waitTimeMs"];
+	        this.command = source["command"];
+	        this.databaseName = source["databaseName"];
+	        this.queryText = source["queryText"];
+	    }
+	}
 	export class EngineInternalsReport {
 	    maxWorkersCount: number;
 	    totalActiveWorkers: number;
@@ -390,9 +430,11 @@ export namespace livedb {
 	    quantumPressureSummary: string;
 	    numaNodesCount: number;
 	    numaSkewDetected: boolean;
+	    numaSkewSummary: string;
 	    totalForeignPages: number;
 	    crossNumaLatencyRisk: string;
 	    schedulers: CPUSchedulerInfo[];
+	    activeTasks: SchedulerActiveTask[];
 	    numaNodes: NUMANodeInfo[];
 	
 	    static createFrom(source: any = {}) {
@@ -410,9 +452,11 @@ export namespace livedb {
 	        this.quantumPressureSummary = source["quantumPressureSummary"];
 	        this.numaNodesCount = source["numaNodesCount"];
 	        this.numaSkewDetected = source["numaSkewDetected"];
+	        this.numaSkewSummary = source["numaSkewSummary"];
 	        this.totalForeignPages = source["totalForeignPages"];
 	        this.crossNumaLatencyRisk = source["crossNumaLatencyRisk"];
 	        this.schedulers = this.convertValues(source["schedulers"], CPUSchedulerInfo);
+	        this.activeTasks = this.convertValues(source["activeTasks"], SchedulerActiveTask);
 	        this.numaNodes = this.convertValues(source["numaNodes"], NUMANodeInfo);
 	    }
 	
@@ -697,6 +741,7 @@ export namespace livedb {
 	        this.planXml = source["planXml"];
 	    }
 	}
+	
 	export class ServerVitals {
 	    cpuQueueTasks: number;
 	    signalWaitPct: number;

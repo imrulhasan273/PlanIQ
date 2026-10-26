@@ -229,6 +229,22 @@ export interface DuplicateIndex {
   dropStatement: string;
 }
 
+export interface SchedulerActiveTask {
+  schedulerId: number;
+  cpuId: number;
+  parentNodeId: number;
+  sessionId: number;
+  requestId: number;
+  taskState: 'RUNNING' | 'RUNNABLE' | 'SUSPENDED';
+  cpuTimeMs: number;
+  totalElapsedTime: number;
+  waitType: string;
+  waitTimeMs: number;
+  command: string;
+  databaseName: string;
+  queryText: string;
+}
+
 export interface CPUSchedulerInfo {
   schedulerId: number;
   cpuId: number;
@@ -244,6 +260,8 @@ export interface CPUSchedulerInfo {
   preemptiveSwitches: number;
   parentNodeId: number;
   quantumHealth: 'Healthy' | 'Warning' | 'Critical';
+  yieldsPerSec?: number;
+  contextSwitchesPerSec?: number;
 }
 
 export interface NUMANodeInfo {
@@ -271,9 +289,11 @@ export interface EngineInternalsReport {
   quantumPressureSummary: string;
   numaNodesCount: number;
   numaSkewDetected: boolean;
+  numaSkewSummary?: string;
   totalForeignPages: number;
   crossNumaLatencyRisk: string;
   schedulers: CPUSchedulerInfo[];
+  activeTasks?: SchedulerActiveTask[];
   numaNodes: NUMANodeInfo[];
 }
 

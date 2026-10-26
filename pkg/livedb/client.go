@@ -17,12 +17,15 @@ import (
 
 // Client manages connection and live query execution to SQL Server
 type Client struct {
-	mu                 sync.RWMutex
-	db                 *sql.DB
-	config             ConnectionConfig
-	status             ConnectionStatus
-	lastBatchCount     int64
-	lastBatchTimestamp time.Time
+	mu                  sync.RWMutex
+	db                  *sql.DB
+	config              ConnectionConfig
+	status              ConnectionStatus
+	lastBatchCount      int64
+	lastBatchTimestamp  time.Time
+	lastSchedSampleTime time.Time
+	lastSchedYields     map[int]int64
+	lastSchedSwitches   map[int]int64
 }
 
 
@@ -1588,10 +1591,10 @@ func (c *Client) GetDuplicateIndexes(ctx context.Context) ([]DuplicateIndex, err
 	return dups, nil
 }
 
-// GetEngineInternals inspects CPU scheduler quantum exhaustion and NUMA node memory balancing (sp_PressureDetector logic)
+// GetEngineInternals inspects CPU scheduler quantum exhaustion, SPID attribution, and NUMA node memory balancing (sp_PressureDetector parity)
 func (c *Client) GetEngineInternals(ctx context.Context) (*EngineInternalsReport, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	if !c.status.Connected {
 		return nil, fmt.Errorf("not connected")
@@ -1606,6 +1609,9 @@ func (c *Client) GetEngineInternals(ctx context.Context) (*EngineInternalsReport
 
 	report := &EngineInternalsReport{
 		MaxWorkersCount: 512,
+		ActiveTasks:     make([]SchedulerActiveTask, 0),
+		Schedulers:      make([]CPUSchedulerInfo, 0),
+		NUMANodes:       make([]NUMANodeInfo, 0),
 	}
 
 	// 1. Get max_workers_count from sys.dm_os_sys_info
@@ -1613,6 +1619,16 @@ func (c *Client) GetEngineInternals(ctx context.Context) (*EngineInternalsReport
 		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
 		SELECT ISNULL(max_workers_count, 512) FROM sys.dm_os_sys_info;
 	`).Scan(&report.MaxWorkersCount)
+
+	// Time elapsed since last scheduler delta sample
+	now := time.Now()
+	var elapsedSec float64
+	if !c.lastSchedSampleTime.IsZero() {
+		elapsedSec = now.Sub(c.lastSchedSampleTime).Seconds()
+	}
+	newYields := make(map[int]int64)
+	newSwitches := make(map[int]int64)
+	nodeRunnable := make(map[int]int)
 
 	// 2. Query visible schedulers from sys.dm_os_schedulers
 	schedRows, err := c.db.QueryContext(queryCtx, `
@@ -1631,7 +1647,7 @@ func (c *Client) GetEngineInternals(ctx context.Context) (*EngineInternalsReport
 			s.yield_count,
 			s.preemptive_switches_count,
 			s.parent_node_id
-		FROM sys.dm_os_schedulers s
+		FROM sys.dm_os_schedulers s WITH (NOLOCK)
 		WHERE s.status IN ('VISIBLE ONLINE', 'VISIBLE OFFLINE')
 		ORDER BY s.scheduler_id;
 	`)
@@ -1657,6 +1673,19 @@ func (c *Client) GetEngineInternals(ctx context.Context) (*EngineInternalsReport
 				continue
 			}
 
+			// Compute delta rates if previous sample exists
+			if elapsedSec > 0.4 && c.lastSchedYields != nil {
+				if prevYield, ok := c.lastSchedYields[s.SchedulerID]; ok && s.YieldCount >= prevYield {
+					s.YieldsPerSec = float64(s.YieldCount-prevYield) / elapsedSec
+				}
+				if prevSwitch, ok := c.lastSchedSwitches[s.SchedulerID]; ok && s.ContextSwitchesCount >= prevSwitch {
+					s.ContextSwitchesPerSec = float64(s.ContextSwitchesCount-prevSwitch) / elapsedSec
+				}
+			}
+			newYields[s.SchedulerID] = s.YieldCount
+			newSwitches[s.SchedulerID] = s.ContextSwitchesCount
+			nodeRunnable[s.ParentNodeID] += s.RunnableTasksCount
+
 			// Quantum health evaluation (Erik Darling criteria)
 			if s.WorkQueueCount > 0 {
 				s.QuantumHealth = "Critical"
@@ -1672,6 +1701,62 @@ func (c *Client) GetEngineInternals(ctx context.Context) (*EngineInternalsReport
 				report.ThreadPoolStarvation = true
 			}
 			report.Schedulers = append(report.Schedulers, s)
+		}
+
+		c.lastSchedSampleTime = now
+		c.lastSchedYields = newYields
+		c.lastSchedSwitches = newSwitches
+	}
+
+	// 3. Query Active Tasks and Queries bound to Schedulers (sp_PressureDetector parity)
+	taskRows, err := c.db.QueryContext(queryCtx, `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT TOP 30
+			t.scheduler_id,
+			s.cpu_id,
+			s.parent_node_id,
+			t.session_id,
+			t.request_id,
+			t.task_state,
+			ISNULL(r.cpu_time, 0) AS cpu_time_ms,
+			ISNULL(r.total_elapsed_time, 0) AS total_elapsed_time,
+			ISNULL(r.wait_type, '') AS wait_type,
+			ISNULL(r.wait_time, 0) AS wait_time_ms,
+			ISNULL(r.command, '') AS command,
+			ISNULL(DB_NAME(r.database_id), '') AS database_name,
+			SUBSTRING(ISNULL(st.text, ''), 1, 300) AS query_text
+		FROM sys.dm_os_tasks t WITH (NOLOCK)
+		INNER JOIN sys.dm_os_schedulers s WITH (NOLOCK) ON t.scheduler_id = s.scheduler_id
+		LEFT JOIN sys.dm_exec_requests r WITH (NOLOCK) ON t.session_id = r.session_id AND t.request_id = r.request_id
+		OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) st
+		WHERE s.status = 'VISIBLE ONLINE'
+		  AND t.session_id > 50
+		  AND (t.task_state IN ('RUNNING', 'RUNNABLE') OR r.session_id IS NOT NULL)
+		ORDER BY 
+			CASE WHEN t.task_state = 'RUNNING' THEN 1 WHEN t.task_state = 'RUNNABLE' THEN 2 ELSE 3 END,
+			r.cpu_time DESC;
+	`)
+	if err == nil {
+		defer taskRows.Close()
+		for taskRows.Next() {
+			var task SchedulerActiveTask
+			if err := taskRows.Scan(
+				&task.SchedulerID,
+				&task.CPUID,
+				&task.ParentNodeID,
+				&task.SessionID,
+				&task.RequestID,
+				&task.TaskState,
+				&task.CPUTimeMs,
+				&task.TotalElapsedTime,
+				&task.WaitType,
+				&task.WaitTimeMs,
+				&task.Command,
+				&task.DatabaseName,
+				&task.QueryText,
+			); err == nil {
+				report.ActiveTasks = append(report.ActiveTasks, task)
+			}
 		}
 	}
 
@@ -1700,7 +1785,7 @@ func (c *Client) GetEngineInternals(ctx context.Context) (*EngineInternalsReport
 		report.QuantumPressureSummary = "Zero CPU queue stalls. Schedulers are processing tasks smoothly with zero worker backpressure."
 	}
 
-	// 3. Query NUMA nodes and memory balancing from sys.dm_os_nodes and sys.dm_os_memory_nodes
+	// 4. Query NUMA nodes and memory balancing from sys.dm_os_nodes and sys.dm_os_memory_nodes
 	numaRows, err := c.db.QueryContext(queryCtx, `
 		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
 		SELECT 
@@ -1714,8 +1799,8 @@ func (c *Client) GetEngineInternals(ctx context.Context) (*EngineInternalsReport
 			CAST(ISNULL(m.pages_kb / 1024.0, 0) AS FLOAT) AS memory_allocated_mb,
 			CAST(ISNULL(m.target_kb / 1024.0, 0) AS FLOAT) AS memory_target_mb,
 			ISNULL(m.foreign_page_count, 0) AS foreign_page_count
-		FROM sys.dm_os_nodes n
-		LEFT JOIN sys.dm_os_memory_nodes m ON n.memory_node_id = m.memory_node_id
+		FROM sys.dm_os_nodes n WITH (NOLOCK)
+		LEFT JOIN sys.dm_os_memory_nodes m WITH (NOLOCK) ON n.memory_node_id = m.memory_node_id
 		WHERE n.node_state_desc <> 'ONLINE DAC'
 		ORDER BY n.node_id;
 	`)
@@ -1769,6 +1854,34 @@ func (c *Client) GetEngineInternals(ctx context.Context) (*EngineInternalsReport
 				report.NUMASkewDetected = true
 			}
 		}
+	}
+
+	// 5. Inter-NUMA Task Skew Analysis
+	if len(nodeRunnable) > 1 {
+		var maxRun, minRun int
+		firstNode := true
+		for _, runCount := range nodeRunnable {
+			if firstNode {
+				maxRun = runCount
+				minRun = runCount
+				firstNode = false
+			} else {
+				if runCount > maxRun {
+					maxRun = runCount
+				}
+				if runCount < minRun {
+					minRun = runCount
+				}
+			}
+		}
+		if maxRun >= 3 && (maxRun-minRun) >= 2 {
+			report.NUMASkewDetected = true
+			report.NUMASkewSummary = fmt.Sprintf("Parallelism thread skew detected: NUMA Node max %d queued runnable tasks vs. min %d. Queries may be saturating a single socket.", maxRun, minRun)
+		} else {
+			report.NUMASkewSummary = "Parallelism worker threads are uniformly balanced across physical NUMA nodes."
+		}
+	} else {
+		report.NUMASkewSummary = "Single NUMA node topology detected."
 	}
 
 	// Cross-NUMA latency risk

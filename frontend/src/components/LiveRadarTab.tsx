@@ -168,8 +168,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
 
   // Deep Engine Internals (Erik Darling sp_PressureDetector parity)
   const [engineInternals, setEngineInternals] = useState<EngineInternalsReport | null>(null);
-  const [vitalsSubTab, setVitalsSubTab] = useState<'overview' | 'schedulers' | 'numa'>('overview');
+  const [vitalsSubTab, setVitalsSubTab] = useState<'overview' | 'schedulers' | 'attribution' | 'numa'>('overview');
   const [schedulerFilter, setSchedulerFilter] = useState<'all' | 'warning' | 'active'>('all');
+  const [taskSearch, setTaskSearch] = useState<string>('');
+  const [taskStateFilter, setTaskStateFilter] = useState<'all' | 'RUNNING' | 'RUNNABLE'>('all');
 
   // Sorting & Controls
   const [qsOrderBy, setQsOrderBy] = useState<'cpu' | 'duration' | 'reads' | 'spills'>('cpu');
@@ -3932,6 +3934,21 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
 
               <button
                 type="button"
+                className={`btn btn-sm ${vitalsSubTab === 'attribution' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setVitalsSubTab('attribution')}
+                style={{ fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Terminal size={13} color="#38bdf8" />
+                <span>SPID Task Attribution</span>
+                {engineInternals && (engineInternals.activeTasks?.length || 0) > 0 && (
+                  <span className="radar-pill-info" style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '10px' }}>
+                    {engineInternals.activeTasks?.length} active
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
                 className={`btn btn-sm ${vitalsSubTab === 'numa' ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => setVitalsSubTab('numa')}
                 style={{ fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '6px' }}
@@ -4026,6 +4043,14 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                         style={{ fontSize: '11px', padding: '3px 8px' }}
                       >
                         CPU Schedulers ({engineInternals.schedulers?.length || 0}) →
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setVitalsSubTab('attribution')}
+                        style={{ fontSize: '11px', padding: '3px 8px', color: '#38bdf8' }}
+                      >
+                        SPID Attribution ({engineInternals.activeTasks?.length || 0}) →
                       </button>
                       <button
                         type="button"
@@ -4241,23 +4266,62 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                           {/* Metrics Rows */}
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             <div className="scheduler-metric-row">
+                              <span className="scheduler-metric-label">Yield Rate (Delta/s):</span>
+                              <span className="scheduler-metric-val" style={{ color: (s.yieldsPerSec || 0) > 1000 ? '#f43f5e' : (s.yieldsPerSec || 0) > 200 ? '#fbbf24' : '#34d399', fontWeight: 700 }}>
+                                {(s.yieldsPerSec || 0) > 0 ? `${(s.yieldsPerSec || 0).toFixed(1)} /s` : '0.0 /s'}
+                              </span>
+                            </div>
+                            <div className="scheduler-metric-row">
+                              <span className="scheduler-metric-label">Context Switch Rate:</span>
+                              <span className="scheduler-metric-val">
+                                {(s.contextSwitchesPerSec || 0) > 0 ? `${(s.contextSwitchesPerSec || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} /s` : '0 /s'}
+                              </span>
+                            </div>
+                            <div className="scheduler-metric-row">
                               <span className="scheduler-metric-label">Work Queue (Starvation):</span>
                               <span className="scheduler-metric-val" style={{ color: s.workQueueCount > 0 ? '#f43f5e' : '#cbd5e1' }}>
                                 {s.workQueueCount} {s.workQueueCount > 0 && '⚠️'}
                               </span>
                             </div>
                             <div className="scheduler-metric-row">
-                              <span className="scheduler-metric-label">Yield Count (4ms slice):</span>
-                              <span className="scheduler-metric-val">{s.yieldCount.toLocaleString()}</span>
-                            </div>
-                            <div className="scheduler-metric-row">
-                              <span className="scheduler-metric-label">Context Switches:</span>
-                              <span className="scheduler-metric-val">{s.contextSwitchesCount.toLocaleString()}</span>
-                            </div>
-                            <div className="scheduler-metric-row">
                               <span className="scheduler-metric-label">Preemptive Switches:</span>
                               <span className="scheduler-metric-val">{s.preemptiveSwitches.toLocaleString()}</span>
                             </div>
+
+                            {/* Active Task Link */}
+                            {engineInternals?.activeTasks && (
+                              <div
+                                style={{
+                                  marginTop: '4px',
+                                  paddingTop: '6px',
+                                  borderTop: '1px solid rgba(255,255,255,0.06)',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  fontSize: '10.5px'
+                                }}
+                              >
+                                <span style={{ color: '#94a3b8' }}>Bound Tasks:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTaskSearch(`Scheduler #${s.schedulerId}`);
+                                    setVitalsSubTab('attribution');
+                                  }}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    padding: 0,
+                                    cursor: 'pointer',
+                                    color: '#38bdf8',
+                                    fontWeight: 700,
+                                    textDecoration: 'underline'
+                                  }}
+                                >
+                                  {engineInternals.activeTasks.filter((t) => t.schedulerId === s.schedulerId).length} SPIDs →
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -4282,9 +4346,339 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             </div>
           )}
 
-          {/* VIEW 3: NUMA MEMORY BALANCING & INTERCONNECT */}
+          {/* VIEW 3: SPID-TO-SCHEDULER ATTRIBUTION (Erik Darling sp_PressureDetector parity) */}
+          {vitalsSubTab === 'attribution' && (
+            <div className="radar-subview-container" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {/* Controls bar */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '12px',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                  flexShrink: 0,
+                }}
+              >
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ position: 'relative', width: '280px' }}>
+                    <Search size={14} color="#64748b" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
+                    <input
+                      type="text"
+                      className="radar-filter-input"
+                      placeholder="Filter by SQL, SPID, Wait, or Core..."
+                      value={taskSearch}
+                      onChange={(e) => setTaskSearch(e.target.value)}
+                      style={{ paddingLeft: '32px', width: '100%', fontSize: '11.5px', height: '30px' }}
+                    />
+                    {taskSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setTaskSearch('')}
+                        style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '4px', background: 'rgba(15, 23, 42, 0.5)', padding: '2px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${taskStateFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setTaskStateFilter('all')}
+                      style={{ fontSize: '11px', padding: '3px 8px' }}
+                    >
+                      All ({engineInternals?.activeTasks?.length || 0})
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${taskStateFilter === 'RUNNING' ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setTaskStateFilter('RUNNING')}
+                      style={{ fontSize: '11px', padding: '3px 8px' }}
+                    >
+                      RUNNING ({engineInternals?.activeTasks?.filter((t) => t.taskState === 'RUNNING').length || 0})
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${taskStateFilter === 'RUNNABLE' ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setTaskStateFilter('RUNNABLE')}
+                      style={{ fontSize: '11px', padding: '3px 8px' }}
+                    >
+                      RUNNABLE ({engineInternals?.activeTasks?.filter((t) => t.taskState === 'RUNNABLE').length || 0})
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>
+                    Bound Cores: <strong style={{ color: '#38bdf8' }}>{new Set(engineInternals?.activeTasks?.map((t) => t.schedulerId)).size} Schedulers</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Attribution Table Container */}
+              <div className="radar-scrollable-block" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                {(() => {
+                  const filteredTasks = (engineInternals?.activeTasks || []).filter((task) => {
+                    if (taskStateFilter !== 'all' && task.taskState !== taskStateFilter) return false;
+                    if (!taskSearch) return true;
+                    const q = taskSearch.toLowerCase();
+                    return (
+                      task.sessionId.toString().includes(q) ||
+                      task.schedulerId.toString().includes(q) ||
+                      `scheduler #${task.schedulerId}`.toLowerCase().includes(q) ||
+                      `cpu #${task.cpuId}`.toLowerCase().includes(q) ||
+                      task.command.toLowerCase().includes(q) ||
+                      task.databaseName.toLowerCase().includes(q) ||
+                      task.waitType.toLowerCase().includes(q) ||
+                      task.queryText.toLowerCase().includes(q)
+                    );
+                  });
+
+                  if (filteredTasks.length === 0) {
+                    return (
+                      <div className="glass-panel" style={{ padding: '36px', textAlign: 'center', borderRadius: '10px' }}>
+                        <Terminal size={36} color="#38bdf8" style={{ margin: '0 auto 12px', opacity: 0.8 }} />
+                        <h4 style={{ margin: '0 0 6px', color: '#f1f5f9' }}>No Active Queries Monopolizing Schedulers</h4>
+                        <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>
+                          {taskSearch
+                            ? `No active task matches "${taskSearch}".`
+                            : 'All visible online CPU schedulers are currently idle with zero RUNNING or queued RUNNABLE requests.'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="glass-panel" style={{ borderRadius: '10px', overflow: 'hidden' }}>
+                      <table className="radar-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: '130px' }}>Scheduler & Core</th>
+                            <th style={{ width: '80px' }}>SPID</th>
+                            <th style={{ width: '100px' }}>Task State</th>
+                            <th style={{ width: '100px' }}>CPU Burn</th>
+                            <th style={{ width: '90px' }}>Elapsed</th>
+                            <th style={{ width: '140px' }}>Wait Type</th>
+                            <th style={{ width: '120px' }}>Database / Cmd</th>
+                            <th>Executing SQL Query Text</th>
+                            <th style={{ width: '70px', textAlign: 'center' }}>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredTasks.map((t, idx) => {
+                            const isYield = t.waitType === 'SOS_SCHEDULER_YIELD';
+                            const isRunning = t.taskState === 'RUNNING';
+
+                            return (
+                              <tr key={`${t.schedulerId}-${t.sessionId}-${t.requestId}-${idx}`}>
+                                <td>
+                                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <span style={{ fontWeight: 700, color: '#f1f5f9', fontSize: '12px' }}>
+                                      Scheduler #{t.schedulerId}
+                                    </span>
+                                    <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>
+                                      CPU #{t.cpuId} • NUMA #{t.parentNodeId}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td>
+                                  <span style={{ fontWeight: 700, color: '#38bdf8', fontSize: '12px' }}>
+                                    #{t.sessionId}
+                                  </span>
+                                  {t.requestId > 0 && (
+                                    <span style={{ fontSize: '10px', color: '#64748b', marginLeft: '3px' }}>
+                                      (req {t.requestId})
+                                    </span>
+                                  )}
+                                </td>
+                                <td>
+                                  <span
+                                    style={{
+                                      fontSize: '10px',
+                                      fontWeight: 800,
+                                      padding: '2px 7px',
+                                      borderRadius: '4px',
+                                      display: 'inline-block',
+                                      background: isRunning
+                                        ? 'rgba(16, 185, 129, 0.2)'
+                                        : t.taskState === 'RUNNABLE'
+                                        ? 'rgba(245, 158, 11, 0.2)'
+                                        : 'rgba(56, 189, 248, 0.2)',
+                                      color: isRunning
+                                        ? '#34d399'
+                                        : t.taskState === 'RUNNABLE'
+                                        ? '#fbbf24'
+                                        : '#38bdf8',
+                                      border: isRunning
+                                        ? '1px solid rgba(16, 185, 129, 0.4)'
+                                        : t.taskState === 'RUNNABLE'
+                                        ? '1px solid rgba(245, 158, 11, 0.4)'
+                                        : '1px solid rgba(56, 189, 248, 0.4)',
+                                    }}
+                                  >
+                                    {t.taskState}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span style={{ fontWeight: 700, color: t.cpuTimeMs > 2000 ? '#f43f5e' : '#f1f5f9', fontSize: '12px' }}>
+                                    {t.cpuTimeMs.toLocaleString()} ms
+                                  </span>
+                                </td>
+                                <td>
+                                  <span style={{ color: '#cbd5e1', fontSize: '11.5px' }}>
+                                    {t.totalElapsedTime.toLocaleString()} ms
+                                  </span>
+                                </td>
+                                <td>
+                                  {t.waitType ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                      <span
+                                        style={{
+                                          fontSize: '11px',
+                                          fontWeight: 600,
+                                          color: isYield ? '#f43f5e' : '#fbbf24',
+                                        }}
+                                      >
+                                        {t.waitType}
+                                      </span>
+                                      {t.waitTimeMs > 0 && (
+                                        <span style={{ fontSize: '10px', color: '#64748b' }}>
+                                          {t.waitTimeMs} ms wait
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span style={{ color: '#64748b', fontSize: '11px' }}>—</span>
+                                  )}
+                                </td>
+                                <td>
+                                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <span style={{ fontSize: '11.5px', color: '#e2e8f0', fontWeight: 600 }}>
+                                      {t.databaseName || '—'}
+                                    </span>
+                                    <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>
+                                      {t.command || 'TASK'}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span
+                                      style={{
+                                        fontFamily: 'monospace',
+                                        fontSize: '11px',
+                                        color: '#cbd5e1',
+                                        maxWidth: '460px',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                      }}
+                                      title={t.queryText}
+                                    >
+                                      {t.queryText || '<No query text available>'}
+                                    </span>
+                                    {t.queryText && (
+                                      <button
+                                        type="button"
+                                        className="btn-icon-subtle"
+                                        onClick={() => handleCopy(t.queryText, `task-${t.sessionId}-${idx}`)}
+                                        title="Copy query SQL"
+                                      >
+                                        {copiedKey === `task-${t.sessionId}-${idx}` ? <Check size={12} color="#34d399" /> : <Copy size={12} />}
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => {
+                                      const found = sessions.find((s) => s.spid === t.sessionId);
+                                      if (found) {
+                                        setInspectSession(found);
+                                      } else {
+                                        setInspectSession({
+                                          spid: t.sessionId,
+                                          status: t.taskState.toLowerCase(),
+                                          command: t.command,
+                                          cpuTimeMs: t.cpuTimeMs,
+                                          totalElapsedTimeMs: t.totalElapsedTime,
+                                          waitType: t.waitType,
+                                          waitTimeMs: t.waitTimeMs,
+                                          databaseName: t.databaseName,
+                                          sqlText: t.queryText,
+                                          loginName: 'Active Task',
+                                          hostName: `CPU #${t.cpuId}`,
+                                          programName: `Scheduler #${t.schedulerId}`,
+                                          blockingSpid: 0,
+                                          lastWaitType: t.waitType,
+                                          logicalReads: 0,
+                                          writes: 0,
+                                          openTransactionCount: 0,
+                                        } as any);
+                                      }
+                                    }}
+                                    style={{ fontSize: '10.5px', padding: '2px 6px' }}
+                                    title="View full 360° Session Details"
+                                  >
+                                    <Eye size={12} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+
+                {/* Insight Footer */}
+                <div className="engine-insight-box" style={{ marginTop: '14px' }}>
+                  <Info size={18} color="#38bdf8" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9', marginBottom: '4px' }}>
+                      Erik Darling Engine Internals Parity: sys.dm_os_tasks &rarr; sys.dm_os_schedulers Cross-Reference
+                    </div>
+                    <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', lineHeight: 1.5 }}>
+                      When a query consumes its entire 4ms slice on a core without voluntary I/O or lock waits, SQLOS moves it to <code>RUNNABLE</code> on <code>SOS_SCHEDULER_YIELD</code>.
+                      This table exposes the <strong>exact SPID and query text</strong> currently bound to that core, allowing you to instantly isolate runaway cursor loops, unindexed scans, or CPU-intensive hash matches without guessing.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW 4: NUMA MEMORY BALANCING & INTERCONNECT */}
           {vitalsSubTab === 'numa' && (
             <div className="radar-subview-container" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {/* NUMA Skew Diagnostic Banner */}
+              {engineInternals?.numaSkewSummary && (
+                <div
+                  style={{
+                    marginBottom: '12px',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: engineInternals.numaSkewDetected ? 'rgba(244, 63, 94, 0.12)' : 'rgba(56, 189, 248, 0.08)',
+                    border: `1px solid ${engineInternals.numaSkewDetected ? 'rgba(244, 63, 94, 0.35)' : 'rgba(56, 189, 248, 0.25)'}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Network size={16} color={engineInternals.numaSkewDetected ? '#f43f5e' : '#38bdf8'} style={{ flexShrink: 0 }} />
+                  <span style={{ fontSize: '12px', color: engineInternals.numaSkewDetected ? '#fca5a5' : '#bae6fd' }}>
+                    <strong>NUMA Topology Telemetry:</strong> {engineInternals.numaSkewSummary}
+                  </span>
+                </div>
+              )}
+
               {/* NUMA KPI Row */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '14px', flexShrink: 0 }}>
                 {/* Node Balance */}
