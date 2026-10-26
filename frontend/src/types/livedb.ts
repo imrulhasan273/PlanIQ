@@ -228,3 +228,52 @@ export interface DuplicateIndex {
   overlapType: 'Exact Duplicate' | 'Left-Prefix Redundant';
   dropStatement: string;
 }
+
+export interface CPUSchedulerInfo {
+  schedulerId: number;
+  cpuId: number;
+  status: string;
+  isOnline: boolean;
+  isIdle: boolean;
+  currentTasksCount: number;
+  runnableTasksCount: number;
+  activeWorkersCount: number;
+  workQueueCount: number;
+  contextSwitchesCount: number;
+  yieldCount: number;
+  preemptiveSwitches: number;
+  parentNodeId: number;
+  quantumHealth: 'Healthy' | 'Warning' | 'Critical';
+}
+
+export interface NUMANodeInfo {
+  nodeId: number;
+  memoryNodeId: number;
+  nodeStateDesc: string;
+  onlineSchedulerCount: number;
+  idleSchedulerCount: number;
+  activeWorkerCount: number;
+  avgLoadBalance: number;
+  memoryAllocatedMb: number;
+  memoryTargetMb: number;
+  foreignPageCount: number;
+  foreignMemoryMb: number;
+  foreignPageRatio: number;
+}
+
+export interface EngineInternalsReport {
+  maxWorkersCount: number;
+  totalActiveWorkers: number;
+  threadPoolUtilization: number;
+  threadPoolStarvation: boolean;
+  totalRunnableTasks: number;
+  quantumPressureStatus: string;
+  quantumPressureSummary: string;
+  numaNodesCount: number;
+  numaSkewDetected: boolean;
+  totalForeignPages: number;
+  crossNumaLatencyRisk: string;
+  schedulers: CPUSchedulerInfo[];
+  numaNodes: NUMANodeInfo[];
+}
+

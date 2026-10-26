@@ -38,7 +38,9 @@ import {
   BarChart3,
   HelpCircle,
   FolderTree,
-  Trash2
+  Trash2,
+  Network,
+  Gauge
 } from 'lucide-react';
 import {
   ActiveSession,
@@ -56,14 +58,18 @@ import {
   WaitTimeHistoryPoint,
   BufferPoolConsumer,
   UnusedIndex,
-  DuplicateIndex
+  DuplicateIndex,
+  EngineInternalsReport,
+  CPUSchedulerInfo,
+  NUMANodeInfo
 } from '../types/livedb';
 import {
   GetLiveActiveSessions,
   GetLiveSessionPlan,
   GetLiveQueryStore,
   GetLiveDeadlocks,
-  GetLiveServerVitals
+  GetLiveServerVitals,
+  GetLiveEngineInternals
 } from '../../wailsjs/go/main/App';
 
 interface LiveRadarTabProps {
@@ -160,6 +166,11 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
   });
   const [unusedLimitInput, setUnusedLimitInput] = useState<string>(unusedLimit.toString());
 
+  // Deep Engine Internals (Erik Darling sp_PressureDetector parity)
+  const [engineInternals, setEngineInternals] = useState<EngineInternalsReport | null>(null);
+  const [vitalsSubTab, setVitalsSubTab] = useState<'overview' | 'schedulers' | 'numa'>('overview');
+  const [schedulerFilter, setSchedulerFilter] = useState<'all' | 'warning' | 'active'>('all');
+
   // Sorting & Controls
   const [qsOrderBy, setQsOrderBy] = useState<'cpu' | 'duration' | 'reads' | 'spills'>('cpu');
   const [isAutoRefresh, setIsAutoRefresh] = useState<boolean>(true);
@@ -226,8 +237,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
       if (hour) hoursSet.add(hour);
     });
     return {
-      uniqueAdvisorDays: Array.from(daysSet).sort(),
-      uniqueAdvisorHours: Array.from(hoursSet).sort(),
+      uniqueAdvisorDays: Array.from(daysSet).sort().reverse(),
+      uniqueAdvisorHours: Array.from(hoursSet).sort().reverse(),
     };
   }, [advisors]);
 
@@ -484,6 +495,14 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
         } else if (activeSubTab === 'vitals') {
           const v = await app.GetLiveServerVitals();
           setVitals(v);
+          if (app.GetLiveEngineInternals) {
+            try {
+              const ei = await app.GetLiveEngineInternals();
+              setEngineInternals(ei || null);
+            } catch (eiErr) {
+              console.error('Failed to fetch engine internals:', eiErr);
+            }
+          }
         }
 
         // Background preload advisors count once if empty
@@ -2053,6 +2072,12 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               groups[groupKey].push(adv);
             });
 
+            const sortedGroupEntries = Object.entries(groups).sort(([keyA], [keyB]) => {
+              if (keyA.startsWith('Today') && !keyB.startsWith('Today')) return -1;
+              if (keyB.startsWith('Today') && !keyA.startsWith('Today')) return 1;
+              return keyB.localeCompare(keyA);
+            });
+
             return (
               <div
                 className="radar-scrollable-block"
@@ -2066,18 +2091,27 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                   paddingRight: '6px'
                 }}
               >
-                {Object.entries(groups).map(([dateLabel, items]) => (
-                  <div key={dateLabel} className="advisor-date-group">
-                    <div className="advisor-date-header">
-                      <Clock size={12} color="#94a3b8" />
-                      <span>{dateLabel}</span>
-                      <span style={{ fontSize: '10.5px', color: '#64748b' }}>({items.length} finding{items.length > 1 ? 's' : ''})</span>
-                    </div>
+                {sortedGroupEntries.map(([dateLabel, items]) => {
+                  const sortedItems = [...items].sort((a, b) => {
+                    const sevWeight: Record<string, number> = { critical: 3, warning: 2, info: 1 };
+                    const wA = sevWeight[a.severity] ?? 0;
+                    const wB = sevWeight[b.severity] ?? 0;
+                    if (wB !== wA) return wB - wA;
+                    return (b.timestamp || '').localeCompare(a.timestamp || '');
+                  });
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {items.map((adv) => {
-                        const isExpanded = expandedAdvisorId === adv.id;
-                        return (
+                  return (
+                    <div key={dateLabel} className="advisor-date-group">
+                      <div className="advisor-date-header">
+                        <Clock size={12} color="#94a3b8" />
+                        <span>{dateLabel}</span>
+                        <span style={{ fontSize: '10.5px', color: '#64748b' }}>({items.length} finding{items.length > 1 ? 's' : ''})</span>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {sortedItems.map((adv) => {
+                          const isExpanded = expandedAdvisorId === adv.id;
+                          return (
                           <div
                             key={adv.id}
                             className={`advisor-card ${adv.severity}`}
@@ -2207,7 +2241,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                       })}
                     </div>
                   </div>
-                ))}
+                );
+              })}
               </div>
             );
           })()}
@@ -2892,7 +2927,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           ======================================================== */}
       {activeSubTab === 'blocking' && (
         <div className="section-block radar-subtab-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
             <div>
               <h3 style={{ fontSize: '14px', fontWeight: 700, margin: '0 0 2px', color: '#f1f5f9' }}>
                 Head-Blocker Hierarchy & Lock Wait Analysis
@@ -2918,7 +2953,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               </p>
             </div>
           ) : (
-            <div className="radar-scrollable-block" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div className="radar-scrollable-block" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', paddingRight: '6px' }}>
               {(() => {
                 const rootGroups: Record<number, LiveBlockingSession[]> = {};
                 blockingSessions.forEach((b) => {
@@ -3205,7 +3240,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           ======================================================== */}
       {activeSubTab === 'deadlocks' && (
         <div className="section-block radar-subtab-section">
-          <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', flexShrink: 0 }}>
             <span style={{ fontSize: '13px', fontWeight: 600, color: '#f1f5f9' }}>
               Recent Deadlocks from `system_health` Extended Events Buffer (Showing {deadlocks.length})
             </span>
@@ -3256,7 +3291,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               </p>
             </div>
           ) : (
-            <div className="radar-scrollable-block" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div className="radar-scrollable-block" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '6px' }}>
               {deadlocks.map((dl, idx) => (
                 <div
                   key={idx}
@@ -3317,7 +3352,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           ======================================================== */}
       {activeSubTab === 'bufferpool' && (
         <div className="section-block radar-subtab-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
             <div>
               <h3 style={{ fontSize: '14px', fontWeight: 700, margin: '0 0 2px', color: '#f1f5f9' }}>
                 Buffer Pool RAM Inspector (Where is my Memory going?)
@@ -3472,7 +3507,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           ======================================================== */}
       {activeSubTab === 'indexes' && (
         <div className="section-block radar-subtab-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px', flexShrink: 0 }}>
             <div>
               <h3 style={{ fontSize: '15px', fontWeight: 800, margin: '0 0 2px', color: '#f1f5f9' }}>
                 Index Hygiene & Waste Engine
@@ -3518,8 +3553,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
 
           {/* VIEW A: MISSING INDEXES */}
           {indexSubTab === 'missing' && (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+            <div className="radar-subview-container" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px', flexShrink: 0 }}>
                 <div className="radar-limit-ctrl" title="Configure maximum missing indexes harvested (Default: 30)">
                   <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
                   <input
@@ -3550,7 +3585,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                 </div>
               </div>
 
-              <div className="radar-scrollable-block" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div className="radar-scrollable-block" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', paddingRight: '6px' }}>
                 {missingIndexes.map((idx, i) => (
                   <div
                     key={i}
@@ -3621,8 +3656,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
 
           {/* VIEW B: UNUSED INDEXES (WRITE & STORAGE WASTE) */}
           {indexSubTab === 'unused' && (
-            <div>
-              <div style={{ background: 'rgba(244, 63, 94, 0.12)', border: '1px solid rgba(244, 63, 94, 0.3)', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px' }}>
+            <div className="radar-subview-container" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ background: 'rgba(244, 63, 94, 0.12)', border: '1px solid rgba(244, 63, 94, 0.3)', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px', flexShrink: 0 }}>
                 <span style={{ fontSize: '12px', color: '#fecdd3' }}>
                   <strong>Write Overhead Warning:</strong> These indexes receive continuous writes (INSERT, UPDATE, DELETE) but have recorded <strong>0 user seeks, scans, or lookups</strong>. They slow down database write operations and consume RAM and disk space needlessly.
                 </span>
@@ -3680,8 +3715,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
 
           {/* VIEW C: DUPLICATE & REDUNDANT INDEXES */}
           {indexSubTab === 'duplicate' && (
-            <div>
-              <div style={{ background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px' }}>
+            <div className="radar-subview-container" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px', flexShrink: 0 }}>
                 <span style={{ fontSize: '12px', color: '#e0f2fe' }}>
                   <strong>Redundancy Detection:</strong> These indexes share identical left-prefix key columns with other existing indexes on the same table, making them redundant and wasting storage.
                 </span>
@@ -3754,7 +3789,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           ======================================================== */}
       {activeSubTab === 'tempdb' && (
         <div className="section-block radar-subtab-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
             <div>
               <h3 style={{ fontSize: '14px', fontWeight: 700, margin: '0 0 2px', color: '#f1f5f9' }}>
                 TempDB Space Allocation per Active Request
@@ -3848,69 +3883,616 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
       )}
 
       {/* ========================================================
-          PAGE 8: SERVER VITALS
+          PAGE 8: SERVER VITALS & DEEP ENGINE INTERNALS (DARLING PARITY)
           ======================================================== */}
       {activeSubTab === 'vitals' && (
         <div className="section-block radar-subtab-section">
-          <div className="radar-scrollable-block">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
-            {/* CPU Queue */}
-            <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#94a3b8', fontSize: '12px' }}>
-                <Cpu size={16} color="#38bdf8" />
-                <span>CPU Queue & Scheduler</span>
+          {/* Header & Sub-Navigation */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px', flexShrink: 0 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#f1f5f9' }}>
+                  Server Vitals & Engine Internals
+                </h3>
+                <span className="radar-badge-darling" title="Deep engine-internals diagnostics modeled after Erik Darling's sp_PressureDetector">
+                  Darling Engine
+                </span>
               </div>
-              <div style={{ fontSize: '24px', fontWeight: 800, color: (vitals?.cpuQueueTasks || 0) > 0 ? '#fbbf24' : '#34d399' }}>
-                {vitals?.cpuQueueTasks ?? 0}
-              </div>
-              <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b' }}>
-                Runnable tasks waiting for CPU slice. Signal wait: {(vitals?.signalWaitPct ?? 0).toFixed(1)}%
+              <p style={{ margin: '3px 0 0', fontSize: '11.5px', color: '#64748b' }}>
+                Real-time scheduler quantum contention (4ms slice exhaustion), worker pool starvation, and cross-socket NUMA memory latency.
               </p>
             </div>
 
-            {/* Memory Grants */}
-            <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#94a3b8', fontSize: '12px' }}>
-                <Activity size={16} color="#818cf8" />
-                <span>Memory Grants Pending</span>
-              </div>
-              <div style={{ fontSize: '24px', fontWeight: 800, color: (vitals?.memoryGrantsPending || 0) > 0 ? '#f43f5e' : '#34d399' }}>
-                {vitals?.memoryGrantsPending ?? 0}
-              </div>
-              <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b' }}>
-                Queries stalled waiting for workspace memory grants on RESOURCE_SEMAPHORE.
-              </p>
-            </div>
+            {/* Sub-view switcher */}
+            <div style={{ display: 'flex', gap: '6px', background: 'rgba(15, 23, 42, 0.6)', padding: '3px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <button
+                type="button"
+                className={`btn btn-sm ${vitalsSubTab === 'overview' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setVitalsSubTab('overview')}
+                style={{ fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Activity size={13} />
+                <span>Overview</span>
+              </button>
 
-            {/* TempDB Space */}
-            <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#94a3b8', fontSize: '12px' }}>
-                <HardDrive size={16} color="#fbbf24" />
-                <span>TempDB Physical Space</span>
-              </div>
-              <div style={{ fontSize: '24px', fontWeight: 800, color: '#f1f5f9' }}>
-                {((vitals?.tempDbUserObjectsMb ?? 0) + (vitals?.tempDbInternalMb ?? 0)).toFixed(1)} MB
-              </div>
-              <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b' }}>
-                User #temp tables: {(vitals?.tempDbUserObjectsMb ?? 0).toFixed(1)} MB • Hash/Sort spills: {(vitals?.tempDbInternalMb ?? 0).toFixed(1)} MB
-              </p>
-            </div>
+              <button
+                type="button"
+                className={`btn btn-sm ${vitalsSubTab === 'schedulers' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setVitalsSubTab('schedulers')}
+                style={{ fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Cpu size={13} />
+                <span>CPU Schedulers & Quantum</span>
+                {engineInternals && engineInternals.totalRunnableTasks > 0 && (
+                  <span className="radar-pill-warn" style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '10px' }}>
+                    {engineInternals.totalRunnableTasks} queued
+                  </span>
+                )}
+              </button>
 
-            {/* Batch Requests */}
-            <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#94a3b8', fontSize: '12px' }}>
-                <TrendingUp size={16} color="#34d399" />
-                <span>Batch Requests / Sec</span>
-              </div>
-              <div style={{ fontSize: '24px', fontWeight: 800, color: '#34d399' }}>
-                {(vitals?.batchRequestsPerSec ?? 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-              </div>
-              <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b' }}>
-                Instantaneous SQL Server throughput rate across all active connections.
-              </p>
+              <button
+                type="button"
+                className={`btn btn-sm ${vitalsSubTab === 'numa' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setVitalsSubTab('numa')}
+                style={{ fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Network size={13} />
+                <span>NUMA Memory Balancing</span>
+                {engineInternals && engineInternals.numaSkewDetected && (
+                  <span className="radar-pill-danger" style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '10px' }}>
+                    Skew
+                  </span>
+                )}
+              </button>
             </div>
           </div>
-        </div>
+
+          {/* VIEW 1: SERVER OVERVIEW */}
+          {vitalsSubTab === 'overview' && (
+            <div className="radar-scrollable-block" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+                {/* CPU Queue */}
+                <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#94a3b8', fontSize: '12px' }}>
+                    <Cpu size={16} color="#38bdf8" />
+                    <span>CPU Queue & Scheduler</span>
+                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: (vitals?.cpuQueueTasks || 0) > 0 ? '#fbbf24' : '#34d399' }}>
+                    {vitals?.cpuQueueTasks ?? 0}
+                  </div>
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b' }}>
+                    Runnable tasks waiting for CPU slice. Signal wait: {(vitals?.signalWaitPct ?? 0).toFixed(1)}%
+                  </p>
+                </div>
+
+                {/* Memory Grants */}
+                <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#94a3b8', fontSize: '12px' }}>
+                    <Activity size={16} color="#818cf8" />
+                    <span>Memory Grants Pending</span>
+                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: (vitals?.memoryGrantsPending || 0) > 0 ? '#f43f5e' : '#34d399' }}>
+                    {vitals?.memoryGrantsPending ?? 0}
+                  </div>
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b' }}>
+                    Queries stalled waiting for workspace memory grants on RESOURCE_SEMAPHORE.
+                  </p>
+                </div>
+
+                {/* TempDB Space */}
+                <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#94a3b8', fontSize: '12px' }}>
+                    <HardDrive size={16} color="#fbbf24" />
+                    <span>TempDB Physical Space</span>
+                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#f1f5f9' }}>
+                    {((vitals?.tempDbUserObjectsMb ?? 0) + (vitals?.tempDbInternalMb ?? 0)).toFixed(1)} MB
+                  </div>
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b' }}>
+                    User #temp tables: {(vitals?.tempDbUserObjectsMb ?? 0).toFixed(1)} MB • Hash/Sort spills: {(vitals?.tempDbInternalMb ?? 0).toFixed(1)} MB
+                  </p>
+                </div>
+
+                {/* Batch Requests */}
+                <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#94a3b8', fontSize: '12px' }}>
+                    <TrendingUp size={16} color="#34d399" />
+                    <span>Batch Requests / Sec</span>
+                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#34d399' }}>
+                    {(vitals?.batchRequestsPerSec ?? 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                  </div>
+                  <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b' }}>
+                    Instantaneous SQL Server throughput rate across all active connections.
+                  </p>
+                </div>
+              </div>
+
+              {/* Quick Engine Internals Summary banner */}
+              {engineInternals && (
+                <div className="glass-panel" style={{ padding: '18px', borderRadius: '10px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Gauge size={18} color="#c084fc" />
+                      <span style={{ fontSize: '13px', fontWeight: 700, color: '#f1f5f9' }}>
+                        Darling Engine Telemetry Snapshot
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setVitalsSubTab('schedulers')}
+                        style={{ fontSize: '11px', padding: '3px 8px' }}
+                      >
+                        CPU Schedulers ({engineInternals.schedulers?.length || 0}) →
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setVitalsSubTab('numa')}
+                        style={{ fontSize: '11px', padding: '3px 8px' }}
+                      >
+                        NUMA Nodes ({engineInternals.numaNodes?.length || 0}) →
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px' }}>
+                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>Worker Thread Pool</div>
+                      <div style={{ fontSize: '16px', fontWeight: 700, color: engineInternals.threadPoolStarvation ? '#f43f5e' : '#34d399', margin: '4px 0' }}>
+                        {engineInternals.totalActiveWorkers} / {engineInternals.maxWorkersCount} ({engineInternals.threadPoolUtilization.toFixed(1)}%)
+                      </div>
+                      <div style={{ fontSize: '10.5px', color: engineInternals.threadPoolStarvation ? '#f87171' : '#64748b' }}>
+                        {engineInternals.threadPoolStarvation ? 'THREADPOOL Starvation Alert!' : 'No starved work queues'}
+                      </div>
+                    </div>
+
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px' }}>
+                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>Quantum Contention (4ms)</div>
+                      <div style={{ fontSize: '16px', fontWeight: 700, color: engineInternals.totalRunnableTasks > 0 ? '#fbbf24' : '#34d399', margin: '4px 0' }}>
+                        {engineInternals.totalRunnableTasks} Queued Tasks
+                      </div>
+                      <div style={{ fontSize: '10.5px', color: '#64748b' }}>
+                        {engineInternals.quantumPressureStatus}
+                      </div>
+                    </div>
+
+                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px' }}>
+                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>NUMA Foreign Pages</div>
+                      <div style={{ fontSize: '16px', fontWeight: 700, color: engineInternals.numaSkewDetected ? '#f43f5e' : '#38bdf8', margin: '4px 0' }}>
+                        {engineInternals.totalForeignPages.toLocaleString()} Pages ({((engineInternals.totalForeignPages * 8) / 1024).toFixed(1)} MB)
+                      </div>
+                      <div style={{ fontSize: '10.5px', color: '#64748b' }}>
+                        Cross-socket risk: {engineInternals.crossNumaLatencyRisk}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VIEW 2: CPU SCHEDULERS & QUANTUM ANALYSIS */}
+          {vitalsSubTab === 'schedulers' && (
+            <div className="radar-subview-container" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {/* Schedulers KPI Row */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '14px', flexShrink: 0 }}>
+                {/* Threadpool utilization */}
+                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>Worker Thread Pool</span>
+                    {engineInternals?.threadPoolStarvation ? (
+                      <span className="radar-pill-danger" style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                        STARVED
+                      </span>
+                    ) : (
+                      <span className="radar-pill-success" style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                        HEALTHY
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: '#f1f5f9' }}>
+                    {engineInternals?.totalActiveWorkers ?? 0} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>/ {engineInternals?.maxWorkersCount ?? 512} max</span>
+                  </div>
+                  <div style={{ height: '4px', background: 'rgba(255,255,255,0.08)', borderRadius: '2px', overflow: 'hidden', margin: '8px 0 4px' }}>
+                    <div style={{ width: `${Math.min(100, engineInternals?.threadPoolUtilization ?? 0)}%`, height: '100%', background: (engineInternals?.threadPoolUtilization ?? 0) > 80 ? '#f43f5e' : '#38bdf8' }} />
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>
+                    {(engineInternals?.threadPoolUtilization ?? 0).toFixed(1)}% pool capacity allocated
+                  </div>
+                </div>
+
+                {/* Quantum contention */}
+                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>Quantum Contention</span>
+                    <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, background: (engineInternals?.totalRunnableTasks ?? 0) > 0 ? 'rgba(245, 158, 11, 0.18)' : 'rgba(16, 185, 129, 0.18)', color: (engineInternals?.totalRunnableTasks ?? 0) > 0 ? '#fbbf24' : '#34d399' }}>
+                      {engineInternals?.quantumPressureStatus || 'Normal'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: (engineInternals?.totalRunnableTasks ?? 0) > 0 ? '#fbbf24' : '#34d399' }}>
+                    {engineInternals?.totalRunnableTasks ?? 0} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>runnable in queue</span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '8px' }}>
+                    Tasks starved waiting for their 4ms CPU slice via SOS_SCHEDULER_YIELD
+                  </div>
+                </div>
+
+                {/* Scheduler Topology */}
+                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>Visible Online Schedulers</span>
+                    <span style={{ fontSize: '10px', color: '#38bdf8', fontFamily: 'monospace' }}>
+                      sys.dm_os_schedulers
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: '#38bdf8' }}>
+                    {engineInternals?.schedulers?.filter((s) => s.isOnline).length ?? 0} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>Active Online Cores</span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '8px' }}>
+                    {engineInternals?.schedulers?.filter((s) => s.isIdle).length ?? 0} idle • {engineInternals?.schedulers?.filter((s) => !s.isOnline).length ?? 0} hidden/DAC
+                  </div>
+                </div>
+              </div>
+
+              {/* Filter Bar */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexShrink: 0 }}>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${schedulerFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setSchedulerFilter('all')}
+                    style={{ fontSize: '11px', padding: '3px 8px' }}
+                  >
+                    All Schedulers ({engineInternals?.schedulers?.length || 0})
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${schedulerFilter === 'active' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setSchedulerFilter('active')}
+                    style={{ fontSize: '11px', padding: '3px 8px' }}
+                  >
+                    Active / Busy Only ({engineInternals?.schedulers?.filter((s) => s.isOnline && !s.isIdle).length || 0})
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${schedulerFilter === 'warning' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setSchedulerFilter('warning')}
+                    style={{ fontSize: '11px', padding: '3px 8px' }}
+                  >
+                    Quantum Pressure ({engineInternals?.schedulers?.filter((s) => s.quantumHealth !== 'Healthy' || s.workQueueCount > 0).length || 0})
+                  </button>
+                </div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>
+                  Erik Darling 4ms Quantum Contention Matrix
+                </div>
+              </div>
+
+              {/* Schedulers Matrix Cards Scrollable */}
+              <div className="radar-scrollable-block" style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px' }}>
+                <div className="scheduler-matrix-grid">
+                  {(engineInternals?.schedulers || [])
+                    .filter((s) => {
+                      if (schedulerFilter === 'warning') return s.quantumHealth !== 'Healthy' || s.workQueueCount > 0;
+                      if (schedulerFilter === 'active') return s.isOnline && !s.isIdle;
+                      return true;
+                    })
+                    .map((s) => {
+                      const healthClass =
+                        s.quantumHealth === 'Critical' || s.workQueueCount > 0
+                          ? 'health-critical'
+                          : s.quantumHealth === 'Warning'
+                          ? 'health-warning'
+                          : 'health-healthy';
+
+                      return (
+                        <div key={s.schedulerId} className={`scheduler-card ${healthClass} ${!s.isOnline ? 'is-offline' : ''}`}>
+                          <div className="scheduler-card-header">
+                            <div>
+                              <div style={{ fontSize: '13px', fontWeight: 700, color: '#f1f5f9' }}>
+                                Scheduler #{s.schedulerId}
+                              </div>
+                              <div className="scheduler-numa-tag">
+                                CPU #{s.cpuId} • NUMA Node #{s.parentNodeId}
+                              </div>
+                            </div>
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontWeight: 700,
+                                background:
+                                  s.quantumHealth === 'Critical'
+                                    ? 'rgba(244, 63, 94, 0.25)'
+                                    : s.quantumHealth === 'Warning'
+                                    ? 'rgba(245, 158, 11, 0.25)'
+                                    : 'rgba(16, 185, 129, 0.2)',
+                                color:
+                                  s.quantumHealth === 'Critical'
+                                    ? '#f43f5e'
+                                    : s.quantumHealth === 'Warning'
+                                    ? '#fbbf24'
+                                    : '#34d399'
+                              }}
+                            >
+                              {s.workQueueCount > 0 ? 'WORK QUEUE > 0' : s.quantumHealth.toUpperCase()}
+                            </span>
+                          </div>
+
+                          {/* Primary Queue Metric */}
+                          <div style={{ background: 'rgba(255,255,255,0.03)', padding: '8px 10px', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Runnable Tasks Queue</div>
+                              <div style={{ fontSize: '18px', fontWeight: 800, color: s.runnableTasksCount > 2 ? '#f43f5e' : s.runnableTasksCount > 0 ? '#fbbf24' : '#34d399' }}>
+                                {s.runnableTasksCount}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Active Workers</div>
+                              <div style={{ fontSize: '14px', fontWeight: 700, color: '#38bdf8' }}>
+                                {s.activeWorkersCount}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Metrics Rows */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <div className="scheduler-metric-row">
+                              <span className="scheduler-metric-label">Work Queue (Starvation):</span>
+                              <span className="scheduler-metric-val" style={{ color: s.workQueueCount > 0 ? '#f43f5e' : '#cbd5e1' }}>
+                                {s.workQueueCount} {s.workQueueCount > 0 && '⚠️'}
+                              </span>
+                            </div>
+                            <div className="scheduler-metric-row">
+                              <span className="scheduler-metric-label">Yield Count (4ms slice):</span>
+                              <span className="scheduler-metric-val">{s.yieldCount.toLocaleString()}</span>
+                            </div>
+                            <div className="scheduler-metric-row">
+                              <span className="scheduler-metric-label">Context Switches:</span>
+                              <span className="scheduler-metric-val">{s.contextSwitchesCount.toLocaleString()}</span>
+                            </div>
+                            <div className="scheduler-metric-row">
+                              <span className="scheduler-metric-label">Preemptive Switches:</span>
+                              <span className="scheduler-metric-val">{s.preemptiveSwitches.toLocaleString()}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+
+                {/* Erik Darling Diagnostic Insights Box */}
+                <div className="engine-insight-box">
+                  <Info size={18} color="#c084fc" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9', marginBottom: '4px' }}>
+                      Erik Darling Engine Internals Insight: 4ms Quantum & Cooperative Scheduling
+                    </div>
+                    <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', lineHeight: 1.5 }}>
+                      SQL Server executes queries non-preemptively. Every worker thread gets a <strong>4ms quantum</strong> before it must yield the CPU via <code>SOS_SCHEDULER_YIELD</code>.
+                      When <code>runnable_tasks_count &gt; 1</code> on visible online schedulers, multiple queries are queued waiting for a CPU slice, accumulating signal wait time.
+                      If <code>work_queue_count &gt; 0</code>, all worker threads are exhausted and SQL Server is actively stalling requests with <code>THREADPOOL</code> waits.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW 3: NUMA MEMORY BALANCING & INTERCONNECT */}
+          {vitalsSubTab === 'numa' && (
+            <div className="radar-subview-container" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {/* NUMA KPI Row */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '14px', flexShrink: 0 }}>
+                {/* Node Balance */}
+                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>Memory Balance</span>
+                    {engineInternals?.numaSkewDetected ? (
+                      <span className="radar-pill-danger" style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                        SKEW DETECTED
+                      </span>
+                    ) : (
+                      <span className="radar-pill-success" style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                        BALANCED
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: engineInternals?.numaSkewDetected ? '#f43f5e' : '#34d399' }}>
+                    {engineInternals?.numaNodesCount ?? 0} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>Physical NUMA Nodes</span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '8px' }}>
+                    {engineInternals?.numaSkewDetected
+                      ? 'Memory distribution skew (>35%) between sockets'
+                      : 'Uniform buffer pool & grant distribution'}
+                  </div>
+                </div>
+
+                {/* Cross-Socket Interconnect Penalty */}
+                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>Interconnect Latency Risk</span>
+                    <span
+                      style={{
+                        fontSize: '10px',
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        fontWeight: 600,
+                        background:
+                          engineInternals?.crossNumaLatencyRisk.includes('High')
+                            ? 'rgba(244, 63, 94, 0.2)'
+                            : engineInternals?.crossNumaLatencyRisk.includes('Moderate')
+                            ? 'rgba(245, 158, 11, 0.2)'
+                            : 'rgba(16, 185, 129, 0.18)',
+                        color:
+                          engineInternals?.crossNumaLatencyRisk.includes('High')
+                            ? '#f43f5e'
+                            : engineInternals?.crossNumaLatencyRisk.includes('Moderate')
+                            ? '#fbbf24'
+                            : '#34d399'
+                      }}
+                    >
+                      {engineInternals?.crossNumaLatencyRisk || 'Low'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: '#f1f5f9' }}>
+                    {engineInternals?.totalForeignPages?.toLocaleString() ?? 0} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>Foreign Pages</span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '8px' }}>
+                    {(((engineInternals?.totalForeignPages ?? 0) * 8) / 1024).toFixed(1)} MB remote memory traffic across QPI/UPI bus
+                  </div>
+                </div>
+
+                {/* Worker Distribution */}
+                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>Cross-Node Worker Balancing</span>
+                    <span style={{ fontSize: '10px', color: '#38bdf8', fontFamily: 'monospace' }}>
+                      sys.dm_os_nodes
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: '#38bdf8' }}>
+                    {engineInternals?.numaNodes?.reduce((acc, n) => acc + n.activeWorkerCount, 0) ?? 0} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>Active Workers</span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '8px' }}>
+                    Across {engineInternals?.numaNodes?.reduce((acc, n) => acc + n.onlineSchedulerCount, 0) ?? 0} online schedulers
+                  </div>
+                </div>
+              </div>
+
+              {/* NUMA Nodes Cards Scrollable */}
+              <div className="radar-scrollable-block" style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '4px' }}>
+                <div className="numa-grid">
+                  {(engineInternals?.numaNodes || []).map((node) => {
+                    const isSkew = node.foreignPageRatio > 20;
+
+                    return (
+                      <div key={node.nodeId} className={`numa-card ${isSkew ? 'skew-alert' : ''}`}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '10px' }}>
+                          <div>
+                            <div style={{ fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>
+                              NUMA Node #{node.nodeId}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                              Memory Node #{node.memoryNodeId} • {node.nodeStateDesc}
+                            </div>
+                          </div>
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              fontWeight: 700,
+                              background:
+                                node.foreignPageRatio < 5
+                                  ? 'rgba(16, 185, 129, 0.2)'
+                                  : node.foreignPageRatio < 20
+                                  ? 'rgba(245, 158, 11, 0.2)'
+                                  : 'rgba(244, 63, 94, 0.25)',
+                              color:
+                                node.foreignPageRatio < 5
+                                  ? '#34d399'
+                                  : node.foreignPageRatio < 20
+                                  ? '#fbbf24'
+                                  : '#f43f5e'
+                            }}
+                          >
+                            {node.foreignPageRatio < 5
+                              ? 'OPTIMAL AFFINITY'
+                              : node.foreignPageRatio < 20
+                              ? 'MODERATE REMOTE SPILL'
+                              : 'HIGH INTERCONNECT PENALTY'}
+                          </span>
+                        </div>
+
+                        {/* Memory Allocation Bar */}
+                        <div className="numa-mem-bar-wrapper">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px' }}>
+                            <span style={{ color: '#94a3b8' }}>Memory Allocated / Target:</span>
+                            <span style={{ fontWeight: 700, color: '#f1f5f9', fontFamily: 'monospace' }}>
+                              {node.memoryAllocatedMb.toFixed(1)} MB / {node.memoryTargetMb.toFixed(1)} MB
+                            </span>
+                          </div>
+                          <div className="numa-mem-bar-track">
+                            <div
+                              className="numa-mem-bar-fill-local"
+                              style={{
+                                width: `${Math.max(
+                                  0,
+                                  Math.min(100, ((node.memoryAllocatedMb - node.foreignMemoryMb) / (node.memoryTargetMb || 1)) * 100)
+                                )}%`
+                              }}
+                              title="Local Socket Memory Allocation"
+                            />
+                            <div
+                              className="numa-mem-bar-fill-foreign"
+                              style={{
+                                width: `${Math.max(
+                                  0,
+                                  Math.min(100, (node.foreignMemoryMb / (node.memoryTargetMb || 1)) * 100)
+                                )}%`
+                              }}
+                              title="Foreign Cross-Socket Memory Allocation"
+                            />
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b' }}>
+                            <span>● Local Memory</span>
+                            <span style={{ color: '#f87171' }}>● Foreign (Cross-Socket): {node.foreignMemoryMb.toFixed(1)} MB</span>
+                          </div>
+                        </div>
+
+                        {/* Detailed Metrics Grid */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px' }}>
+                          <div>
+                            <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Foreign Pages Count</div>
+                            <div style={{ fontSize: '14px', fontWeight: 700, color: node.foreignPageCount > 0 ? '#fbbf24' : '#34d399' }}>
+                              {node.foreignPageCount.toLocaleString()}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Foreign Page Ratio</div>
+                            <div style={{ fontSize: '14px', fontWeight: 700, color: node.foreignPageRatio > 20 ? '#f43f5e' : node.foreignPageRatio > 5 ? '#fbbf24' : '#34d399' }}>
+                              {node.foreignPageRatio.toFixed(2)}%
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Online Schedulers</div>
+                            <div style={{ fontSize: '14px', fontWeight: 700, color: '#38bdf8' }}>
+                              {node.onlineSchedulerCount} ({node.idleSchedulerCount} idle)
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Active Workers / Load</div>
+                            <div style={{ fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>
+                              {node.activeWorkerCount} (Load: {node.avgLoadBalance})
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Erik Darling Diagnostic Insights Box for NUMA */}
+                <div className="engine-insight-box">
+                  <Info size={18} color="#c084fc" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9', marginBottom: '4px' }}>
+                      Erik Darling Engine Internals Insight: NUMA Foreign Pages & Interconnect Bottlenecks
+                    </div>
+                    <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', lineHeight: 1.5 }}>
+                      On modern NUMA hardware, access to local RAM attached to the same CPU socket takes ~60-80ns, whereas access to remote RAM on another socket across the <strong>UPI/QPI interconnect bus takes ~100-140ns</strong>.
+                      A high <code>foreign_page_count</code> indicates that memory allocations for queries on this NUMA node had to be satisfied by borrowing pages from another node because the local buffer pool was exhausted.
+                      Severe NUMA memory skew leads to asymmetric buffer cache churn and cross-socket memory bus contention.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
       </div> {/* Closing radar-content-area */}

@@ -27,6 +27,8 @@ export function GetLiveDeadlocks(arg1:number):Promise<Array<livedb.LiveDeadlockR
 
 export function GetLiveDuplicateIndexes():Promise<Array<livedb.DuplicateIndex>>;
 
+export function GetLiveEngineInternals():Promise<livedb.EngineInternalsReport>;
+
 export function GetLiveIdleSessions(arg1:number):Promise<Array<livedb.IdleSession>>;
 
 export function GetLiveMissingIndexes(arg1:number):Promise<Array<livedb.LiveMissingIndex>>;

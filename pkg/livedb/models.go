@@ -249,3 +249,55 @@ type DuplicateIndex struct {
 	OverlapType   string `json:"overlapType"` // "Exact Duplicate" or "Left-Prefix Redundant"
 	DropStatement string `json:"dropStatement"`
 }
+
+// CPUSchedulerInfo represents deep scheduler quantum and worker metrics from sys.dm_os_schedulers
+type CPUSchedulerInfo struct {
+	SchedulerID          int    `json:"schedulerId"`
+	CPUID                int    `json:"cpuId"`
+	Status               string `json:"status"`
+	IsOnline             bool   `json:"isOnline"`
+	IsIdle               bool   `json:"isIdle"`
+	CurrentTasksCount    int    `json:"currentTasksCount"`
+	RunnableTasksCount   int    `json:"runnableTasksCount"`
+	ActiveWorkersCount   int    `json:"activeWorkersCount"`
+	WorkQueueCount       int    `json:"workQueueCount"`
+	ContextSwitchesCount int64  `json:"contextSwitchesCount"`
+	YieldCount           int64  `json:"yieldCount"`
+	PreemptiveSwitches   int64  `json:"preemptiveSwitches"`
+	ParentNodeID         int    `json:"parentNodeId"`
+	QuantumHealth        string `json:"quantumHealth"` // "Healthy", "Warning", "Critical"
+}
+
+// NUMANodeInfo represents NUMA memory and CPU load balancing from sys.dm_os_nodes and sys.dm_os_memory_nodes
+type NUMANodeInfo struct {
+	NodeID               int     `json:"nodeId"`
+	MemoryNodeID         int     `json:"memoryNodeId"`
+	NodeStateDesc        string  `json:"nodeStateDesc"`
+	OnlineSchedulerCount int     `json:"onlineSchedulerCount"`
+	IdleSchedulerCount   int     `json:"idleSchedulerCount"`
+	ActiveWorkerCount    int     `json:"activeWorkerCount"`
+	AvgLoadBalance       int     `json:"avgLoadBalance"`
+	MemoryAllocatedMB    float64 `json:"memoryAllocatedMb"`
+	MemoryTargetMB       float64 `json:"memoryTargetMb"`
+	ForeignPageCount     int64   `json:"foreignPageCount"`
+	ForeignMemoryMB      float64 `json:"foreignMemoryMb"`
+	ForeignPageRatio     float64 `json:"foreignPageRatio"`
+}
+
+// EngineInternalsReport represents comprehensive CPU scheduler quantum analysis and NUMA hardware memory balancing
+type EngineInternalsReport struct {
+	MaxWorkersCount        int                `json:"maxWorkersCount"`
+	TotalActiveWorkers     int                `json:"totalActiveWorkers"`
+	ThreadPoolUtilization  float64            `json:"threadPoolUtilization"`
+	ThreadPoolStarvation   bool               `json:"threadPoolStarvation"`
+	TotalRunnableTasks     int                `json:"totalRunnableTasks"`
+	QuantumPressureStatus  string             `json:"quantumPressureStatus"`
+	QuantumPressureSummary string             `json:"quantumPressureSummary"`
+	NUMANodesCount         int                `json:"numaNodesCount"`
+	NUMASkewDetected       bool               `json:"numaSkewDetected"`
+	TotalForeignPages      int64              `json:"totalForeignPages"`
+	CrossNUMALatencyRisk   string             `json:"crossNumaLatencyRisk"`
+	Schedulers             []CPUSchedulerInfo `json:"schedulers"`
+	NUMANodes              []NUMANodeInfo     `json:"numaNodes"`
+}
+

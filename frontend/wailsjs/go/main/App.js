@@ -46,6 +46,10 @@ export function GetLiveDuplicateIndexes() {
   return window['go']['main']['App']['GetLiveDuplicateIndexes']();
 }
 
+export function GetLiveEngineInternals() {
+  return window['go']['main']['App']['GetLiveEngineInternals']();
+}
+
 export function GetLiveIdleSessions(arg1) {
   return window['go']['main']['App']['GetLiveIdleSessions'](arg1);
 }

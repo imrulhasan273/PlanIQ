@@ -261,3 +261,10 @@ func (a *App) GetLiveDuplicateIndexes() ([]livedb.DuplicateIndex, error) {
 	return client.GetDuplicateIndexes(a.ctx)
 }
 
+// GetLiveEngineInternals analyzes CPU scheduler quantum exhaustion and NUMA memory balancing
+func (a *App) GetLiveEngineInternals() (*livedb.EngineInternalsReport, error) {
+	client := livedb.GetClient()
+	return client.GetEngineInternals(a.ctx)
+}
+
+

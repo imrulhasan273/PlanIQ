@@ -226,6 +226,44 @@ export namespace livedb {
 	        this.rowCount = source["rowCount"];
 	    }
 	}
+	export class CPUSchedulerInfo {
+	    schedulerId: number;
+	    cpuId: number;
+	    status: string;
+	    isOnline: boolean;
+	    isIdle: boolean;
+	    currentTasksCount: number;
+	    runnableTasksCount: number;
+	    activeWorkersCount: number;
+	    workQueueCount: number;
+	    contextSwitchesCount: number;
+	    yieldCount: number;
+	    preemptiveSwitches: number;
+	    parentNodeId: number;
+	    quantumHealth: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CPUSchedulerInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schedulerId = source["schedulerId"];
+	        this.cpuId = source["cpuId"];
+	        this.status = source["status"];
+	        this.isOnline = source["isOnline"];
+	        this.isIdle = source["isIdle"];
+	        this.currentTasksCount = source["currentTasksCount"];
+	        this.runnableTasksCount = source["runnableTasksCount"];
+	        this.activeWorkersCount = source["activeWorkersCount"];
+	        this.workQueueCount = source["workQueueCount"];
+	        this.contextSwitchesCount = source["contextSwitchesCount"];
+	        this.yieldCount = source["yieldCount"];
+	        this.preemptiveSwitches = source["preemptiveSwitches"];
+	        this.parentNodeId = source["parentNodeId"];
+	        this.quantumHealth = source["quantumHealth"];
+	    }
+	}
 	export class ConnectionConfig {
 	    server: string;
 	    port: number;
@@ -307,6 +345,94 @@ export namespace livedb {
 	        this.overlapType = source["overlapType"];
 	        this.dropStatement = source["dropStatement"];
 	    }
+	}
+	export class NUMANodeInfo {
+	    nodeId: number;
+	    memoryNodeId: number;
+	    nodeStateDesc: string;
+	    onlineSchedulerCount: number;
+	    idleSchedulerCount: number;
+	    activeWorkerCount: number;
+	    avgLoadBalance: number;
+	    memoryAllocatedMb: number;
+	    memoryTargetMb: number;
+	    foreignPageCount: number;
+	    foreignMemoryMb: number;
+	    foreignPageRatio: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new NUMANodeInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.nodeId = source["nodeId"];
+	        this.memoryNodeId = source["memoryNodeId"];
+	        this.nodeStateDesc = source["nodeStateDesc"];
+	        this.onlineSchedulerCount = source["onlineSchedulerCount"];
+	        this.idleSchedulerCount = source["idleSchedulerCount"];
+	        this.activeWorkerCount = source["activeWorkerCount"];
+	        this.avgLoadBalance = source["avgLoadBalance"];
+	        this.memoryAllocatedMb = source["memoryAllocatedMb"];
+	        this.memoryTargetMb = source["memoryTargetMb"];
+	        this.foreignPageCount = source["foreignPageCount"];
+	        this.foreignMemoryMb = source["foreignMemoryMb"];
+	        this.foreignPageRatio = source["foreignPageRatio"];
+	    }
+	}
+	export class EngineInternalsReport {
+	    maxWorkersCount: number;
+	    totalActiveWorkers: number;
+	    threadPoolUtilization: number;
+	    threadPoolStarvation: boolean;
+	    totalRunnableTasks: number;
+	    quantumPressureStatus: string;
+	    quantumPressureSummary: string;
+	    numaNodesCount: number;
+	    numaSkewDetected: boolean;
+	    totalForeignPages: number;
+	    crossNumaLatencyRisk: string;
+	    schedulers: CPUSchedulerInfo[];
+	    numaNodes: NUMANodeInfo[];
+	
+	    static createFrom(source: any = {}) {
+	        return new EngineInternalsReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.maxWorkersCount = source["maxWorkersCount"];
+	        this.totalActiveWorkers = source["totalActiveWorkers"];
+	        this.threadPoolUtilization = source["threadPoolUtilization"];
+	        this.threadPoolStarvation = source["threadPoolStarvation"];
+	        this.totalRunnableTasks = source["totalRunnableTasks"];
+	        this.quantumPressureStatus = source["quantumPressureStatus"];
+	        this.quantumPressureSummary = source["quantumPressureSummary"];
+	        this.numaNodesCount = source["numaNodesCount"];
+	        this.numaSkewDetected = source["numaSkewDetected"];
+	        this.totalForeignPages = source["totalForeignPages"];
+	        this.crossNumaLatencyRisk = source["crossNumaLatencyRisk"];
+	        this.schedulers = this.convertValues(source["schedulers"], CPUSchedulerInfo);
+	        this.numaNodes = this.convertValues(source["numaNodes"], NUMANodeInfo);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class IdleSession {
 	    spid: number;
@@ -498,6 +624,7 @@ export namespace livedb {
 	        this.recommendation = source["recommendation"];
 	    }
 	}
+	
 	export class PerformanceAdvisor {
 	    id: string;
 	    severity: string;
