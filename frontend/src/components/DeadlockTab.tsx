@@ -41,21 +41,19 @@ import { toPng, toSvg } from 'html-to-image';
 interface DeadlockTabProps {
   initialDeadlocks?: DeadlockGraph[];
   onOpenXdlFile?: () => void;
+  onLoadSample?: () => void;
 }
 
 export const DeadlockTab: React.FC<DeadlockTabProps> = ({
   initialDeadlocks,
   onOpenXdlFile,
+  onLoadSample,
 }) => {
   const [deadlocks, setDeadlocks] = useState<DeadlockGraph[]>(() => {
     if (initialDeadlocks && initialDeadlocks.length > 0) {
       return initialDeadlocks;
     }
-    try {
-      return parseDeadlockXML(SAMPLE_DEADLOCK_XDL);
-    } catch {
-      return [];
-    }
+    return [];
   });
 
   const [activeIdx, setActiveIdx] = useState<number>(0);
@@ -105,6 +103,9 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
       const parsed = parseDeadlockXML(SAMPLE_DEADLOCK_XDL);
       setDeadlocks(parsed);
       setActiveIdx(0);
+      if (onLoadSample) {
+        onLoadSample();
+      }
     } catch (e) {
       console.error(e);
     }
@@ -189,15 +190,113 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
   if (!activeDeadlock) {
     return (
       <div className="tab-scroll-container">
-        <div className="glass-panel" style={{ padding: '40px', textAlign: 'center' }}>
-          <ShieldAlert size={48} color="#f43f5e" style={{ margin: '0 auto 16px' }} />
-          <h2>No Deadlock Graph Loaded</h2>
-          <p style={{ color: '#94a3b8', margin: '8px 0 24px' }}>
-            Load a sample SQL Server deadlock report or open a .xdl file to visualize the lock cycle.
+        <div
+          className="glass-panel"
+          style={{
+            maxWidth: '680px',
+            margin: '40px auto',
+            padding: '48px 36px',
+            textAlign: 'center',
+            borderRadius: '16px',
+            border: '1px solid rgba(244, 63, 94, 0.25)',
+            background: 'linear-gradient(180deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.85) 100%)',
+            boxShadow: '0 20px 50px rgba(0, 0, 0, 0.4)',
+          }}
+        >
+          <div
+            style={{
+              width: '72px',
+              height: '72px',
+              borderRadius: '20px',
+              background: 'rgba(244, 63, 94, 0.12)',
+              border: '1px solid rgba(244, 63, 94, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 20px',
+            }}
+          >
+            <ShieldAlert size={36} color="#f43f5e" />
+          </div>
+
+          <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#f8fafc', marginBottom: '8px' }}>
+            SQL Server Deadlock Analyzer
+          </h2>
+          <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.6', maxWidth: '520px', margin: '0 auto 28px' }}>
+            Visualize circular lock dependencies, identify victim processes rolled back by the engine, inspect lock resources, and generate automated EF Core &amp; T-SQL resolution scripts.
           </p>
-          <button className="btn btn-primary" onClick={handleLoadSample}>
-            Load Sample Deadlock (.xdl)
-          </button>
+
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '32px' }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleLoadSample}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 22px', fontSize: '13px', fontWeight: 600 }}
+            >
+              <FileCode2 size={16} />
+              <span>Sample Plan (.xdl)</span>
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleOpenXdlFile}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 22px', fontSize: '13px', fontWeight: 600 }}
+            >
+              <Upload size={16} color="#38bdf8" />
+              <span>Open .xdl File</span>
+            </button>
+          </div>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xdl,.xml"
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
+          />
+
+          {/* Quick Capability Highlights */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: '12px',
+              textAlign: 'left',
+              marginTop: '10px',
+              paddingTop: '24px',
+              borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Skull size={18} color="#f43f5e" />
+              <div>
+                <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#e2e8f0' }}>Victim Detection</div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>Identifies rolled-back SPID</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Lock size={18} color="#fbbf24" />
+              <div>
+                <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#e2e8f0' }}>Lock Modes &amp; Graph</div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>Key, page &amp; object locks</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Clock size={18} color="#38bdf8" />
+              <div>
+                <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#e2e8f0' }}>Lock Timeline</div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>Chronological sequence</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Sparkles size={18} color="#34d399" />
+              <div>
+                <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#e2e8f0' }}>Automated Fixes</div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>EF Core &amp; T-SQL remedies</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -347,7 +446,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
               title="Load demo classic 2-process deadlock"
             >
               <FileCode2 size={13} color="#38bdf8" />
-              <span>Sample .xdl</span>
+              <span>Sample Plan</span>
             </button>
 
             <button

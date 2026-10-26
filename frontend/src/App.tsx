@@ -17,7 +17,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { PlanAnalysis, StatementAnalysis } from './types/plan';
 import { DeadlockGraph } from './types/deadlock';
 import { ConnectionStatus } from './types/livedb';
-import { isDeadlockXML, parseDeadlockXML, readFileAsDecodedText } from './utils/deadlockParser';
+import { SAMPLE_DEADLOCK_XDL, isDeadlockXML, parseDeadlockXML, readFileAsDecodedText } from './utils/deadlockParser';
 import { LoadSamplePlan, OpenFileAndParse, OpenFilePicker, ParsePlan, GetLiveDBStatus } from '../wailsjs/go/main/App';
 import { exportDiagnosticReportHTML } from './utils/reportExporter';
 import { parseShowPlanXMLClient } from './utils/clientPlanParser';
@@ -99,6 +99,16 @@ export function App() {
   }, []);
 
   const handleLoadSample = async () => {
+    if (activeTab === 'deadlock') {
+      try {
+        const deadlocks = parseDeadlockXML(SAMPLE_DEADLOCK_XDL);
+        setDeadlockGraphs(deadlocks);
+      } catch (err: any) {
+        console.error('Failed to parse sample deadlock:', err);
+      }
+      return;
+    }
+
     setIsLoading(true);
     setErrorMessage(null);
     try {
@@ -324,6 +334,10 @@ export function App() {
             <DeadlockTab
               initialDeadlocks={deadlockGraphs}
               onOpenXdlFile={handleOpenFile}
+              onLoadSample={() => {
+                const parsed = parseDeadlockXML(SAMPLE_DEADLOCK_XDL);
+                setDeadlockGraphs(parsed);
+              }}
             />
           </ErrorBoundary>
         ) : activeTab === 'playbook' ? (
