@@ -1915,7 +1915,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
                   PLAN A OPERATORS ({nodesA.length} nodes)
                 </span>
                 <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>
-                  Stmt Cost: <strong style={{ color: '#f43f5e' }}>{activeStatementA?.statementSubTreeCost.toFixed(2)}</strong>
+                  Stmt Cost: <strong style={{ color: '#f43f5e' }}>{((activeStatementA?.statementSubTreeCost ?? 0)).toFixed(2)}</strong>
                 </span>
               </div>
 
@@ -1980,7 +1980,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
                   PLAN B OPERATORS ({nodesB.length} nodes)
                 </span>
                 <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>
-                  Stmt Cost: <strong style={{ color: '#34d399' }}>{activeStatementB?.statementSubTreeCost.toFixed(2)}</strong>
+                  Stmt Cost: <strong style={{ color: '#34d399' }}>{((activeStatementB?.statementSubTreeCost ?? 0)).toFixed(2)}</strong>
                 </span>
               </div>
 

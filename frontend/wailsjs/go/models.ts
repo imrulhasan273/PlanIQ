@@ -196,6 +196,36 @@ export namespace livedb {
 	        this.percentComplete = source["percentComplete"];
 	    }
 	}
+	export class BufferPoolConsumer {
+	    databaseName: string;
+	    schemaName: string;
+	    objectName: string;
+	    indexName: string;
+	    indexType: string;
+	    bufferSizeMb: number;
+	    cleanPagesMb: number;
+	    dirtyPagesMb: number;
+	    percentageOfBuffer: number;
+	    rowCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new BufferPoolConsumer(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.databaseName = source["databaseName"];
+	        this.schemaName = source["schemaName"];
+	        this.objectName = source["objectName"];
+	        this.indexName = source["indexName"];
+	        this.indexType = source["indexType"];
+	        this.bufferSizeMb = source["bufferSizeMb"];
+	        this.cleanPagesMb = source["cleanPagesMb"];
+	        this.dirtyPagesMb = source["dirtyPagesMb"];
+	        this.percentageOfBuffer = source["percentageOfBuffer"];
+	        this.rowCount = source["rowCount"];
+	    }
+	}
 	export class ConnectionConfig {
 	    server: string;
 	    port: number;
@@ -254,6 +284,110 @@ export namespace livedb {
 	        this.errorMessage = source["errorMessage"];
 	    }
 	}
+	export class DuplicateIndex {
+	    tableName: string;
+	    indexName: string;
+	    duplicateOf: string;
+	    indexCols: string;
+	    includedCols: string;
+	    overlapType: string;
+	    dropStatement: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DuplicateIndex(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tableName = source["tableName"];
+	        this.indexName = source["indexName"];
+	        this.duplicateOf = source["duplicateOf"];
+	        this.indexCols = source["indexCols"];
+	        this.includedCols = source["includedCols"];
+	        this.overlapType = source["overlapType"];
+	        this.dropStatement = source["dropStatement"];
+	    }
+	}
+	export class IdleSession {
+	    spid: number;
+	    status: string;
+	    loginName: string;
+	    hostName: string;
+	    programName: string;
+	    databaseName: string;
+	    openTransactions: number;
+	    lastRequestStartTime: string;
+	    lastRequestEndTime: string;
+	    idleSeconds: number;
+	    totalCpuTimeMs: number;
+	    totalElapsedTimeMs: number;
+	    logicalReads: number;
+	    writes: number;
+	    memoryUsageKb: number;
+	    lastQueryText: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new IdleSession(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.spid = source["spid"];
+	        this.status = source["status"];
+	        this.loginName = source["loginName"];
+	        this.hostName = source["hostName"];
+	        this.programName = source["programName"];
+	        this.databaseName = source["databaseName"];
+	        this.openTransactions = source["openTransactions"];
+	        this.lastRequestStartTime = source["lastRequestStartTime"];
+	        this.lastRequestEndTime = source["lastRequestEndTime"];
+	        this.idleSeconds = source["idleSeconds"];
+	        this.totalCpuTimeMs = source["totalCpuTimeMs"];
+	        this.totalElapsedTimeMs = source["totalElapsedTimeMs"];
+	        this.logicalReads = source["logicalReads"];
+	        this.writes = source["writes"];
+	        this.memoryUsageKb = source["memoryUsageKb"];
+	        this.lastQueryText = source["lastQueryText"];
+	    }
+	}
+	export class LiveBlockingSession {
+	    rootBlockerSpid: number;
+	    rootBlockerStatus: string;
+	    rootBlockerLogin: string;
+	    rootBlockerProgram: string;
+	    rootBlockerQuery: string;
+	    blockedSpid: number;
+	    blockedStatus: string;
+	    blockedLogin: string;
+	    blockedProgram: string;
+	    blockedWaitType: string;
+	    blockedWaitTimeMs: number;
+	    blockedQuery: string;
+	    lockResource: string;
+	    lockMode: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LiveBlockingSession(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rootBlockerSpid = source["rootBlockerSpid"];
+	        this.rootBlockerStatus = source["rootBlockerStatus"];
+	        this.rootBlockerLogin = source["rootBlockerLogin"];
+	        this.rootBlockerProgram = source["rootBlockerProgram"];
+	        this.rootBlockerQuery = source["rootBlockerQuery"];
+	        this.blockedSpid = source["blockedSpid"];
+	        this.blockedStatus = source["blockedStatus"];
+	        this.blockedLogin = source["blockedLogin"];
+	        this.blockedProgram = source["blockedProgram"];
+	        this.blockedWaitType = source["blockedWaitType"];
+	        this.blockedWaitTimeMs = source["blockedWaitTimeMs"];
+	        this.blockedQuery = source["blockedQuery"];
+	        this.lockResource = source["lockResource"];
+	        this.lockMode = source["lockMode"];
+	    }
+	}
 	export class LiveDeadlockReport {
 	    timestamp: string;
 	    victimSpid: number;
@@ -276,6 +410,124 @@ export namespace livedb {
 	        this.lockedResourceCount = source["lockedResourceCount"];
 	        this.deadlockType = source["deadlockType"];
 	        this.summary = source["summary"];
+	    }
+	}
+	export class LiveMissingIndex {
+	    databaseName: string;
+	    tableName: string;
+	    impactScore: number;
+	    userSeeks: number;
+	    userScans: number;
+	    avgTotalUserCost: number;
+	    avgUserImpact: number;
+	    equalityColumns: string;
+	    inequalityColumns: string;
+	    includedColumns: string;
+	    createIndexStatement: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LiveMissingIndex(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.databaseName = source["databaseName"];
+	        this.tableName = source["tableName"];
+	        this.impactScore = source["impactScore"];
+	        this.userSeeks = source["userSeeks"];
+	        this.userScans = source["userScans"];
+	        this.avgTotalUserCost = source["avgTotalUserCost"];
+	        this.avgUserImpact = source["avgUserImpact"];
+	        this.equalityColumns = source["equalityColumns"];
+	        this.inequalityColumns = source["inequalityColumns"];
+	        this.includedColumns = source["includedColumns"];
+	        this.createIndexStatement = source["createIndexStatement"];
+	    }
+	}
+	export class LiveTempDBUsage {
+	    spid: number;
+	    databaseName: string;
+	    loginName: string;
+	    programName: string;
+	    userObjectsAllocMb: number;
+	    userObjectsDeallocMb: number;
+	    internalObjectsAllocMb: number;
+	    internalObjectsDeallocMb: number;
+	    queryText: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LiveTempDBUsage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.spid = source["spid"];
+	        this.databaseName = source["databaseName"];
+	        this.loginName = source["loginName"];
+	        this.programName = source["programName"];
+	        this.userObjectsAllocMb = source["userObjectsAllocMb"];
+	        this.userObjectsDeallocMb = source["userObjectsDeallocMb"];
+	        this.internalObjectsAllocMb = source["internalObjectsAllocMb"];
+	        this.internalObjectsDeallocMb = source["internalObjectsDeallocMb"];
+	        this.queryText = source["queryText"];
+	    }
+	}
+	export class LiveWaitStat {
+	    waitType: string;
+	    waitCategory: string;
+	    waitingTasksCount: number;
+	    waitTimeMs: number;
+	    signalWaitTimeMs: number;
+	    percentage: number;
+	    description: string;
+	    recommendation: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LiveWaitStat(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.waitType = source["waitType"];
+	        this.waitCategory = source["waitCategory"];
+	        this.waitingTasksCount = source["waitingTasksCount"];
+	        this.waitTimeMs = source["waitTimeMs"];
+	        this.signalWaitTimeMs = source["signalWaitTimeMs"];
+	        this.percentage = source["percentage"];
+	        this.description = source["description"];
+	        this.recommendation = source["recommendation"];
+	    }
+	}
+	export class PerformanceAdvisor {
+	    id: string;
+	    severity: string;
+	    category: string;
+	    title: string;
+	    description: string;
+	    queryId?: number;
+	    queryText?: string;
+	    metricValue: string;
+	    timestamp: string;
+	    planXml?: string;
+	    recommendation: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PerformanceAdvisor(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.severity = source["severity"];
+	        this.category = source["category"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.queryId = source["queryId"];
+	        this.queryText = source["queryText"];
+	        this.metricValue = source["metricValue"];
+	        this.timestamp = source["timestamp"];
+	        this.planXml = source["planXml"];
+	        this.recommendation = source["recommendation"];
 	    }
 	}
 	export class QueryStoreEntry {
@@ -340,6 +592,68 @@ export namespace livedb {
 	        this.tempDbUserObjectsMb = source["tempDbUserObjectsMb"];
 	        this.tempDbInternalMb = source["tempDbInternalMb"];
 	        this.batchRequestsPerSec = source["batchRequestsPerSec"];
+	    }
+	}
+	export class UnusedIndex {
+	    databaseName: string;
+	    schemaName: string;
+	    tableName: string;
+	    indexName: string;
+	    indexType: string;
+	    indexSizeMb: number;
+	    userWrites: number;
+	    userSeeks: number;
+	    userScans: number;
+	    userLookups: number;
+	    dropStatement: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UnusedIndex(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.databaseName = source["databaseName"];
+	        this.schemaName = source["schemaName"];
+	        this.tableName = source["tableName"];
+	        this.indexName = source["indexName"];
+	        this.indexType = source["indexType"];
+	        this.indexSizeMb = source["indexSizeMb"];
+	        this.userWrites = source["userWrites"];
+	        this.userSeeks = source["userSeeks"];
+	        this.userScans = source["userScans"];
+	        this.userLookups = source["userLookups"];
+	        this.dropStatement = source["dropStatement"];
+	    }
+	}
+	export class WaitTimeHistoryPoint {
+	    intervalLabel: string;
+	    totalWaitMs: number;
+	    cpuWaitMs: number;
+	    lockWaitMs: number;
+	    ioWaitMs: number;
+	    memoryWaitMs: number;
+	    otherWaitMs: number;
+	    executionCount: number;
+	    isAnomaly: boolean;
+	    anomalyReason?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WaitTimeHistoryPoint(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.intervalLabel = source["intervalLabel"];
+	        this.totalWaitMs = source["totalWaitMs"];
+	        this.cpuWaitMs = source["cpuWaitMs"];
+	        this.lockWaitMs = source["lockWaitMs"];
+	        this.ioWaitMs = source["ioWaitMs"];
+	        this.memoryWaitMs = source["memoryWaitMs"];
+	        this.otherWaitMs = source["otherWaitMs"];
+	        this.executionCount = source["executionCount"];
+	        this.isAnomaly = source["isAnomaly"];
+	        this.anomalyReason = source["anomalyReason"];
 	    }
 	}
 

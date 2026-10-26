@@ -18,8 +18,20 @@ export function GetAIAdvice(arg1) {
   return window['go']['main']['App']['GetAIAdvice'](arg1);
 }
 
-export function GetLiveActiveSessions() {
-  return window['go']['main']['App']['GetLiveActiveSessions']();
+export function GetLiveActiveSessions(arg1) {
+  return window['go']['main']['App']['GetLiveActiveSessions'](arg1);
+}
+
+export function GetLiveAdvisors() {
+  return window['go']['main']['App']['GetLiveAdvisors']();
+}
+
+export function GetLiveBlockingSessions() {
+  return window['go']['main']['App']['GetLiveBlockingSessions']();
+}
+
+export function GetLiveBufferPool(arg1) {
+  return window['go']['main']['App']['GetLiveBufferPool'](arg1);
 }
 
 export function GetLiveDBStatus() {
@@ -28,6 +40,18 @@ export function GetLiveDBStatus() {
 
 export function GetLiveDeadlocks(arg1) {
   return window['go']['main']['App']['GetLiveDeadlocks'](arg1);
+}
+
+export function GetLiveDuplicateIndexes() {
+  return window['go']['main']['App']['GetLiveDuplicateIndexes']();
+}
+
+export function GetLiveIdleSessions(arg1) {
+  return window['go']['main']['App']['GetLiveIdleSessions'](arg1);
+}
+
+export function GetLiveMissingIndexes(arg1) {
+  return window['go']['main']['App']['GetLiveMissingIndexes'](arg1);
 }
 
 export function GetLiveQueryStore(arg1, arg2) {
@@ -40,6 +64,22 @@ export function GetLiveServerVitals() {
 
 export function GetLiveSessionPlan(arg1) {
   return window['go']['main']['App']['GetLiveSessionPlan'](arg1);
+}
+
+export function GetLiveTempDBUsage(arg1) {
+  return window['go']['main']['App']['GetLiveTempDBUsage'](arg1);
+}
+
+export function GetLiveUnusedIndexes(arg1) {
+  return window['go']['main']['App']['GetLiveUnusedIndexes'](arg1);
+}
+
+export function GetLiveWaitHistory() {
+  return window['go']['main']['App']['GetLiveWaitHistory']();
+}
+
+export function GetLiveWaitStats(arg1) {
+  return window['go']['main']['App']['GetLiveWaitStats'](arg1);
 }
 
 export function LoadSamplePlan() {

@@ -172,9 +172,9 @@ func (a *App) GetLiveDBStatus() livedb.ConnectionStatus {
 }
 
 // GetLiveActiveSessions returns currently running user requests from sys.dm_exec_requests
-func (a *App) GetLiveActiveSessions() ([]livedb.ActiveSession, error) {
+func (a *App) GetLiveActiveSessions(limit int) ([]livedb.ActiveSession, error) {
 	client := livedb.GetClient()
-	return client.GetActiveSessions(a.ctx)
+	return client.GetActiveSessions(a.ctx, limit)
 }
 
 // GetLiveSessionPlan retrieves ShowPlan XML for an in-flight plan handle
@@ -199,5 +199,65 @@ func (a *App) GetLiveDeadlocks(limit int) ([]livedb.LiveDeadlockReport, error) {
 func (a *App) GetLiveServerVitals() (*livedb.ServerVitals, error) {
 	client := livedb.GetClient()
 	return client.GetServerVitals(a.ctx)
+}
+
+// GetLiveWaitStats returns instance-wide cumulative wait statistics
+func (a *App) GetLiveWaitStats(limit int) ([]livedb.LiveWaitStat, error) {
+	client := livedb.GetClient()
+	return client.GetWaitStats(a.ctx, limit)
+}
+
+// GetLiveBlockingSessions returns currently active blocking chains and victims
+func (a *App) GetLiveBlockingSessions() ([]livedb.LiveBlockingSession, error) {
+	client := livedb.GetClient()
+	return client.GetBlockingSessions(a.ctx)
+}
+
+// GetLiveMissingIndexes returns real-time missing index recommendations
+func (a *App) GetLiveMissingIndexes(limit int) ([]livedb.LiveMissingIndex, error) {
+	client := livedb.GetClient()
+	return client.GetMissingIndexes(a.ctx, limit)
+}
+
+// GetLiveTempDBUsage returns TempDB space allocation per SPID
+func (a *App) GetLiveTempDBUsage(limit int) ([]livedb.LiveTempDBUsage, error) {
+	client := livedb.GetClient()
+	return client.GetTempDBUsage(a.ctx, limit)
+}
+
+// GetLiveIdleSessions returns sleeping, dormant, and open-transaction sessions
+func (a *App) GetLiveIdleSessions(limit int) ([]livedb.IdleSession, error) {
+	client := livedb.GetClient()
+	return client.GetIdleSessions(a.ctx, limit)
+}
+
+// GetLiveAdvisors returns automated AI performance insights and anomaly alerts (SolarWinds DPA Advisors)
+func (a *App) GetLiveAdvisors() ([]livedb.PerformanceAdvisor, error) {
+	client := livedb.GetClient()
+	return client.GetPerformanceAdvisors(a.ctx)
+}
+
+// GetLiveWaitHistory returns hourly/daily wait time history and anomalies (SolarWinds DPA Trend Chart)
+func (a *App) GetLiveWaitHistory() ([]livedb.WaitTimeHistoryPoint, error) {
+	client := livedb.GetClient()
+	return client.GetWaitHistory(a.ctx)
+}
+
+// GetLiveBufferPool returns tables and indexes consuming RAM in buffer pool
+func (a *App) GetLiveBufferPool(limit int) ([]livedb.BufferPoolConsumer, error) {
+	client := livedb.GetClient()
+	return client.GetBufferPoolUsage(a.ctx, limit)
+}
+
+// GetLiveUnusedIndexes returns indexes with write overhead but 0 seeks/scans
+func (a *App) GetLiveUnusedIndexes(limit int) ([]livedb.UnusedIndex, error) {
+	client := livedb.GetClient()
+	return client.GetUnusedIndexes(a.ctx, limit)
+}
+
+// GetLiveDuplicateIndexes returns overlapping or redundant indexes
+func (a *App) GetLiveDuplicateIndexes() ([]livedb.DuplicateIndex, error) {
+	client := livedb.GetClient()
+	return client.GetDuplicateIndexes(a.ctx)
 }
 

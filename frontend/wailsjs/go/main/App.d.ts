@@ -13,17 +13,37 @@ export function DisconnectLiveDB():Promise<void>;
 
 export function GetAIAdvice(arg1:advisor.AIRequest):Promise<advisor.AIResponse>;
 
-export function GetLiveActiveSessions():Promise<Array<livedb.ActiveSession>>;
+export function GetLiveActiveSessions(arg1:number):Promise<Array<livedb.ActiveSession>>;
+
+export function GetLiveAdvisors():Promise<Array<livedb.PerformanceAdvisor>>;
+
+export function GetLiveBlockingSessions():Promise<Array<livedb.LiveBlockingSession>>;
+
+export function GetLiveBufferPool(arg1:number):Promise<Array<livedb.BufferPoolConsumer>>;
 
 export function GetLiveDBStatus():Promise<livedb.ConnectionStatus>;
 
 export function GetLiveDeadlocks(arg1:number):Promise<Array<livedb.LiveDeadlockReport>>;
+
+export function GetLiveDuplicateIndexes():Promise<Array<livedb.DuplicateIndex>>;
+
+export function GetLiveIdleSessions(arg1:number):Promise<Array<livedb.IdleSession>>;
+
+export function GetLiveMissingIndexes(arg1:number):Promise<Array<livedb.LiveMissingIndex>>;
 
 export function GetLiveQueryStore(arg1:string,arg2:number):Promise<Array<livedb.QueryStoreEntry>>;
 
 export function GetLiveServerVitals():Promise<livedb.ServerVitals>;
 
 export function GetLiveSessionPlan(arg1:string):Promise<string>;
+
+export function GetLiveTempDBUsage(arg1:number):Promise<Array<livedb.LiveTempDBUsage>>;
+
+export function GetLiveUnusedIndexes(arg1:number):Promise<Array<livedb.UnusedIndex>>;
+
+export function GetLiveWaitHistory():Promise<Array<livedb.WaitTimeHistoryPoint>>;
+
+export function GetLiveWaitStats(arg1:number):Promise<Array<livedb.LiveWaitStat>>;
 
 export function LoadSamplePlan():Promise<sqlplan.PlanAnalysis>;
 
