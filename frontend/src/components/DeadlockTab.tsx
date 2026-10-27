@@ -1314,6 +1314,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
             {/* Final Victim Rollback event */}
             {activeDeadlock.victimSpid && (
               <div
+                className="deadlock-resolution-card"
                 style={{
                   display: 'flex',
                   gap: '16px',
@@ -1417,7 +1418,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
 
               {victimProcess && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '12px' }}>
-                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <div className="deadlock-session-meta" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div><span style={{ color: '#64748b' }}>Rollback Cost:</span> <strong style={{ color: '#f43f5e' }}>{victimProcess.logUsedBytes !== undefined ? `${(victimProcess.logUsedBytes / 1024).toFixed(1)} KB` : 'N/A'}</strong></div>
                     <div><span style={{ color: '#64748b' }}>Deadlock Priority:</span> <strong style={{ color: '#e2e8f0' }}>{victimProcess.priority}</strong></div>
                     <div><span style={{ color: '#64748b' }}>Status:</span> <strong style={{ color: '#e2e8f0' }}>{victimProcess.status}</strong></div>
@@ -1442,7 +1443,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                         <span>{copiedKey === 'victim_sql' ? 'Copied' : 'Copy'}</span>
                       </button>
                     </div>
-                    <pre style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#e2e8f0', maxHeight: '160px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                    <pre className="deadlock-sql-box" style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#e2e8f0', maxHeight: '160px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
                       {victimProcess.inputbuf || 'No statement captured'}
                     </pre>
                   </div>
@@ -1473,7 +1474,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
 
               {survivorProcess && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '12px' }}>
-                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <div className="deadlock-session-meta" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div><span style={{ color: '#64748b' }}>Rollback Cost:</span> <strong style={{ color: '#34d399' }}>{survivorProcess.logUsedBytes !== undefined ? `${(survivorProcess.logUsedBytes / 1024).toFixed(1)} KB` : 'N/A'}</strong></div>
                     <div><span style={{ color: '#64748b' }}>Deadlock Priority:</span> <strong style={{ color: '#e2e8f0' }}>{survivorProcess.priority}</strong></div>
                     <div><span style={{ color: '#64748b' }}>Status:</span> <strong style={{ color: '#e2e8f0' }}>{survivorProcess.status}</strong></div>
@@ -1498,7 +1499,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                         <span>{copiedKey === 'survivor_sql' ? 'Copied' : 'Copy'}</span>
                       </button>
                     </div>
-                    <pre style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#e2e8f0', maxHeight: '160px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                    <pre className="deadlock-sql-box" style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#e2e8f0', maxHeight: '160px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
                       {survivorProcess.inputbuf || 'No statement captured'}
                     </pre>
                   </div>
@@ -1728,7 +1729,7 @@ ALTER INDEX ALL ON [program].[LoanTransaction] SET (ALLOW_PAGE_LOCKS = OFF);`}
                 <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 8px' }}>
                   Configures Entity Framework Core connection resiliency to automatically replay transactions when SQL Server kills a session as a deadlock victim.
                 </p>
-                <pre style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#38bdf8', fontFamily: 'Consolas, monospace', maxHeight: '140px', overflowY: 'auto' }}>
+                <pre className="deadlock-sql-box" style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#38bdf8', fontFamily: 'Consolas, monospace', maxHeight: '140px', overflowY: 'auto' }}>
 {`sqlOptions.EnableRetryOnFailure(
     maxRetryCount: 5,
     maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -1790,7 +1791,7 @@ END;`,
                 <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 8px' }}>
                   Wrap high-concurrency transactions with error 1205 retry handlers so transient deadlocks resolve seamlessly.
                 </p>
-                <pre style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#94a3b8', fontFamily: 'Consolas, monospace', maxHeight: '120px', overflowY: 'auto' }}>
+                <pre className="deadlock-sql-box" style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#94a3b8', fontFamily: 'Consolas, monospace', maxHeight: '120px', overflowY: 'auto' }}>
 {`IF ERROR_NUMBER() = 1205 -- Deadlock
 BEGIN
     SET @RetryCount = @RetryCount + 1;

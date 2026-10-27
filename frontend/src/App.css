@@ -9709,12 +9709,74 @@
 /* ========================================================
    LIVE RADAR SUB-NAVIGATION TABS & CONTROLS (PILL DESIGN)
    ======================================================== */
+.radar-category-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(10, 15, 29, 0.9);
+  padding: 2px 3px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+  flex-shrink: 0;
+}
+
+.radar-cat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 25px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.radar-cat-pill:hover {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.radar-cat-pill.active {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.35);
+  font-weight: 700;
+}
+
+.radar-cat-badge {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  line-height: 1.2;
+}
+
+.radar-cat-badge.blocked {
+  background: rgba(239, 68, 68, 0.25);
+  color: #f87171;
+}
+
+.radar-cat-badge.waste {
+  background: rgba(245, 158, 11, 0.25);
+  color: #fbbf24;
+}
+
 .radar-subnav-bar {
   display: inline-flex;
   align-items: center;
   gap: 2px;
   background: rgba(10, 15, 29, 0.9);
-  padding: 3px;
+  padding: 2px 3px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
@@ -9723,14 +9785,14 @@
 .radar-subnav-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 27px;
-  padding: 0 10px;
+  gap: 5px;
+  height: 25px;
+  padding: 0 7px;
   border-radius: 5px;
   border: 1px solid transparent;
   background: transparent;
   color: #94a3b8;
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.16s ease;
@@ -10395,6 +10457,63 @@
   color: #38bdf8;
   border: 1px solid rgba(56, 189, 248, 0.4);
 }
+
+.advisor-title-text {
+  color: #f1f5f9;
+}
+
+.advisor-read-more-btn {
+  color: #38bdf8;
+}
+
+.advisor-metric-badge.critical {
+  background: rgba(244, 63, 94, 0.2);
+  color: #f43f5e;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.advisor-metric-badge.warning {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.advisor-metric-badge.info {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.advisor-desc-text {
+  color: #cbd5e1;
+}
+
+.advisor-sql-box {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.advisor-sql-label {
+  color: #94a3b8;
+}
+
+.advisor-sql-pre {
+  color: #38bdf8;
+}
+
+.advisor-tip-box {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.advisor-tip-title {
+  color: #34d399;
+}
+
+.advisor-tip-text {
+  color: #e2e8f0;
+}
+
 
 /* ========================================================
    SOLARWINDS WAIT TREND STACKED BAR CHART

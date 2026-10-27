@@ -1041,7 +1041,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
             {/* 6 Core Benchmark Metric Pills */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '12px' }}>
               {/* Metric 1: Logical Reads */}
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
+              <div className="comparator-metric-pill" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
                 <div style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <HardDrive size={12} color="#38bdf8" /> RAM Reads (I/O)
                 </div>
@@ -1056,7 +1056,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
               </div>
 
               {/* Metric 2: CPU Time */}
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
+              <div className="comparator-metric-pill" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
                 <div style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <Cpu size={12} color="#38bdf8" /> CPU Execution
                 </div>
@@ -1069,7 +1069,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
               </div>
 
               {/* Metric 3: TempDB Spills */}
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
+              <div className="comparator-metric-pill" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
                 <div style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <AlertTriangle size={12} color="#fbbf24" /> TempDB Spills
                 </div>
@@ -1082,7 +1082,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
               </div>
 
               {/* Metric 4: Memory Grant */}
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
+              <div className="comparator-metric-pill" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
                 <div style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <Database size={12} color="#a78bfa" /> Memory Grant
                 </div>
@@ -1095,7 +1095,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
               </div>
 
               {/* Metric 5: Missing Indexes */}
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
+              <div className="comparator-metric-pill" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
                 <div style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <Layers size={12} color="#a855f7" /> Missing Indexes
                 </div>
@@ -1108,7 +1108,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
               </div>
 
               {/* Metric 6: Health Score */}
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
+              <div className="comparator-metric-pill" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
                 <div style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <Sparkles size={12} color="#34d399" /> Health Score
                 </div>
@@ -1671,7 +1671,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
             {/* 4 Deep Memory Comparison Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '20px' }}>
               {/* Card 1: Granted Memory */}
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px' }}>
+              <div className="comparator-memory-card" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px' }}>
                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Database size={14} color="#38bdf8" /> Granted RAM Semaphore
                 </div>
@@ -1684,7 +1684,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
               </div>
 
               {/* Card 2: Max Used Memory */}
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px' }}>
+              <div className="comparator-memory-card" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px' }}>
                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Activity size={14} color="#34d399" /> Peak RAM Consumed
                 </div>
@@ -1697,7 +1697,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
               </div>
 
               {/* Card 3: Wasted RAM */}
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px' }}>
+              <div className="comparator-memory-card" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px' }}>
                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <AlertTriangle size={14} color="#f59e0b" /> Wasted RAM Reserved
                 </div>
@@ -1710,7 +1710,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
               </div>
 
               {/* Card 4: Grant Wait Time */}
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px' }}>
+              <div className="comparator-memory-card" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px' }}>
                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Clock size={14} color="#a855f7" /> Grant Wait Time
                 </div>
@@ -1724,7 +1724,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
             </div>
 
             {/* Visual RAM Allocation Bar Comparison */}
-            <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px' }}>
+            <div className="comparator-allocation-card" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px' }}>
               <h5 style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0', margin: '0 0 12px' }}>
                 Visual RAM Semaphore Allocation vs Peak Utilization
               </h5>
@@ -1909,7 +1909,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
             {/* Left: Statement Tree in Plan A */}
-            <div className="glass-panel" style={{ borderRadius: '12px', padding: '16px', background: '#070b14' }}>
+            <div className="glass-panel comparator-tree-panel" style={{ borderRadius: '12px', padding: '16px', background: '#070b14' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <span style={{ fontSize: '12px', fontWeight: 800, color: '#f43f5e' }}>
                   PLAN A OPERATORS ({nodesA.length} nodes)
@@ -1928,6 +1928,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
                   return (
                     <div
                       key={node.nodeId}
+                      className={`comparator-operator-row ${isSelected ? 'selected' : ''}`}
                       onClick={() => setSelectedNodeA(node)}
                       style={{
                         background: isScan ? 'rgba(244, 63, 94, 0.08)' : isSelected ? '#1e293b' : '#090d16',
@@ -1942,7 +1943,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
                       }}
                     >
                       <div>
-                        <div style={{ fontWeight: 700, color: isScan ? '#f43f5e' : '#e2e8f0' }}>
+                        <div className="comparator-node-title" style={{ fontWeight: 700, color: isScan ? '#f43f5e' : '#e2e8f0' }}>
                           {node.physicalOp}
                           {isSpill && (
                             <span style={{ marginLeft: '6px', background: 'rgba(234, 179, 8, 0.2)', color: '#fbbf24', padding: '1px 5px', borderRadius: '3px', fontSize: '10px' }}>
@@ -1955,15 +1956,15 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
                             </span>
                           )}
                         </div>
-                        <div style={{ color: '#94a3b8', fontSize: '10.5px', marginTop: '2px' }}>
+                        <div className="comparator-node-meta" style={{ color: '#94a3b8', fontSize: '10.5px', marginTop: '2px' }}>
                           {node.table ? `${node.table}${node.index ? ` (${node.index})` : ''}` : node.logicalOp}
                         </div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
-                        <div style={{ color: '#cbd5e1', fontWeight: 600 }}>
+                        <div className="comparator-node-cost" style={{ color: '#cbd5e1', fontWeight: 600 }}>
                           {(((node.estimateIo || 0) + (node.estimateCpu || 0)) || 0).toFixed(2)} cost
                         </div>
-                        <div style={{ color: '#64748b', fontSize: '10px' }}>
+                        <div className="comparator-node-rows" style={{ color: '#64748b', fontSize: '10px' }}>
                           {node.estimateRows} est rows
                         </div>
                       </div>
@@ -1974,7 +1975,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
             </div>
 
             {/* Right: Statement Tree in Plan B */}
-            <div className="glass-panel" style={{ borderRadius: '12px', padding: '16px', background: '#070b14' }}>
+            <div className="glass-panel comparator-tree-panel" style={{ borderRadius: '12px', padding: '16px', background: '#070b14' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <span style={{ fontSize: '12px', fontWeight: 800, color: '#34d399' }}>
                   PLAN B OPERATORS ({nodesB.length} nodes)
@@ -1992,6 +1993,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
                   return (
                     <div
                       key={node.nodeId}
+                      className={`comparator-operator-row ${isSelected ? 'selected' : ''}`}
                       onClick={() => setSelectedNodeB(node)}
                       style={{
                         background: isSeek ? 'rgba(52, 211, 153, 0.08)' : isSelected ? '#1e293b' : '#090d16',
@@ -2006,7 +2008,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
                       }}
                     >
                       <div>
-                        <div style={{ fontWeight: 700, color: isSeek ? '#34d399' : '#e2e8f0' }}>
+                        <div className="comparator-node-title" style={{ fontWeight: 700, color: isSeek ? '#34d399' : '#e2e8f0' }}>
                           {node.physicalOp}
                           {isSeek && (
                             <span style={{ marginLeft: '6px', background: 'rgba(52, 211, 153, 0.2)', color: '#34d399', padding: '1px 5px', borderRadius: '3px', fontSize: '10px' }}>
@@ -2014,7 +2016,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
                             </span>
                           )}
                         </div>
-                        <div style={{ color: '#94a3b8', fontSize: '10.5px', marginTop: '2px' }}>
+                        <div className="comparator-node-meta" style={{ color: '#94a3b8', fontSize: '10.5px', marginTop: '2px' }}>
                           {node.table ? `${node.table}${node.index ? ` (${node.index})` : ''}` : node.logicalOp}
                         </div>
                       </div>

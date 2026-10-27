@@ -126,6 +126,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
   onLoadDeadlockXML,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<SubTabType>('sessions');
+  const [radarCategory, setRadarCategory] = useState<'all' | 'activity' | 'waits' | 'engine'>('all');
 
   // Live Data States
   const [sessions, setSessions] = useState<ActiveSession[]>([]);
@@ -1350,7 +1351,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             justifyContent: 'space-between',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="sleeping-sessions-warning" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <AlertTriangle size={16} color="#fbbf24" />
             <span style={{ fontSize: '12px', color: '#fef3c7' }}>
               <strong>High Severity Warning:</strong> {idleSessions.filter((s) => (s.openTransactions ?? 0) > 0).length} sleeping connection(s) have uncommitted open transactions! These hold exclusive locks on data pages, block other queries, and prevent transaction log truncation.
@@ -1737,275 +1738,355 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
         <div
           className="glass-panel radar-top-ribbon"
           style={{
-            padding: '10px 16px',
+            padding: '8px 14px',
             display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '10px',
+            flexDirection: 'column',
+            gap: '8px',
             borderRadius: '10px',
+            width: '100%',
+            boxSizing: 'border-box'
           }}
         >
-        {/* Left: Instance info & Navigation */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span
-              style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                background: '#34d399',
-                boxShadow: '0 0 8px #34d399',
-              }}
-            />
-            <span style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9' }}>
-              {status.serverName}
-            </span>
-            <span
-              style={{
-                fontSize: '10px',
-                padding: '1px 6px',
-                borderRadius: '4px',
-                background: 'rgba(56, 189, 248, 0.15)',
-                color: '#38bdf8',
-                border: '1px solid rgba(56, 189, 248, 0.3)',
-              }}
-            >
-              {status.databaseName}
-            </span>
-            {status.isDemo && (
+          {/* Tier 1: Instance Info (Left) & Polling Controls (Right) */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span
                 style={{
-                  fontSize: '9.5px',
-                  padding: '1px 5px',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: '#34d399',
+                  boxShadow: '0 0 8px #34d399',
+                }}
+              />
+              <span style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9' }}>
+                {status.serverName}
+              </span>
+              <span
+                style={{
+                  fontSize: '10px',
+                  padding: '1px 6px',
                   borderRadius: '4px',
-                  background: 'rgba(244, 63, 94, 0.15)',
-                  color: '#f43f5e',
-                  border: '1px solid rgba(244, 63, 94, 0.3)',
+                  background: 'rgba(56, 189, 248, 0.15)',
+                  color: '#38bdf8',
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
                 }}
               >
-                Demo Mode
+                {status.databaseName}
               </span>
-            )}
+              {status.isDemo && (
+                <span
+                  style={{
+                    fontSize: '9.5px',
+                    padding: '1px 5px',
+                    borderRadius: '4px',
+                    background: 'rgba(244, 63, 94, 0.15)',
+                    color: '#f43f5e',
+                    border: '1px solid rgba(244, 63, 94, 0.3)',
+                  }}
+                >
+                  Demo Mode
+                </span>
+              )}
+            </div>
+
+            {/* Right: Controls */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+              <span style={{ fontSize: '11px', color: '#64748b' }}>
+                Updated: {lastUpdated.toLocaleTimeString()}
+              </span>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm radar-ctrl-btn"
+                onClick={() => setIsAutoRefresh(!isAutoRefresh)}
+                title={isAutoRefresh ? 'Pause polling' : 'Resume live polling'}
+              >
+                {isAutoRefresh ? (
+                  <>
+                    <Pause size={11} color="#fbbf24" />
+                    <span>Pause</span>
+                  </>
+                ) : (
+                  <>
+                    <Play size={11} color="#34d399" />
+                    <span>Auto</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm radar-ctrl-btn"
+                onClick={fetchData}
+                disabled={isLoading}
+                title="Poll DMVs now"
+              >
+                <RefreshCw size={11} className={isLoading ? 'spin' : ''} />
+                <span>Poll</span>
+              </button>
+            </div>
           </div>
 
-          <div style={{ width: '1px', height: '18px', background: 'rgba(255,255,255,0.1)' }} />
+          {/* Tier 2: Categorized & Compact Sub Navigation Bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', minWidth: 0 }}>
+            {/* Category Filter Pills (Categorized Navigation) */}
+            <div className="radar-category-pills">
+              <button
+                type="button"
+                className={`radar-cat-pill ${radarCategory === 'all' ? 'active' : ''}`}
+                onClick={() => setRadarCategory('all')}
+                title="Show all 12 Live Radar subtabs in compact view"
+              >
+                <span>All (12)</span>
+              </button>
+              <button
+                type="button"
+                className={`radar-cat-pill ${radarCategory === 'activity' ? 'active' : ''}`}
+                onClick={() => {
+                  setRadarCategory('activity');
+                  if (!['sessions', 'sleeping', 'blocking', 'deadlocks'].includes(activeSubTab)) {
+                    setActiveSubTab('sessions');
+                  }
+                }}
+                title="Active Sessions, Sleeping Connections, Blocking Tree & Deadlocks"
+              >
+                <span>⚡ Activity</span>
+                {blockedCount > 0 && <span className="radar-cat-badge blocked">{blockedCount}</span>}
+              </button>
+              <button
+                type="button"
+                className={`radar-cat-pill ${radarCategory === 'waits' ? 'active' : ''}`}
+                onClick={() => {
+                  setRadarCategory('waits');
+                  if (!['advisors', 'waithistory', 'waits', 'querystore'].includes(activeSubTab)) {
+                    setActiveSubTab('advisors');
+                  }
+                }}
+                title="Advisors, Wait Trend History, Wait Stats & Query Store Top"
+              >
+                <span>⏱ Performance</span>
+                {advisors.length > 0 && <span className="radar-cat-badge">{advisors.length}</span>}
+              </button>
+              <button
+                type="button"
+                className={`radar-cat-pill ${radarCategory === 'engine' ? 'active' : ''}`}
+                onClick={() => {
+                  setRadarCategory('engine');
+                  if (!['bufferpool', 'indexes', 'tempdb', 'vitals'].includes(activeSubTab)) {
+                    setActiveSubTab('bufferpool');
+                  }
+                }}
+                title="Buffer Pool RAM, Index Hygiene Waste, TempDB & Server Vitals"
+              >
+                <span>💽 Engine</span>
+                {unusedIndexes.length > 0 && <span className="radar-cat-badge waste">{unusedIndexes.length}</span>}
+              </button>
+            </div>
 
-          {/* Sub Navigation Bar - Enterprise Observability Ribbons */}
-          <div className="radar-subnav-bar">
-            {/* 0. SolarWinds DPA Performance Advisors */}
-            <button
-              type="button"
-              className={`radar-subnav-btn ${activeSubTab === 'advisors' ? 'active active-advisors' : ''}`}
-              onClick={() => setActiveSubTab('advisors')}
-              title="Automated SolarWinds DPA Performance Advisors & Anomaly Alerts"
-              style={activeSubTab === 'advisors' ? { borderColor: '#818cf8', color: '#818cf8' } : undefined}
-            >
-              <Sparkles size={12} className="radar-subnav-icon" color="#818cf8" />
-              <span>Advisors</span>
-              {pagePollingConfig['advisors'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
-              {advisors.length > 0 && (
-                <span className="radar-count-pill" style={{ background: 'rgba(129, 140, 248, 0.25)', color: '#818cf8', fontWeight: 800 }}>
-                  {advisors.length}
-                </span>
-              )}
-            </button>
+            <div style={{ width: '1px', height: '18px', background: 'rgba(255,255,255,0.1)', flexShrink: 0 }} />
 
-            {/* 1. Active Sessions */}
-            <button
-              type="button"
-              className={`radar-subnav-btn ${activeSubTab === 'sessions' ? 'active active-sessions' : ''}`}
-              onClick={() => setActiveSubTab('sessions')}
-              title="Active executing SQL requests (sys.dm_exec_requests)"
-            >
-              <Activity size={12} className="radar-subnav-icon" />
-              <span>Active Sessions</span>
-              {pagePollingConfig['sessions'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
-              <span className="radar-count-pill">{sessions.length}</span>
-              {blockedCount > 0 && (
-                <span className="radar-blocked-pill">
-                  {blockedCount} Blocked
-                </span>
-              )}
-            </button>
+            {/* Sub Navigation Bar - Stays 100% inside container */}
+            <div className="radar-subnav-scroll-wrap" style={{ overflowX: 'auto', flex: 1, minWidth: 0, scrollbarWidth: 'none', display: 'flex' }}>
+              <div className="radar-subnav-bar">
+                {/* 0. Advisors */}
+                {(radarCategory === 'all' || radarCategory === 'waits') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'advisors' ? 'active active-advisors' : ''}`}
+                    onClick={() => setActiveSubTab('advisors')}
+                    title="Automated SolarWinds DPA Performance Advisors & Anomaly Alerts"
+                  >
+                    <Sparkles size={12} className="radar-subnav-icon" color="#818cf8" />
+                    <span>Advisors</span>
+                    {pagePollingConfig['advisors'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                    {advisors.length > 0 && (
+                      <span className="radar-count-pill" style={{ background: 'rgba(129, 140, 248, 0.25)', color: '#818cf8', fontWeight: 800 }}>
+                        {advisors.length}
+                      </span>
+                    )}
+                  </button>
+                )}
 
-            {/* 2. Sleeping & Idle Connections (sys.dm_exec_sessions) */}
-            <button
-              type="button"
-              className={`radar-subnav-btn ${activeSubTab === 'sleeping' ? 'active active-sleeping' : ''}`}
-              onClick={() => setActiveSubTab('sleeping')}
-              title="Sleeping, connection-pool, and dormant sessions from sys.dm_exec_sessions"
-            >
-              <Moon size={12} className="radar-subnav-icon" />
-              <span>Sleeping & Idle</span>
-              {pagePollingConfig['sleeping'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
-              <span className="radar-count-pill">{idleSessions.length}</span>
-              {idleSessions.filter((s) => (s.openTransactions ?? 0) > 0).length > 0 && (
-                <span className="radar-blocked-pill" style={{ background: '#f59e0b' }}>
-                  {idleSessions.filter((s) => (s.openTransactions ?? 0) > 0).length} Open Xact
-                </span>
-              )}
-            </button>
+                {/* 1. Active Sessions */}
+                {(radarCategory === 'all' || radarCategory === 'activity') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'sessions' ? 'active active-sessions' : ''}`}
+                    onClick={() => setActiveSubTab('sessions')}
+                    title="Active executing SQL requests (sys.dm_exec_requests)"
+                  >
+                    <Activity size={12} className="radar-subnav-icon" />
+                    <span>{radarCategory === 'all' ? 'Active' : 'Active Sessions'}</span>
+                    {pagePollingConfig['sessions'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                    <span className="radar-count-pill">{sessions.length}</span>
+                    {blockedCount > 0 && (
+                      <span className="radar-blocked-pill">
+                        {blockedCount} Blocked
+                      </span>
+                    )}
+                  </button>
+                )}
 
-            {/* 3. Wait Trend Stacked Bar Chart (SolarWinds DPA) */}
-            <button
-              type="button"
-              className={`radar-subnav-btn ${activeSubTab === 'waithistory' ? 'active' : ''}`}
-              onClick={() => setActiveSubTab('waithistory')}
-              title="SolarWinds DPA Wait Trend & Anomaly Stacked Bar Chart"
-              style={activeSubTab === 'waithistory' ? { borderColor: '#10b981', color: '#10b981' } : undefined}
-            >
-              <BarChart3 size={12} className="radar-subnav-icon" color="#10b981" />
-              <span>Wait Trend</span>
-              {pagePollingConfig['waithistory'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
-            </button>
+                {/* 2. Sleeping & Idle */}
+                {(radarCategory === 'all' || radarCategory === 'activity') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'sleeping' ? 'active active-sleeping' : ''}`}
+                    onClick={() => setActiveSubTab('sleeping')}
+                    title="Sleeping, connection-pool, and dormant sessions from sys.dm_exec_sessions"
+                  >
+                    <Moon size={12} className="radar-subnav-icon" />
+                    <span>{radarCategory === 'all' ? 'Idle' : 'Sleeping & Idle'}</span>
+                    {pagePollingConfig['sleeping'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                    <span className="radar-count-pill">{idleSessions.length}</span>
+                    {idleSessions.filter((s) => (s.openTransactions ?? 0) > 0).length > 0 && (
+                      <span className="radar-blocked-pill" style={{ background: '#f59e0b' }}>
+                        {idleSessions.filter((s) => (s.openTransactions ?? 0) > 0).length} Open Xact
+                      </span>
+                    )}
+                  </button>
+                )}
 
-            {/* 4. Blocking & Lock Tree */}
-            <button
-              type="button"
-              className={`radar-subnav-btn ${activeSubTab === 'blocking' ? 'active active-blocking' : ''}`}
-              onClick={() => setActiveSubTab('blocking')}
-              title="Head-blocker hierarchy and victim sessions (sys.dm_os_waiting_tasks)"
-            >
-              <GitCommit size={12} className="radar-subnav-icon" />
-              <span>Blocking Tree</span>
-              {pagePollingConfig['blocking'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
-              {blockedCount > 0 && (
-                <span className="radar-blocked-pill" style={{ background: '#ef4444' }}>
-                  {blockedCount}
-                </span>
-              )}
-            </button>
+                {/* 3. Wait Trend */}
+                {(radarCategory === 'all' || radarCategory === 'waits') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'waithistory' ? 'active' : ''}`}
+                    onClick={() => setActiveSubTab('waithistory')}
+                    title="SolarWinds DPA Wait Trend & Anomaly Stacked Bar Chart"
+                  >
+                    <BarChart3 size={12} className="radar-subnav-icon" color="#10b981" />
+                    <span>Wait Trend</span>
+                    {pagePollingConfig['waithistory'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                  </button>
+                )}
 
-            {/* 5. Wait Statistics */}
-            <button
-              type="button"
-              className={`radar-subnav-btn ${activeSubTab === 'waits' ? 'active active-waits' : ''}`}
-              onClick={() => setActiveSubTab('waits')}
-              title="Cumulative SQL Server engine wait stats (sys.dm_os_wait_stats)"
-            >
-              <Clock size={12} className="radar-subnav-icon" />
-              <span>Wait Stats</span>
-              {pagePollingConfig['waits'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
-            </button>
+                {/* 4. Blocking Tree */}
+                {(radarCategory === 'all' || radarCategory === 'activity') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'blocking' ? 'active active-blocking' : ''}`}
+                    onClick={() => setActiveSubTab('blocking')}
+                    title="Head-blocker hierarchy and victim sessions (sys.dm_os_waiting_tasks)"
+                  >
+                    <GitCommit size={12} className="radar-subnav-icon" />
+                    <span>{radarCategory === 'all' ? 'Blocking' : 'Blocking Tree'}</span>
+                    {pagePollingConfig['blocking'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                    {blockedCount > 0 && (
+                      <span className="radar-blocked-pill" style={{ background: '#ef4444' }}>
+                        {blockedCount}
+                      </span>
+                    )}
+                  </button>
+                )}
 
-            {/* 6. Query Store */}
-            <button
-              type="button"
-              className={`radar-subnav-btn ${activeSubTab === 'querystore' ? 'active active-querystore' : ''}`}
-              onClick={() => setActiveSubTab('querystore')}
-              title="Query Store top CPU/Duration/IO bottlenecks"
-            >
-              <TrendingUp size={12} className="radar-subnav-icon" />
-              <span>Query Store Top</span>
-              {pagePollingConfig['querystore'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
-            </button>
+                {/* 5. Wait Stats */}
+                {(radarCategory === 'all' || radarCategory === 'waits') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'waits' ? 'active active-waits' : ''}`}
+                    onClick={() => setActiveSubTab('waits')}
+                    title="Cumulative SQL Server engine wait stats (sys.dm_os_wait_stats)"
+                  >
+                    <Clock size={12} className="radar-subnav-icon" />
+                    <span>Wait Stats</span>
+                    {pagePollingConfig['waits'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                  </button>
+                )}
 
-            {/* 7. Buffer Pool RAM Inspector */}
-            <button
-              type="button"
-              className={`radar-subnav-btn ${activeSubTab === 'bufferpool' ? 'active' : ''}`}
-              onClick={() => setActiveSubTab('bufferpool')}
-              title="Buffer Pool RAM Inspector: tables and indexes caching RAM (sys.dm_os_buffer_descriptors)"
-              style={activeSubTab === 'bufferpool' ? { borderColor: '#38bdf8', color: '#38bdf8' } : undefined}
-            >
-              <Layers size={12} className="radar-subnav-icon" color="#38bdf8" />
-              <span>Buffer Pool</span>
-              {pagePollingConfig['bufferpool'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
-            </button>
+                {/* 6. Query Store */}
+                {(radarCategory === 'all' || radarCategory === 'waits') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'querystore' ? 'active active-querystore' : ''}`}
+                    onClick={() => setActiveSubTab('querystore')}
+                    title="Query Store top CPU/Duration/IO bottlenecks"
+                  >
+                    <TrendingUp size={12} className="radar-subnav-icon" />
+                    <span>{radarCategory === 'all' ? 'Query Store' : 'Query Store Top'}</span>
+                    {pagePollingConfig['querystore'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                  </button>
+                )}
 
-            {/* 8. Index Hygiene & Waste */}
-            <button
-              type="button"
-              className={`radar-subnav-btn ${activeSubTab === 'indexes' ? 'active active-indexes' : ''}`}
-              onClick={() => setActiveSubTab('indexes')}
-              title="Index Hygiene: Missing, Unused Waste, and Redundant Indexes"
-            >
-              <FolderTree size={12} className="radar-subnav-icon" />
-              <span>Index Hygiene</span>
-              {pagePollingConfig['indexes'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
-              {unusedIndexes.length > 0 && (
-                <span className="radar-count-pill" style={{ background: 'rgba(244, 63, 94, 0.2)', color: '#f43f5e' }}>
-                  {unusedIndexes.length} Waste
-                </span>
-              )}
-            </button>
+                {/* 7. Buffer Pool */}
+                {(radarCategory === 'all' || radarCategory === 'engine') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'bufferpool' ? 'active' : ''}`}
+                    onClick={() => setActiveSubTab('bufferpool')}
+                    title="Buffer Pool RAM Inspector: tables and indexes caching RAM (sys.dm_os_buffer_descriptors)"
+                  >
+                    <Layers size={12} className="radar-subnav-icon" color="#38bdf8" />
+                    <span>Buffer Pool</span>
+                    {pagePollingConfig['bufferpool'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                  </button>
+                )}
 
-            {/* 9. Live Deadlocks */}
-            <button
-              type="button"
-              className={`radar-subnav-btn ${activeSubTab === 'deadlocks' ? 'active active-deadlocks' : ''}`}
-              onClick={() => setActiveSubTab('deadlocks')}
-              title="Recent deadlocks captured by system_health XE ring buffer"
-            >
-              <ShieldAlert size={12} className="radar-subnav-icon" />
-              <span>Deadlocks</span>
-              {pagePollingConfig['deadlocks'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
-            </button>
+                {/* 8. Index Hygiene */}
+                {(radarCategory === 'all' || radarCategory === 'engine') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'indexes' ? 'active active-indexes' : ''}`}
+                    onClick={() => setActiveSubTab('indexes')}
+                    title="Index Hygiene: Missing, Unused Waste, and Redundant Indexes"
+                  >
+                    <FolderTree size={12} className="radar-subnav-icon" />
+                    <span>{radarCategory === 'all' ? 'Indexes' : 'Index Hygiene'}</span>
+                    {pagePollingConfig['indexes'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                    {unusedIndexes.length > 0 && (
+                      <span className="radar-count-pill" style={{ background: 'rgba(244, 63, 94, 0.2)', color: '#f43f5e' }}>
+                        {unusedIndexes.length} Waste
+                      </span>
+                    )}
+                  </button>
+                )}
 
-            {/* 10. TempDB Allocation */}
-            <button
-              type="button"
-              className={`radar-subnav-btn ${activeSubTab === 'tempdb' ? 'active active-tempdb' : ''}`}
-              onClick={() => setActiveSubTab('tempdb')}
-              title="TempDB allocation per active session & internal spills"
-            >
-              <HardDrive size={12} className="radar-subnav-icon" />
-              <span>TempDB Usage</span>
-              {pagePollingConfig['tempdb'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
-            </button>
+                {/* 9. Deadlocks */}
+                {(radarCategory === 'all' || radarCategory === 'activity') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'deadlocks' ? 'active active-deadlocks' : ''}`}
+                    onClick={() => setActiveSubTab('deadlocks')}
+                    title="Recent deadlocks captured by system_health XE ring buffer"
+                  >
+                    <ShieldAlert size={12} className="radar-subnav-icon" />
+                    <span>Deadlocks</span>
+                    {pagePollingConfig['deadlocks'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                  </button>
+                )}
 
-            {/* 11. Server Vitals */}
-            <button
-              type="button"
-              className={`radar-subnav-btn ${activeSubTab === 'vitals' ? 'active active-vitals' : ''}`}
-              onClick={() => setActiveSubTab('vitals')}
-              title="CPU queue, memory grants pending, and batch requests/sec"
-            >
-              <Cpu size={12} className="radar-subnav-icon" />
-              <span>Server Vitals</span>
-              {pagePollingConfig['vitals'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
-            </button>
+                {/* 10. TempDB */}
+                {(radarCategory === 'all' || radarCategory === 'engine') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'tempdb' ? 'active active-tempdb' : ''}`}
+                    onClick={() => setActiveSubTab('tempdb')}
+                    title="TempDB allocation per active session & internal spills"
+                  >
+                    <HardDrive size={12} className="radar-subnav-icon" />
+                    <span>{radarCategory === 'all' ? 'TempDB' : 'TempDB Usage'}</span>
+                    {pagePollingConfig['tempdb'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                  </button>
+                )}
+
+                {/* 11. Server Vitals */}
+                {(radarCategory === 'all' || radarCategory === 'engine') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'vitals' ? 'active active-vitals' : ''}`}
+                    onClick={() => setActiveSubTab('vitals')}
+                    title="CPU queue, memory grants pending, and batch requests/sec"
+                  >
+                    <Cpu size={12} className="radar-subnav-icon" />
+                    <span>{radarCategory === 'all' ? 'Vitals' : 'Server Vitals'}</span>
+                    {pagePollingConfig['vitals'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
-
-        {/* Right: Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '11px', color: '#64748b' }}>
-            Updated: {lastUpdated.toLocaleTimeString()}
-          </span>
-
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm radar-ctrl-btn"
-            onClick={() => setIsAutoRefresh(!isAutoRefresh)}
-            title={isAutoRefresh ? 'Pause polling' : 'Resume live polling'}
-          >
-            {isAutoRefresh ? (
-              <>
-                <Pause size={11} color="#fbbf24" />
-                <span>Pause</span>
-              </>
-            ) : (
-              <>
-                <Play size={11} color="#34d399" />
-                <span>Auto</span>
-              </>
-            )}
-          </button>
-
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm radar-ctrl-btn"
-            onClick={fetchData}
-            disabled={isLoading}
-            title="Poll DMVs now"
-          >
-            <RefreshCw size={11} className={isLoading ? 'spin' : ''} />
-            <span>Poll</span>
-          </button>
-        </div>
-      </div>
 
       {/* Dynamic Filters Bar for the Current Active Sub-Tab (Sticky Header) */}
       {activeSubTab === 'sessions' && renderActiveSessionsFilters()}
@@ -2251,15 +2332,15 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                                   {adv.severity === 'critical' ? '!' : 'i'}
                                 </div>
                                 <div style={{ flex: 1 }}>
-                                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#f1f5f9', lineHeight: '1.4' }}>
+                                  <div className="advisor-title-text" style={{ fontSize: '13px', fontWeight: 600, lineHeight: '1.4' }}>
                                     {adv.title}{' '}
                                     <button
                                       type="button"
+                                      className="advisor-read-more-btn"
                                       onClick={() => setExpandedAdvisorId(isExpanded ? null : adv.id)}
                                       style={{
                                         background: 'none',
                                         border: 'none',
-                                        color: '#38bdf8',
                                         cursor: 'pointer',
                                         padding: 0,
                                         fontSize: '12px',
@@ -2275,14 +2356,12 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
 
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
                                 <span
+                                  className={`advisor-metric-badge ${adv.severity}`}
                                   style={{
                                     fontSize: '10.5px',
                                     fontWeight: 700,
                                     padding: '2px 8px',
-                                    borderRadius: '4px',
-                                    background: adv.severity === 'critical' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                                    color: adv.severity === 'critical' ? '#f43f5e' : '#fbbf24',
-                                    border: `1px solid ${adv.severity === 'critical' ? 'rgba(244, 63, 94, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`
+                                    borderRadius: '4px'
                                   }}
                                 >
                                   {adv.metricValue}
@@ -2302,21 +2381,21 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                                   gap: '8px'
                                 }}
                               >
-                                <p style={{ margin: 0, fontSize: '12px', color: '#cbd5e1' }}>
+                                <p className="advisor-desc-text" style={{ margin: 0, fontSize: '12px' }}>
                                   {adv.description}
                                 </p>
 
                                 {adv.queryText && (
-                                  <div style={{ background: 'rgba(15, 23, 42, 0.85)', padding: '10px 12px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#94a3b8', marginBottom: '4px' }}>
+                                  <div className="advisor-sql-box" style={{ padding: '10px 12px', borderRadius: '6px' }}>
+                                    <div className="advisor-sql-label" style={{ fontSize: '10.5px', fontWeight: 700, marginBottom: '4px' }}>
                                       EXECUTING SQL STATEMENT:
                                     </div>
                                     <pre
+                                      className="advisor-sql-pre"
                                       style={{
                                         margin: 0,
                                         fontSize: '11px',
                                         fontFamily: 'Consolas, monospace',
-                                        color: '#38bdf8',
                                         whiteSpace: 'pre-wrap',
                                         maxHeight: '120px',
                                         overflowY: 'auto'
@@ -2327,11 +2406,11 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                                   </div>
                                 )}
 
-                                <div style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', padding: '8px 12px', borderRadius: '6px' }}>
-                                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#34d399', marginBottom: '2px' }}>
+                                <div className="advisor-tip-box" style={{ padding: '8px 12px', borderRadius: '6px' }}>
+                                  <div className="advisor-tip-title" style={{ fontSize: '11px', fontWeight: 700, marginBottom: '2px' }}>
                                     💡 Tuning Advice & Recommendation:
                                   </div>
-                                  <div style={{ fontSize: '11.5px', color: '#e2e8f0' }}>
+                                  <div className="advisor-tip-text" style={{ fontSize: '11.5px' }}>
                                     {adv.recommendation}
                                   </div>
                                 </div>
@@ -3119,10 +3198,11 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                           >
                             ROOT BLOCKER SPID #{rootSpid}
                           </span>
-                          <span style={{ fontSize: '11.5px', color: '#cbd5e1' }}>
-                            Status: <strong style={{ color: '#f1f5f9' }}>{first.rootBlockerStatus}</strong> • App: <strong>{first.rootBlockerProgram || 'SQL Client'}</strong> • User: {first.rootBlockerLogin || 'System'}
+                          <span className="blocking-root-meta" style={{ fontSize: '11.5px', color: '#cbd5e1' }}>
+                            Status: <strong className="blocking-status-val" style={{ color: '#f1f5f9' }}>{first.rootBlockerStatus}</strong> • App: <strong className="blocking-app-val">{first.rootBlockerProgram || 'SQL Client'}</strong> • User: <span className="blocking-user-val">{first.rootBlockerLogin || 'System'}</span>
                           </span>
                           <span
+                            className="blocking-lock-badge"
                             style={{
                               fontSize: '10.5px',
                               fontWeight: 700,
@@ -3152,34 +3232,34 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                       </div>
 
                       {hasOpenXact && (
-                        <div style={{ background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.35)', padding: '6px 12px', borderRadius: '4px', margin: '8px 0', fontSize: '11.5px', color: '#fef3c7', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div className="blocking-rollback-alert" style={{ background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.35)', padding: '6px 12px', borderRadius: '4px', margin: '8px 0', fontSize: '11.5px', color: '#fef3c7', display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <AlertTriangle size={13} color="#fbbf24" />
                           <span><strong>Rollback Alert:</strong> This session has uncommitted open transactions. If killed, SQL Server will roll back all in-flight row modifications.</span>
                         </div>
                       )}
 
                       {first.rootBlockerQuery && (
-                        <div style={{ margin: '8px 0', background: 'rgba(0,0,0,0.3)', padding: '8px 12px', borderRadius: '6px', fontSize: '11px', fontFamily: 'Consolas, monospace', color: '#94a3b8' }}>
+                        <div className="blocking-root-query" style={{ margin: '8px 0', background: 'rgba(0,0,0,0.3)', padding: '8px 12px', borderRadius: '6px', fontSize: '11px', fontFamily: 'Consolas, monospace', color: '#94a3b8' }}>
                           {first.rootBlockerQuery}
                         </div>
                       )}
 
                       {/* Tree Branch Connecting Victims */}
                       <div className="blocking-tree-children">
-                        <div style={{ fontSize: '11px', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>
+                        <div className="blocking-branch-title" style={{ fontSize: '11px', fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '2px' }}>
                           └─► Blocked Victim Sessions ({victims.length} Waiting):
                         </div>
                         {victims.map((vic, vIdx) => (
                           <div key={vIdx} className="blocking-victim-node">
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '8px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#fbbf24' }}>
+                                <span className="blocking-victim-badge" style={{ fontSize: '11.5px', fontWeight: 700, color: '#fbbf24' }}>
                                   Victim SPID #{vic.blockedSpid}
                                 </span>
-                                <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                <span className="blocking-victim-wait" style={{ fontSize: '11px', color: '#94a3b8' }}>
                                   Waiting <strong style={{ color: '#f43f5e' }}>{((vic.blockedWaitTimeMs || 0) / 1000).toFixed(1)}s</strong> on <code>{vic.blockedWaitType}</code>
                                 </span>
-                                <span style={{ fontSize: '10.5px', color: '#64748b' }}>
+                                <span className="blocking-victim-program" style={{ fontSize: '10.5px', color: '#64748b' }}>
                                   ({vic.blockedLogin} @ {vic.blockedProgram})
                                 </span>
                               </div>
@@ -3195,7 +3275,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                               </button>
                             </div>
 
-                            <div style={{ fontSize: '10.5px', fontFamily: 'Consolas, monospace', color: '#cbd5e1', background: 'rgba(0,0,0,0.25)', padding: '6px 10px', borderRadius: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <div className="blocking-victim-query" style={{ fontSize: '10.5px', fontFamily: 'Consolas, monospace', color: '#cbd5e1', background: 'rgba(0,0,0,0.25)', padding: '6px 10px', borderRadius: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {vic.blockedQuery || 'Query text unavailable'}
                             </div>
                           </div>
@@ -3773,6 +3853,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     </div>
 
                     <pre
+                      className="missing-idx-sql-box"
                       style={{
                         background: 'rgba(15, 23, 42, 0.8)',
                         padding: '8px 12px',
@@ -3795,7 +3876,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           {/* VIEW B: UNUSED INDEXES (WRITE & STORAGE WASTE) */}
           {indexSubTab === 'unused' && (
             <div className="radar-subview-container" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ background: 'rgba(244, 63, 94, 0.12)', border: '1px solid rgba(244, 63, 94, 0.3)', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px', flexShrink: 0 }}>
+              <div className="unused-index-warning" style={{ background: 'rgba(244, 63, 94, 0.12)', border: '1px solid rgba(244, 63, 94, 0.3)', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px', flexShrink: 0 }}>
                 <span style={{ fontSize: '12px', color: '#fecdd3' }}>
                   <strong>Write Overhead Warning:</strong> These indexes receive continuous writes (INSERT, UPDATE, DELETE) but have recorded <strong>0 user seeks, scans, or lookups</strong>. They slow down database write operations and consume RAM and disk space needlessly.
                 </span>
@@ -3854,7 +3935,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           {/* VIEW C: DUPLICATE & REDUNDANT INDEXES */}
           {indexSubTab === 'duplicate' && (
             <div className="radar-subview-container" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px', flexShrink: 0 }}>
+              <div className="duplicate-index-warning" style={{ background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px', flexShrink: 0 }}>
                 <span style={{ fontSize: '12px', color: '#e0f2fe' }}>
                   <strong>Redundancy Detection:</strong> These indexes share identical left-prefix key columns with other existing indexes on the same table, making them redundant and wasting storage.
                 </span>
@@ -4204,32 +4285,32 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
-                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px' }}>
-                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>Worker Thread Pool</div>
-                      <div style={{ fontSize: '16px', fontWeight: 700, color: engineInternals.threadPoolStarvation ? '#f43f5e' : '#34d399', margin: '4px 0' }}>
+                    <div className="telemetry-stat-card" style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px' }}>
+                      <div className="telemetry-stat-lbl" style={{ fontSize: '11px', color: '#94a3b8' }}>Worker Thread Pool</div>
+                      <div className="telemetry-stat-val" style={{ fontSize: '16px', fontWeight: 700, color: engineInternals.threadPoolStarvation ? '#f43f5e' : '#34d399', margin: '4px 0' }}>
                         {engineInternals.totalActiveWorkers} / {engineInternals.maxWorkersCount} ({engineInternals.threadPoolUtilization.toFixed(1)}%)
                       </div>
-                      <div style={{ fontSize: '10.5px', color: engineInternals.threadPoolStarvation ? '#f87171' : '#64748b' }}>
+                      <div className="telemetry-stat-sub" style={{ fontSize: '10.5px', color: engineInternals.threadPoolStarvation ? '#f87171' : '#64748b' }}>
                         {engineInternals.threadPoolStarvation ? 'THREADPOOL Starvation Alert!' : 'No starved work queues'}
                       </div>
                     </div>
 
-                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px' }}>
-                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>Quantum Contention (4ms)</div>
-                      <div style={{ fontSize: '16px', fontWeight: 700, color: engineInternals.totalRunnableTasks > 0 ? '#fbbf24' : '#34d399', margin: '4px 0' }}>
+                    <div className="telemetry-stat-card" style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px' }}>
+                      <div className="telemetry-stat-lbl" style={{ fontSize: '11px', color: '#94a3b8' }}>Quantum Contention (4ms)</div>
+                      <div className="telemetry-stat-val" style={{ fontSize: '16px', fontWeight: 700, color: engineInternals.totalRunnableTasks > 0 ? '#fbbf24' : '#34d399', margin: '4px 0' }}>
                         {engineInternals.totalRunnableTasks} Queued Tasks
                       </div>
-                      <div style={{ fontSize: '10.5px', color: '#64748b' }}>
+                      <div className="telemetry-stat-sub" style={{ fontSize: '10.5px', color: '#64748b' }}>
                         {engineInternals.quantumPressureStatus}
                       </div>
                     </div>
 
-                    <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px' }}>
-                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>NUMA Foreign Pages</div>
-                      <div style={{ fontSize: '16px', fontWeight: 700, color: engineInternals.numaSkewDetected ? '#f43f5e' : '#38bdf8', margin: '4px 0' }}>
+                    <div className="telemetry-stat-card" style={{ background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '8px' }}>
+                      <div className="telemetry-stat-lbl" style={{ fontSize: '11px', color: '#94a3b8' }}>NUMA Foreign Pages</div>
+                      <div className="telemetry-stat-val" style={{ fontSize: '16px', fontWeight: 700, color: engineInternals.numaSkewDetected ? '#f43f5e' : '#38bdf8', margin: '4px 0' }}>
                         {engineInternals.totalForeignPages.toLocaleString()} Pages ({((engineInternals.totalForeignPages * 8) / 1024).toFixed(1)} MB)
                       </div>
-                      <div style={{ fontSize: '10.5px', color: '#64748b' }}>
+                      <div className="telemetry-stat-sub" style={{ fontSize: '10.5px', color: '#64748b' }}>
                         Cross-socket risk: {engineInternals.crossNumaLatencyRisk}
                       </div>
                     </div>
@@ -4356,7 +4437,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                         <div key={s.schedulerId} className={`scheduler-card ${healthClass} ${!s.isOnline ? 'is-offline' : ''}`}>
                           <div className="scheduler-card-header">
                             <div>
-                              <div style={{ fontSize: '13px', fontWeight: 700, color: '#f1f5f9' }}>
+                              <div className="scheduler-card-title" style={{ fontSize: '13px', fontWeight: 700, color: '#f1f5f9' }}>
                                 Scheduler #{s.schedulerId}
                               </div>
                               <div className="scheduler-numa-tag">
@@ -4364,6 +4445,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                               </div>
                             </div>
                             <span
+                              className={`scheduler-health-badge ${s.workQueueCount > 0 ? 'critical' : s.quantumHealth.toLowerCase()}`}
                               style={{
                                 fontSize: '10px',
                                 padding: '2px 6px',
@@ -4388,16 +4470,16 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                           </div>
 
                           {/* Primary Queue Metric */}
-                          <div style={{ background: 'rgba(255,255,255,0.03)', padding: '8px 10px', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div className="scheduler-primary-metric-box" style={{ background: 'rgba(255,255,255,0.03)', padding: '8px 10px', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div>
-                              <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Runnable Tasks Queue</div>
-                              <div style={{ fontSize: '18px', fontWeight: 800, color: s.runnableTasksCount > 2 ? '#f43f5e' : s.runnableTasksCount > 0 ? '#fbbf24' : '#34d399' }}>
+                              <div className="scheduler-metric-lbl" style={{ fontSize: '10.5px', color: '#94a3b8' }}>Runnable Tasks Queue</div>
+                              <div className={`scheduler-queue-val ${s.runnableTasksCount > 2 ? 'critical' : s.runnableTasksCount > 0 ? 'warning' : 'healthy'}`} style={{ fontSize: '18px', fontWeight: 800, color: s.runnableTasksCount > 2 ? '#f43f5e' : s.runnableTasksCount > 0 ? '#fbbf24' : '#34d399' }}>
                                 {s.runnableTasksCount}
                               </div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
-                              <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Active Workers</div>
-                              <div style={{ fontSize: '14px', fontWeight: 700, color: '#38bdf8' }}>
+                              <div className="scheduler-metric-lbl" style={{ fontSize: '10.5px', color: '#94a3b8' }}>Active Workers</div>
+                              <div className="scheduler-workers-val" style={{ fontSize: '14px', fontWeight: 700, color: '#38bdf8' }}>
                                 {s.activeWorkersCount}
                               </div>
                             </div>
@@ -4407,7 +4489,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             <div className="scheduler-metric-row">
                               <span className="scheduler-metric-label">Yield Rate (Delta/s):</span>
-                              <span className="scheduler-metric-val" style={{ color: (s.yieldsPerSec || 0) > 1000 ? '#f43f5e' : (s.yieldsPerSec || 0) > 200 ? '#fbbf24' : '#34d399', fontWeight: 700 }}>
+                              <span className={`scheduler-metric-val ${ (s.yieldsPerSec || 0) > 1000 ? 'critical' : (s.yieldsPerSec || 0) > 200 ? 'warning' : 'healthy' }`} style={{ color: (s.yieldsPerSec || 0) > 1000 ? '#f43f5e' : (s.yieldsPerSec || 0) > 200 ? '#fbbf24' : '#34d399', fontWeight: 700 }}>
                                 {(s.yieldsPerSec || 0) > 0 ? `${(s.yieldsPerSec || 0).toFixed(1)} /s` : '0.0 /s'}
                               </span>
                             </div>
@@ -4419,7 +4501,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                             </div>
                             <div className="scheduler-metric-row">
                               <span className="scheduler-metric-label">Work Queue (Starvation):</span>
-                              <span className="scheduler-metric-val" style={{ color: s.workQueueCount > 0 ? '#f43f5e' : '#cbd5e1' }}>
+                              <span className={`scheduler-metric-val ${s.workQueueCount > 0 ? 'critical' : ''}`} style={{ color: s.workQueueCount > 0 ? '#f43f5e' : '#cbd5e1' }}>
                                 {s.workQueueCount} {s.workQueueCount > 0 && '⚠️'}
                               </span>
                             </div>
@@ -4431,6 +4513,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                             {/* Active Task Link */}
                             {engineInternals?.activeTasks && (
                               <div
+                                className="scheduler-bound-tasks-row"
                                 style={{
                                   marginTop: '4px',
                                   paddingTop: '6px',
@@ -4441,9 +4524,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                                   fontSize: '10.5px'
                                 }}
                               >
-                                <span style={{ color: '#94a3b8' }}>Bound Tasks:</span>
+                                <span className="scheduler-bound-label" style={{ color: '#94a3b8' }}>Bound Tasks:</span>
                                 <button
                                   type="button"
+                                  className="scheduler-bound-btn"
                                   onClick={() => {
                                     setTaskSearch(`Scheduler #${s.schedulerId}`);
                                     setVitalsSubTab('attribution');
@@ -4523,7 +4607,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', gap: '4px', background: 'rgba(15, 23, 42, 0.5)', padding: '2px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div className="spid-state-filter-group" style={{ display: 'flex', gap: '4px', background: 'rgba(15, 23, 42, 0.5)', padding: '2px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }}>
                     <button
                       type="button"
                       className={`btn btn-sm ${taskStateFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
@@ -4592,8 +4676,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                   }
 
                   return (
-                    <div className="glass-panel" style={{ borderRadius: '10px', overflow: 'hidden' }}>
-                      <table className="radar-table">
+                    <div className="glass-panel radar-table-scroll-panel" style={{ borderRadius: '10px', overflow: 'hidden' }}>
+                      <table className="radar-table radar-sticky-table">
                         <thead>
                           <tr>
                             <th style={{ width: '130px' }}>Scheduler & Core</th>
@@ -4800,6 +4884,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               {/* NUMA Skew Diagnostic Banner */}
               {engineInternals?.numaSkewSummary && (
                 <div
+                  className={`numa-telemetry-banner ${engineInternals.numaSkewDetected ? 'skew' : 'normal'}`}
                   style={{
                     marginBottom: '12px',
                     padding: '10px 14px',
@@ -4812,19 +4897,19 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     flexShrink: 0,
                   }}
                 >
-                  <Network size={16} color={engineInternals.numaSkewDetected ? '#f43f5e' : '#38bdf8'} style={{ flexShrink: 0 }} />
-                  <span style={{ fontSize: '12px', color: engineInternals.numaSkewDetected ? '#fca5a5' : '#bae6fd' }}>
+                  <Network size={16} className="numa-telemetry-icon" color={engineInternals.numaSkewDetected ? '#f43f5e' : '#38bdf8'} style={{ flexShrink: 0 }} />
+                  <span className="numa-telemetry-text" style={{ fontSize: '12px', color: engineInternals.numaSkewDetected ? '#fca5a5' : '#bae6fd' }}>
                     <strong>NUMA Topology Telemetry:</strong> {engineInternals.numaSkewSummary}
                   </span>
                 </div>
               )}
 
               {/* NUMA KPI Row */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '14px', flexShrink: 0 }}>
+              <div className="numa-kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '14px', flexShrink: 0 }}>
                 {/* Node Balance */}
-                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px' }}>
+                <div className="glass-panel numa-kpi-card" style={{ padding: '14px', borderRadius: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>Memory Balance</span>
+                    <span className="numa-kpi-lbl" style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>Memory Balance</span>
                     {engineInternals?.numaSkewDetected ? (
                       <span className="radar-pill-danger" style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
                         SKEW DETECTED
@@ -4835,10 +4920,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: '20px', fontWeight: 800, color: engineInternals?.numaSkewDetected ? '#f43f5e' : '#34d399' }}>
-                    {engineInternals?.numaNodesCount ?? 0} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>Physical NUMA Nodes</span>
+                  <div className="numa-kpi-val" style={{ fontSize: '20px', fontWeight: 800, color: engineInternals?.numaSkewDetected ? '#f43f5e' : '#34d399' }}>
+                    {engineInternals?.numaNodesCount ?? 0} <span className="numa-kpi-unit" style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>Physical NUMA Nodes</span>
                   </div>
-                  <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '8px' }}>
+                  <div className="numa-kpi-desc" style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '8px' }}>
                     {engineInternals?.numaSkewDetected
                       ? 'Memory distribution skew (>35%) between sockets'
                       : 'Uniform buffer pool & grant distribution'}
@@ -4846,10 +4931,11 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                 </div>
 
                 {/* Cross-Socket Interconnect Penalty */}
-                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px' }}>
+                <div className="glass-panel numa-kpi-card" style={{ padding: '14px', borderRadius: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>Interconnect Latency Risk</span>
+                    <span className="numa-kpi-lbl" style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>Interconnect Latency Risk</span>
                     <span
+                      className={`numa-risk-badge ${engineInternals?.crossNumaLatencyRisk?.toLowerCase().includes('high') ? 'high' : engineInternals?.crossNumaLatencyRisk?.toLowerCase().includes('mod') ? 'mod' : 'low'}`}
                       style={{
                         fontSize: '10px',
                         padding: '2px 6px',
@@ -4872,26 +4958,26 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                       {engineInternals?.crossNumaLatencyRisk || 'Low'}
                     </span>
                   </div>
-                  <div style={{ fontSize: '20px', fontWeight: 800, color: '#f1f5f9' }}>
-                    {engineInternals?.totalForeignPages?.toLocaleString() ?? 0} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>Foreign Pages</span>
+                  <div className="numa-kpi-val" style={{ fontSize: '20px', fontWeight: 800, color: '#f1f5f9' }}>
+                    {engineInternals?.totalForeignPages?.toLocaleString() ?? 0} <span className="numa-kpi-unit" style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>Foreign Pages</span>
                   </div>
-                  <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '8px' }}>
+                  <div className="numa-kpi-desc" style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '8px' }}>
                     {(((engineInternals?.totalForeignPages ?? 0) * 8) / 1024).toFixed(1)} MB remote memory traffic across QPI/UPI bus
                   </div>
                 </div>
 
                 {/* Worker Distribution */}
-                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px' }}>
+                <div className="glass-panel numa-kpi-card" style={{ padding: '14px', borderRadius: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>Cross-Node Worker Balancing</span>
+                    <span className="numa-kpi-lbl" style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600 }}>Cross-Node Worker Balancing</span>
                     <span style={{ fontSize: '10px', color: '#38bdf8', fontFamily: 'monospace' }}>
                       sys.dm_os_nodes
                     </span>
                   </div>
-                  <div style={{ fontSize: '20px', fontWeight: 800, color: '#38bdf8' }}>
-                    {engineInternals?.numaNodes?.reduce((acc, n) => acc + n.activeWorkerCount, 0) ?? 0} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>Active Workers</span>
+                  <div className="numa-kpi-val worker-count" style={{ fontSize: '20px', fontWeight: 800, color: '#38bdf8' }}>
+                    {engineInternals?.numaNodes?.reduce((acc, n) => acc + n.activeWorkerCount, 0) ?? 0} <span className="numa-kpi-unit" style={{ fontSize: '12px', color: '#64748b', fontWeight: 500 }}>Active Workers</span>
                   </div>
-                  <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '8px' }}>
+                  <div className="numa-kpi-desc" style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '8px' }}>
                     Across {engineInternals?.numaNodes?.reduce((acc, n) => acc + n.onlineSchedulerCount, 0) ?? 0} online schedulers
                   </div>
                 </div>
@@ -4905,16 +4991,17 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
 
                     return (
                       <div key={node.nodeId} className={`numa-card ${isSkew ? 'skew-alert' : ''}`}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '10px' }}>
+                        <div className="numa-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '10px' }}>
                           <div>
-                            <div style={{ fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>
+                            <div className="numa-card-title" style={{ fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>
                               NUMA Node #{node.nodeId}
                             </div>
-                            <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                            <div className="numa-card-subtitle" style={{ fontSize: '11px', color: '#94a3b8' }}>
                               Memory Node #{node.memoryNodeId} • {node.nodeStateDesc}
                             </div>
                           </div>
                           <span
+                            className={`numa-affinity-badge ${node.foreignPageRatio < 5 ? 'optimal' : node.foreignPageRatio < 20 ? 'moderate' : 'high'}`}
                             style={{
                               fontSize: '10px',
                               padding: '2px 8px',
@@ -4945,8 +5032,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                         {/* Memory Allocation Bar */}
                         <div className="numa-mem-bar-wrapper">
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px' }}>
-                            <span style={{ color: '#94a3b8' }}>Memory Allocated / Target:</span>
-                            <span style={{ fontWeight: 700, color: '#f1f5f9', fontFamily: 'monospace' }}>
+                            <span className="numa-mem-bar-lbl" style={{ color: '#94a3b8' }}>Memory Allocated / Target:</span>
+                            <span className="numa-mem-bar-val" style={{ fontWeight: 700, color: '#f1f5f9', fontFamily: 'monospace' }}>
                               {node.memoryAllocatedMb.toFixed(1)} MB / {node.memoryTargetMb.toFixed(1)} MB
                             </span>
                           </div>
@@ -4972,35 +5059,35 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                               title="Foreign Cross-Socket Memory Allocation"
                             />
                           </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b' }}>
-                            <span>● Local Memory</span>
-                            <span style={{ color: '#f87171' }}>● Foreign (Cross-Socket): {node.foreignMemoryMb.toFixed(1)} MB</span>
+                          <div className="numa-mem-legend" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#64748b' }}>
+                            <span className="numa-legend-local">● Local Memory</span>
+                            <span className="numa-legend-foreign" style={{ color: '#f87171' }}>● Foreign (Cross-Socket): {node.foreignMemoryMb.toFixed(1)} MB</span>
                           </div>
                         </div>
 
                         {/* Detailed Metrics Grid */}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px' }}>
+                        <div className="numa-metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px' }}>
                           <div>
-                            <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Foreign Pages Count</div>
-                            <div style={{ fontSize: '14px', fontWeight: 700, color: node.foreignPageCount > 0 ? '#fbbf24' : '#34d399' }}>
+                            <div className="numa-metric-lbl" style={{ fontSize: '10.5px', color: '#94a3b8' }}>Foreign Pages Count</div>
+                            <div className={`numa-metric-val ${node.foreignPageCount > 0 ? 'warning' : 'healthy'}`} style={{ fontSize: '14px', fontWeight: 700, color: node.foreignPageCount > 0 ? '#fbbf24' : '#34d399' }}>
                               {node.foreignPageCount.toLocaleString()}
                             </div>
                           </div>
                           <div>
-                            <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Foreign Page Ratio</div>
-                            <div style={{ fontSize: '14px', fontWeight: 700, color: node.foreignPageRatio > 20 ? '#f43f5e' : node.foreignPageRatio > 5 ? '#fbbf24' : '#34d399' }}>
+                            <div className="numa-metric-lbl" style={{ fontSize: '10.5px', color: '#94a3b8' }}>Foreign Page Ratio</div>
+                            <div className={`numa-metric-val ${node.foreignPageRatio > 20 ? 'critical' : node.foreignPageRatio > 5 ? 'warning' : 'healthy'}`} style={{ fontSize: '14px', fontWeight: 700, color: node.foreignPageRatio > 20 ? '#f43f5e' : node.foreignPageRatio > 5 ? '#fbbf24' : '#34d399' }}>
                               {node.foreignPageRatio.toFixed(2)}%
                             </div>
                           </div>
                           <div>
-                            <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Online Schedulers</div>
-                            <div style={{ fontSize: '14px', fontWeight: 700, color: '#38bdf8' }}>
+                            <div className="numa-metric-lbl" style={{ fontSize: '10.5px', color: '#94a3b8' }}>Online Schedulers</div>
+                            <div className="numa-metric-val schedulers" style={{ fontSize: '14px', fontWeight: 700, color: '#38bdf8' }}>
                               {node.onlineSchedulerCount} ({node.idleSchedulerCount} idle)
                             </div>
                           </div>
                           <div>
-                            <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Active Workers / Load</div>
-                            <div style={{ fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>
+                            <div className="numa-metric-lbl" style={{ fontSize: '10.5px', color: '#94a3b8' }}>Active Workers / Load</div>
+                            <div className="numa-metric-val workers" style={{ fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>
                               {node.activeWorkerCount} (Load: {node.avgLoadBalance})
                             </div>
                           </div>
