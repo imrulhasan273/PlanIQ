@@ -56,6 +56,30 @@ export function App() {
   const [deadlockGraphs, setDeadlockGraphs] = useState<DeadlockGraph[]>([]);
   const [windowsUser, setWindowsUser] = useState<WindowsUserInfo | null>(null);
 
+  // Theme: default dark, persist to localStorage
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    const saved = localStorage.getItem('planiq_theme');
+    return saved !== null ? saved === 'dark' : true;
+  });
+
+  const handleToggleTheme = () => {
+    setIsDark((prev) => {
+      const next = !prev;
+      localStorage.setItem('planiq_theme', next ? 'dark' : 'light');
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.remove('light-theme');
+      document.body.classList.remove('light-theme');
+    } else {
+      document.documentElement.classList.add('light-theme');
+      document.body.classList.add('light-theme');
+    }
+  }, [isDark]);
+
   const [aiConfig, setAiConfig] = useState<{
     provider: 'offline' | 'gemini' | 'openai' | 'ollama';
     apiKey: string;
@@ -280,7 +304,8 @@ export function App() {
 
   return (
     <div
-      className="app-container"
+      id="app-root"
+      className={`app-container${isDark ? '' : ' light-theme'}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -310,6 +335,8 @@ export function App() {
         windowsUser={windowsUser}
         onExportReport={() => plan && exportDiagnosticReportHTML(plan)}
         isLoading={isLoading}
+        isDark={isDark}
+        onToggleTheme={handleToggleTheme}
       />
 
       {/* Main Content Area */}

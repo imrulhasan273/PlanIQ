@@ -27,6 +27,8 @@ import {
   HardDrive,
   Star,
   Plus,
+  Moon,
+  Sun,
 } from 'lucide-react';
 import { PlanAnalysis } from '../types/plan';
 import { ConnectionStatus, WindowsUserInfo, DBConnectionProfile } from '../types/livedb';
@@ -45,6 +47,8 @@ interface NavbarProps {
   windowsUser?: WindowsUserInfo | null;
   onExportReport?: () => void;
   isLoading: boolean;
+  isDark: boolean;
+  onToggleTheme: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -60,6 +64,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   windowsUser,
   onExportReport,
   isLoading,
+  isDark,
+  onToggleTheme,
 }) => {
   const [openMenu, setOpenMenu] = useState<'diagnostics' | 'optimization' | null>(null);
   const [isConnDropdownOpen, setIsConnDropdownOpen] = useState<boolean>(false);
@@ -390,6 +396,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Settings size={12} color="#38bdf8" />
               <span>AI Settings</span>
+            </button>
+
+            {/* Theme Toggle */}
+            <button
+              type="button"
+              className="theme-toggle-btn"
+              onClick={onToggleTheme}
+              title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+              aria-label={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              <Moon size={15} className="toggle-icon icon-moon" />
+              <Sun size={15} className="toggle-icon icon-sun" />
             </button>
           </div>
         </div>
