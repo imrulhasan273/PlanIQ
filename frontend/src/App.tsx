@@ -10,15 +10,16 @@ import { WaitStatsTab } from './components/WaitStatsTab';
 import { TuningPlaybookTab } from './components/TuningPlaybookTab';
 import { DeadlockTab } from './components/DeadlockTab';
 import { LiveRadarTab } from './components/LiveRadarTab';
+import { ConnectionsTab } from './components/ConnectionsTab';
 import { LiveConnectionModal } from './components/LiveConnectionModal';
 import { PasteModal } from './components/PasteModal';
 import { AISettingsModal } from './components/AISettingsModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PlanAnalysis, StatementAnalysis } from './types/plan';
 import { DeadlockGraph } from './types/deadlock';
-import { ConnectionStatus } from './types/livedb';
+import { ConnectionStatus, WindowsUserInfo } from './types/livedb';
 import { SAMPLE_DEADLOCK_XDL, isDeadlockXML, parseDeadlockXML, readFileAsDecodedText } from './utils/deadlockParser';
-import { LoadSamplePlan, OpenFileAndParse, OpenFilePicker, ParsePlan, GetLiveDBStatus } from '../wailsjs/go/main/App';
+import { LoadSamplePlan, OpenFileAndParse, OpenFilePicker, ParsePlan, GetLiveDBStatus, GetCurrentWindowsUser } from '../wailsjs/go/main/App';
 import { exportDiagnosticReportHTML } from './utils/reportExporter';
 import { parseShowPlanXMLClient } from './utils/clientPlanParser';
 import { sanitizePlan } from './utils/sanitizePlan';
@@ -37,7 +38,8 @@ export type TabType =
   | 'comparator'
   | 'playbook'
   | 'deadlock'
-  | 'liveradar';
+  | 'liveradar'
+  | 'connections';
 
 export function App() {
   const [plan, setPlan] = useState<PlanAnalysis | null>(null);
@@ -52,6 +54,7 @@ export function App() {
   const [isLiveConnOpen, setIsLiveConnOpen] = useState<boolean>(false);
   const [liveStatus, setLiveStatus] = useState<ConnectionStatus | null>(null);
   const [deadlockGraphs, setDeadlockGraphs] = useState<DeadlockGraph[]>([]);
+  const [windowsUser, setWindowsUser] = useState<WindowsUserInfo | null>(null);
 
   const [aiConfig, setAiConfig] = useState<{
     provider: 'offline' | 'gemini' | 'openai' | 'ollama';
@@ -88,9 +91,21 @@ export function App() {
     localStorage.setItem('planiq_ai_config', JSON.stringify(newConfig));
   };
 
-  // Auto-load explan.xml on first launch and check live connection status
+  // Auto-load explan.xml on first launch, get windows user, and check live connection status
   useEffect(() => {
     handleLoadSample();
+
+    // Fetch logged in Windows user
+    if (typeof window !== 'undefined' && (window as any).go?.main?.App?.GetCurrentWindowsUser) {
+      GetCurrentWindowsUser().then((u) => {
+        if (u && u.username) {
+          setWindowsUser(u);
+        }
+      }).catch((err) => {
+        console.warn('Failed to get Windows user:', err);
+      });
+    }
+
     if (typeof window !== 'undefined' && (window as any).go?.main?.App?.GetLiveDBStatus) {
       GetLiveDBStatus().then((st) => {
         if (st && st.connected) setLiveStatus(st);
@@ -292,6 +307,7 @@ export function App() {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenLiveModal={() => setIsLiveConnOpen(true)}
         liveStatus={liveStatus}
+        windowsUser={windowsUser}
         onExportReport={() => plan && exportDiagnosticReportHTML(plan)}
         isLoading={isLoading}
       />
@@ -316,7 +332,19 @@ export function App() {
           </div>
         )}
 
-        {activeTab === 'liveradar' ? (
+        {activeTab === 'connections' ? (
+          <ErrorBoundary onReset={() => setActiveTab('overview')}>
+            <ConnectionsTab
+              liveStatus={liveStatus}
+              windowsUser={windowsUser}
+              onConnectSuccess={(status) => {
+                setLiveStatus(status);
+                setActiveTab('liveradar');
+              }}
+              onNavigateToRadar={() => setActiveTab('liveradar')}
+            />
+          </ErrorBoundary>
+        ) : activeTab === 'liveradar' ? (
           <ErrorBoundary onReset={() => setActiveTab('overview')}>
             <LiveRadarTab
               status={liveStatus}
@@ -329,6 +357,7 @@ export function App() {
               }}
             />
           </ErrorBoundary>
+
         ) : activeTab === 'deadlock' ? (
           <ErrorBoundary onReset={() => setActiveTab('overview')}>
             <DeadlockTab
@@ -456,9 +485,12 @@ export function App() {
         onClose={() => setIsLiveConnOpen(false)}
         status={liveStatus}
         onStatusChange={(st) => setLiveStatus(st)}
+        defaultUsername={windowsUser?.username}
+        onOpenConnectionsTab={() => setActiveTab('connections')}
       />
     </div>
   );
 }
+
 
 export default App;

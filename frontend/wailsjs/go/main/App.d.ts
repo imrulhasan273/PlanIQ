@@ -4,14 +4,19 @@ import {sqlplan} from '../models';
 import {livedb} from '../models';
 import {advisor} from '../models';
 import {main} from '../models';
+import {configdb} from '../models';
 
 export function ComparePlans(arg1:string,arg2:string,arg3:string,arg4:string):Promise<sqlplan.PlanComparison>;
 
 export function ConnectLiveDB(arg1:livedb.ConnectionConfig):Promise<livedb.ConnectionStatus>;
 
+export function DeleteDBConnection(arg1:string):Promise<void>;
+
 export function DisconnectLiveDB():Promise<void>;
 
 export function GetAIAdvice(arg1:advisor.AIRequest):Promise<advisor.AIResponse>;
+
+export function GetCurrentWindowsUser():Promise<main.WindowsUserInfo>;
 
 export function GetLiveActiveSessions(arg1:number):Promise<Array<livedb.ActiveSession>>;
 
@@ -47,6 +52,10 @@ export function GetLiveWaitHistory():Promise<Array<livedb.WaitTimeHistoryPoint>>
 
 export function GetLiveWaitStats(arg1:number):Promise<Array<livedb.LiveWaitStat>>;
 
+export function GetRadarPagePollingConfig():Promise<Record<string, boolean>>;
+
+export function GetSavedDBConnections():Promise<Array<configdb.DBConnectionProfile>>;
+
 export function LoadSamplePlan():Promise<sqlplan.PlanAnalysis>;
 
 export function OpenFileAndParse():Promise<sqlplan.PlanAnalysis>;
@@ -54,3 +63,11 @@ export function OpenFileAndParse():Promise<sqlplan.PlanAnalysis>;
 export function OpenFilePicker():Promise<main.SelectedPlanFile>;
 
 export function ParsePlan(arg1:string,arg2:string):Promise<sqlplan.PlanAnalysis>;
+
+export function SaveDBConnection(arg1:configdb.DBConnectionProfile):Promise<configdb.DBConnectionProfile>;
+
+export function SetDefaultDBConnection(arg1:string):Promise<void>;
+
+export function SetRadarPagePolling(arg1:string,arg2:boolean):Promise<void>;
+
+export function TestDBConnection(arg1:livedb.ConnectionConfig):Promise<livedb.ConnectionStatus>;

@@ -69,7 +69,9 @@ import {
   GetLiveQueryStore,
   GetLiveDeadlocks,
   GetLiveServerVitals,
-  GetLiveEngineInternals
+  GetLiveEngineInternals,
+  GetRadarPagePollingConfig,
+  SetRadarPagePolling
 } from '../../wailsjs/go/main/App';
 
 interface LiveRadarTabProps {
@@ -212,6 +214,104 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
   // Selected Session for 360° Detail Modal
   const [inspectSession, setInspectSession] = useState<any | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Persistent SQLite Page Polling Configuration (for 12 Live Radar subtabs)
+  const [pagePollingConfig, setPagePollingConfig] = useState<Record<string, boolean>>({
+    advisors: true,
+    sessions: true,
+    sleeping: true,
+    waithistory: true,
+    blocking: true,
+    waits: true,
+    querystore: true,
+    bufferpool: true,
+    indexes: true,
+    deadlocks: true,
+    tempdb: true,
+    vitals: true,
+  });
+
+  // Load polling config from SQLite on component mount
+  useEffect(() => {
+    let isMounted = true;
+    const loadConfig = async () => {
+      try {
+        const app = (window as any).go?.main?.App;
+        if (app?.GetRadarPagePollingConfig) {
+          const cfg = await app.GetRadarPagePollingConfig();
+          if (cfg && typeof cfg === 'object' && isMounted) {
+            setPagePollingConfig((prev) => ({ ...prev, ...cfg }));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load page polling config from SQLite:', err);
+      }
+    };
+    loadConfig();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Persist enable/disable state for a page to SQLite DB
+  const togglePagePolling = async (pageId: SubTabType) => {
+    const current = pagePollingConfig[pageId] !== false;
+    const nextVal = !current;
+
+    // Optimistic UI update
+    setPagePollingConfig((prev) => ({ ...prev, [pageId]: nextVal }));
+
+    // Persist to SQLite DB
+    try {
+      const app = (window as any).go?.main?.App;
+      if (app?.SetRadarPagePolling) {
+        await app.SetRadarPagePolling(pageId, nextVal);
+      }
+    } catch (err) {
+      console.error(`Failed to save polling config for ${pageId} to SQLite:`, err);
+    }
+  };
+
+  // Beautiful modern toggle switch for the top-right corner of each Live Radar page
+  const renderPagePollingToggle = (pageId: SubTabType) => {
+    const isEnabled = pagePollingConfig[pageId] !== false;
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          togglePagePolling(pageId);
+        }}
+        className={`radar-page-poll-toggle ${isEnabled ? 'enabled' : 'disabled'}`}
+        title={`Click to ${isEnabled ? 'pause' : 'resume'} live background polling for this page (Saved to SQLite config)`}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <span
+            style={{
+              width: '7px',
+              height: '7px',
+              borderRadius: '50%',
+              background: isEnabled ? '#10b981' : '#64748b',
+              boxShadow: isEnabled ? '0 0 6px #10b981' : 'none',
+              display: 'inline-block',
+            }}
+          />
+          <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.02em' }}>
+            {isEnabled ? 'Live Polling' : 'Polling Paused'}
+          </span>
+        </span>
+
+        <div className="radar-poll-toggle-track" style={{ background: isEnabled ? '#10b981' : 'rgba(255, 255, 255, 0.16)' }}>
+          <div
+            className="radar-poll-toggle-thumb"
+            style={{
+              transform: isEnabled ? 'translateX(13px)' : 'translateX(0px)',
+            }}
+          />
+        </div>
+      </button>
+    );
+  };
 
   // Helper to extract Day and Hour from advisor timestamp
   const parseAdvisorTimestamp = (ts: string) => {
@@ -416,8 +516,12 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
   };
 
   // Fetch data
-  const fetchData = async () => {
+  const fetchData = async (trigger?: boolean | React.SyntheticEvent) => {
     if (!isConnected) return;
+    const isManual = trigger === true || (trigger && typeof trigger === 'object');
+    if (!isManual && pagePollingConfig[activeSubTab] === false) {
+      return; // Polling disabled for this page in SQLite config
+    }
     setIsLoading(true);
     try {
       const app = (window as any).go?.main?.App;
@@ -522,11 +626,13 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
     }
   };
 
-  // Auto-refresh interval
+  // Auto-refresh interval (respects per-page SQLite toggle)
   useEffect(() => {
-    fetchData();
+    if (pagePollingConfig[activeSubTab] !== false) {
+      fetchData();
+    }
 
-    if (!isAutoRefresh || !isConnected) {
+    if (!isAutoRefresh || !isConnected || pagePollingConfig[activeSubTab] === false) {
       if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
@@ -534,14 +640,16 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
     const interval = activeSubTab === 'sessions' || activeSubTab === 'blocking' ? 2500 : 5000;
     timerRef.current = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        fetchData();
+        if (pagePollingConfig[activeSubTab] !== false) {
+          fetchData();
+        }
       }
     }, interval);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isConnected, isAutoRefresh, activeSubTab, qsOrderBy, activeLimit, idleLimit, qsLimit, waitsLimit, deadlocksLimit, indexesLimit, tempDbLimit]);
+  }, [isConnected, isAutoRefresh, activeSubTab, pagePollingConfig, qsOrderBy, activeLimit, idleLimit, qsLimit, waitsLimit, deadlocksLimit, indexesLimit, tempDbLimit]);
 
   // Handle Inspect Live Plan
   const handleInspectPlan = async (session: ActiveSession) => {
@@ -893,6 +1001,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {renderPagePollingToggle('sessions')}
           {/* Row Limit Control for Active Sessions */}
           <div className="radar-limit-ctrl" title="Configure maximum active sessions fetched from SQL Server (Default: 200)">
             <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
@@ -1276,6 +1385,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {renderPagePollingToggle('sleeping')}
             {/* Limit Control for Sleeping Sessions */}
             <div className="radar-limit-ctrl" title="Configure maximum sleeping connections fetched from SQL Server (Default: 500)">
               <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
@@ -1456,6 +1566,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {renderPagePollingToggle('querystore')}
           {/* Limit Control for Query Store */}
           <div className="radar-limit-ctrl" title="Configure top queries fetched from Query Store (Default: 25)">
             <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
@@ -1551,6 +1662,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {renderPagePollingToggle('waits')}
           {/* Limit Control for Wait Stats */}
           <div className="radar-limit-ctrl" title="Configure top wait types fetched from sys.dm_os_wait_stats (Default: 50)">
             <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
@@ -1691,6 +1803,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             >
               <Sparkles size={12} className="radar-subnav-icon" color="#818cf8" />
               <span>Advisors</span>
+              {pagePollingConfig['advisors'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
               {advisors.length > 0 && (
                 <span className="radar-count-pill" style={{ background: 'rgba(129, 140, 248, 0.25)', color: '#818cf8', fontWeight: 800 }}>
                   {advisors.length}
@@ -1707,6 +1820,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             >
               <Activity size={12} className="radar-subnav-icon" />
               <span>Active Sessions</span>
+              {pagePollingConfig['sessions'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
               <span className="radar-count-pill">{sessions.length}</span>
               {blockedCount > 0 && (
                 <span className="radar-blocked-pill">
@@ -1724,6 +1838,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             >
               <Moon size={12} className="radar-subnav-icon" />
               <span>Sleeping & Idle</span>
+              {pagePollingConfig['sleeping'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
               <span className="radar-count-pill">{idleSessions.length}</span>
               {idleSessions.filter((s) => (s.openTransactions ?? 0) > 0).length > 0 && (
                 <span className="radar-blocked-pill" style={{ background: '#f59e0b' }}>
@@ -1742,6 +1857,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             >
               <BarChart3 size={12} className="radar-subnav-icon" color="#10b981" />
               <span>Wait Trend</span>
+              {pagePollingConfig['waithistory'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
             </button>
 
             {/* 4. Blocking & Lock Tree */}
@@ -1753,6 +1869,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             >
               <GitCommit size={12} className="radar-subnav-icon" />
               <span>Blocking Tree</span>
+              {pagePollingConfig['blocking'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
               {blockedCount > 0 && (
                 <span className="radar-blocked-pill" style={{ background: '#ef4444' }}>
                   {blockedCount}
@@ -1769,6 +1886,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             >
               <Clock size={12} className="radar-subnav-icon" />
               <span>Wait Stats</span>
+              {pagePollingConfig['waits'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
             </button>
 
             {/* 6. Query Store */}
@@ -1780,6 +1898,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             >
               <TrendingUp size={12} className="radar-subnav-icon" />
               <span>Query Store Top</span>
+              {pagePollingConfig['querystore'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
             </button>
 
             {/* 7. Buffer Pool RAM Inspector */}
@@ -1792,6 +1911,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             >
               <Layers size={12} className="radar-subnav-icon" color="#38bdf8" />
               <span>Buffer Pool</span>
+              {pagePollingConfig['bufferpool'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
             </button>
 
             {/* 8. Index Hygiene & Waste */}
@@ -1803,6 +1923,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             >
               <FolderTree size={12} className="radar-subnav-icon" />
               <span>Index Hygiene</span>
+              {pagePollingConfig['indexes'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
               {unusedIndexes.length > 0 && (
                 <span className="radar-count-pill" style={{ background: 'rgba(244, 63, 94, 0.2)', color: '#f43f5e' }}>
                   {unusedIndexes.length} Waste
@@ -1819,6 +1940,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             >
               <ShieldAlert size={12} className="radar-subnav-icon" />
               <span>Deadlocks</span>
+              {pagePollingConfig['deadlocks'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
             </button>
 
             {/* 10. TempDB Allocation */}
@@ -1830,6 +1952,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             >
               <HardDrive size={12} className="radar-subnav-icon" />
               <span>TempDB Usage</span>
+              {pagePollingConfig['tempdb'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
             </button>
 
             {/* 11. Server Vitals */}
@@ -1841,6 +1964,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             >
               <Cpu size={12} className="radar-subnav-icon" />
               <span>Server Vitals</span>
+              {pagePollingConfig['vitals'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
             </button>
           </div>
         </div>
@@ -1911,13 +2035,16 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               background: 'rgba(30, 41, 59, 0.75)'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-              <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: 'rgba(129, 140, 248, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Sparkles size={16} color="#818cf8" />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: 'rgba(129, 140, 248, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Sparkles size={16} color="#818cf8" />
+                </div>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#f1f5f9' }}>
+                  Advisors
+                </h3>
               </div>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#f1f5f9' }}>
-                Advisors
-              </h3>
+              {renderPagePollingToggle('advisors')}
             </div>
             <p style={{ margin: '0 0 12px', fontSize: '12.5px', color: '#cbd5e1', lineHeight: '1.5' }}>
               PlanIQ employs proprietary heuristics inspired by SolarWinds DPA to provide you with rich real-time analysis of top queries. 
@@ -2753,8 +2880,9 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                 </p>
               </div>
 
-              {/* View Granularity Switcher & Chart Legend */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+              {/* View Granularity Switcher, Polling Toggle & Chart Legend */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                {renderPagePollingToggle('waithistory')}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Granularity:</span>
                   <div className="radar-limit-presets" style={{ background: 'rgba(0,0,0,0.3)', padding: '2px', borderRadius: '4px' }}>
@@ -2938,10 +3066,13 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                 Extracted from <code>sys.dm_os_waiting_tasks</code> and <code>sys.dm_tran_locks</code>. Identifies root blocker SPID and victim cascade.
               </p>
             </div>
-            <button type="button" className="btn btn-secondary btn-sm radar-ctrl-btn" onClick={fetchData} disabled={isLoading}>
-              <RefreshCw size={11} className={isLoading ? 'spin' : ''} />
-              <span>Poll Locks</span>
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {renderPagePollingToggle('blocking')}
+              <button type="button" className="btn btn-secondary btn-sm radar-ctrl-btn" onClick={() => fetchData(true)} disabled={isLoading}>
+                <RefreshCw size={11} className={isLoading ? 'spin' : ''} />
+                <span>Poll Locks</span>
+              </button>
+            </div>
           </div>
 
           {blockingSessions.length === 0 ? (
@@ -3247,6 +3378,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               Recent Deadlocks from `system_health` Extended Events Buffer (Showing {deadlocks.length})
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {renderPagePollingToggle('deadlocks')}
               <div className="radar-limit-ctrl" title="Configure maximum deadlocks retrieved (Default: 15)">
                 <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
                 <input
@@ -3364,6 +3496,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {renderPagePollingToggle('bufferpool')}
               <div className="radar-limit-ctrl" title="Configure maximum cached objects shown (Default: 50)">
                 <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
                 <input
@@ -3519,8 +3652,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               </p>
             </div>
 
-            {/* 3-Way Sub-Segment Switcher */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(15, 23, 42, 0.7)', padding: '3px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {renderPagePollingToggle('indexes')}
+              {/* 3-Way Sub-Segment Switcher */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(15, 23, 42, 0.7)', padding: '3px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
               <button
                 type="button"
                 className={`btn btn-sm ${indexSubTab === 'missing' ? 'btn-primary' : 'btn-secondary'}`}
@@ -3550,6 +3685,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                 <span>Duplicates</span>
                 <span style={{ fontSize: '10px', opacity: 0.8 }}>({duplicateIndexes.length})</span>
               </button>
+            </div>
             </div>
           </div>
 
@@ -3801,6 +3937,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {renderPagePollingToggle('tempdb')}
               <div className="radar-limit-ctrl" title="Configure maximum active tasks analyzed for TempDB workspace (Default: 100)">
                 <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
                 <input
@@ -3905,8 +4042,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               </p>
             </div>
 
-            {/* Sub-view switcher */}
-            <div style={{ display: 'flex', gap: '6px', background: 'rgba(15, 23, 42, 0.6)', padding: '3px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+            {/* Sub-view switcher & Polling Toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              {renderPagePollingToggle('vitals')}
+              <div style={{ display: 'flex', gap: '6px', background: 'rgba(15, 23, 42, 0.6)', padding: '3px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
               <button
                 type="button"
                 className={`btn btn-sm ${vitalsSubTab === 'overview' ? 'btn-primary' : 'btn-secondary'}`}
@@ -3961,6 +4100,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                   </span>
                 )}
               </button>
+            </div>
             </div>
           </div>
 

@@ -142,6 +142,51 @@ export namespace advisor {
 
 }
 
+export namespace configdb {
+	
+	export class DBConnectionProfile {
+	    id: string;
+	    name: string;
+	    server: string;
+	    port: number;
+	    database: string;
+	    authType: string;
+	    username: string;
+	    password: string;
+	    encrypt: boolean;
+	    trustServerCertificate: boolean;
+	    applicationIntent: string;
+	    timeoutSeconds: number;
+	    isDefault: boolean;
+	    createdAt: string;
+	    updatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DBConnectionProfile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.server = source["server"];
+	        this.port = source["port"];
+	        this.database = source["database"];
+	        this.authType = source["authType"];
+	        this.username = source["username"];
+	        this.password = source["password"];
+	        this.encrypt = source["encrypt"];
+	        this.trustServerCertificate = source["trustServerCertificate"];
+	        this.applicationIntent = source["applicationIntent"];
+	        this.timeoutSeconds = source["timeoutSeconds"];
+	        this.isDefault = source["isDefault"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+
+}
+
 export namespace livedb {
 	
 	export class ActiveSession {
@@ -847,6 +892,22 @@ export namespace main {
 	        this.path = source["path"];
 	        this.name = source["name"];
 	        this.content = source["content"];
+	    }
+	}
+	export class WindowsUserInfo {
+	    username: string;
+	    domain: string;
+	    fullAccount: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WindowsUserInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.username = source["username"];
+	        this.domain = source["domain"];
+	        this.fullAccount = source["fullAccount"];
 	    }
 	}
 

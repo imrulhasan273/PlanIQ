@@ -22,9 +22,15 @@ import {
   BookOpen,
   TrendingUp,
   ShieldAlert,
+  User,
+  Server,
+  HardDrive,
+  Star,
+  Plus,
 } from 'lucide-react';
 import { PlanAnalysis } from '../types/plan';
-import { ConnectionStatus } from '../types/livedb';
+import { ConnectionStatus, WindowsUserInfo, DBConnectionProfile } from '../types/livedb';
+import { GetSavedDBConnections, ConnectLiveDB } from '../../wailsjs/go/main/App';
 
 interface NavbarProps {
   plan: PlanAnalysis | null;
@@ -36,6 +42,7 @@ interface NavbarProps {
   onOpenSettings: () => void;
   onOpenLiveModal: () => void;
   liveStatus: ConnectionStatus | null;
+  windowsUser?: WindowsUserInfo | null;
   onExportReport?: () => void;
   isLoading: boolean;
 }
@@ -50,13 +57,58 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSettings,
   onOpenLiveModal,
   liveStatus,
+  windowsUser,
   onExportReport,
   isLoading,
 }) => {
   const [openMenu, setOpenMenu] = useState<'diagnostics' | 'optimization' | null>(null);
+  const [isConnDropdownOpen, setIsConnDropdownOpen] = useState<boolean>(false);
+  const [savedProfiles, setSavedProfiles] = useState<DBConnectionProfile[]>([]);
   const timerRef = useRef<any>(null);
   const diagRef = useRef<HTMLDivElement>(null);
   const optRef = useRef<HTMLDivElement>(null);
+  const connDropdownRef = useRef<HTMLDivElement>(null);
+
+  const refreshSavedProfiles = async () => {
+    try {
+      if (typeof window !== 'undefined' && (window as any).go?.main?.App?.GetSavedDBConnections) {
+        const list = await GetSavedDBConnections();
+        if (Array.isArray(list)) {
+          setSavedProfiles(list);
+        }
+      }
+    } catch (e) {
+      console.warn('Navbar: failed to load saved connections:', e);
+    }
+  };
+
+  useEffect(() => {
+    refreshSavedProfiles();
+  }, [liveStatus]);
+
+  const handleQuickConnect = async (p: DBConnectionProfile) => {
+    setIsConnDropdownOpen(false);
+    try {
+      if (typeof window !== 'undefined' && (window as any).go?.main?.App?.ConnectLiveDB) {
+        await ConnectLiveDB({
+          server: p.server,
+          port: Number(p.port) || 1433,
+          database: p.database,
+          authType: p.authType,
+          username: p.username,
+          password: p.password,
+          encrypt: p.encrypt,
+          trustServerCertificate: p.trustServerCertificate,
+          applicationIntent: p.applicationIntent,
+          timeoutSeconds: Number(p.timeoutSeconds) || 4,
+        } as any);
+        setActiveTab('liveradar');
+      }
+    } catch (err) {
+      console.error('Quick connect failed:', err);
+      onOpenLiveModal();
+    }
+  };
 
   const isDiagnosticsActive =
     activeTab === 'overview' ||
@@ -105,7 +157,9 @@ export const Navbar: React.FC<NavbarProps> = ({
       const target = e.target as Node;
       if (diagRef.current && diagRef.current.contains(target)) return;
       if (optRef.current && optRef.current.contains(target)) return;
+      if (connDropdownRef.current && connDropdownRef.current.contains(target)) return;
       setOpenMenu(null);
+      setIsConnDropdownOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -124,6 +178,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="brand-title-row">
               <span className="brand-title">PlanIQ</span>
               <span className="brand-version-pill">v2.0 Desktop</span>
+              {windowsUser?.username && (
+                <div
+                  className="brand-user-pill"
+                  title={`Windows User: ${windowsUser.fullAccount || windowsUser.username}${windowsUser.domain ? ` | Domain: ${windowsUser.domain}` : ''}`}
+                >
+                  <User size={11} className="brand-user-icon" />
+                  <span className="brand-username-text">{windowsUser.username}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -180,28 +243,144 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {liveStatus && liveStatus.connected ? (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm top-action-btn live-conn-btn"
-                onClick={onOpenLiveModal}
-                title={`Connected to ${liveStatus.serverName} (${liveStatus.databaseName}) - Click to manage`}
-              >
-                <span className="live-status-dot" />
-                <span className="live-server-name">{liveStatus.serverName.split('.')[0]}</span>
-                <span className="live-db-name">({liveStatus.databaseName})</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm top-action-btn"
-                onClick={onOpenLiveModal}
-                title="Connect to live Microsoft SQL Server instance"
-              >
-                <Zap size={12} color="#38bdf8" />
-                <span>Connect DB</span>
-              </button>
-            )}
+            <div className="live-conn-dropdown-wrap" ref={connDropdownRef}>
+              {liveStatus && liveStatus.connected ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm top-action-btn live-conn-btn"
+                  onClick={() => {
+                    setIsConnDropdownOpen(!isConnDropdownOpen);
+                    refreshSavedProfiles();
+                  }}
+                  title={`Connected to ${liveStatus.serverName} (${liveStatus.databaseName}) - Click to switch saved connection`}
+                >
+                  <span className="live-status-dot" />
+                  <span className="live-server-name">{liveStatus.serverName.split('.')[0]}</span>
+                  <span className="live-db-name">({liveStatus.databaseName})</span>
+                  <ChevronDown size={11} className={`conn-dropdown-chevron ${isConnDropdownOpen ? 'open' : ''}`} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm top-action-btn"
+                  onClick={() => {
+                    setIsConnDropdownOpen(!isConnDropdownOpen);
+                    refreshSavedProfiles();
+                  }}
+                  title="Connect to SQL Server or select saved connection"
+                >
+                  <Zap size={12} color="#38bdf8" />
+                  <span>Connect DB</span>
+                  <ChevronDown size={11} className={`conn-dropdown-chevron ${isConnDropdownOpen ? 'open' : ''}`} />
+                </button>
+              )}
+
+              {isConnDropdownOpen && (
+                <div className="nav-conn-flyout glass-panel">
+                  <div className="nav-conn-flyout-header">
+                    <div className="nav-conn-flyout-title">
+                      <HardDrive size={13} color="#34d399" />
+                      <span>Saved SQL Connections</span>
+                      <span className="nav-conn-count-pill">{savedProfiles.length}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="nav-conn-new-btn"
+                      onClick={() => {
+                        setIsConnDropdownOpen(false);
+                        setActiveTab('connections');
+                      }}
+                      title="Create new profile in SQLite Studio"
+                    >
+                      <Plus size={11} />
+                      <span>New</span>
+                    </button>
+                  </div>
+
+                  <div className="nav-conn-flyout-list">
+                    {savedProfiles.length === 0 ? (
+                      <div className="nav-conn-empty">
+                        <span>No saved profiles found.</span>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-xs"
+                          onClick={() => {
+                            setIsConnDropdownOpen(false);
+                            setActiveTab('connections');
+                          }}
+                        >
+                          Create Connection
+                        </button>
+                      </div>
+                    ) : (
+                      savedProfiles.map((p) => {
+                        const isActive =
+                          liveStatus?.connected &&
+                          (liveStatus.serverName.toLowerCase().includes(p.server.toLowerCase()) ||
+                            p.server.toLowerCase().includes(liveStatus.serverName.toLowerCase())) &&
+                          liveStatus.databaseName.toLowerCase() === p.database.toLowerCase();
+
+                        return (
+                          <div
+                            key={p.id}
+                            className={`nav-conn-flyout-item ${isActive ? 'is-active-item' : ''}`}
+                            onClick={() => handleQuickConnect(p)}
+                          >
+                            <div className="nav-conn-item-left">
+                              <div className="nav-conn-item-title-row">
+                                <span className="nav-conn-item-name">{p.name}</span>
+                                {p.isDefault && <Star size={10} fill="#f59e0b" color="#f59e0b" />}
+                                {isActive && <span className="nav-conn-active-badge">ACTIVE</span>}
+                              </div>
+                              <span className="nav-conn-item-sub">
+                                {p.server}:{p.port || 1433} / {p.database}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-xs nav-conn-quick-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleQuickConnect(p);
+                              }}
+                            >
+                              <Zap size={10} />
+                              <span>{isActive ? 'Active' : 'Connect'}</span>
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="nav-conn-flyout-footer">
+                    <button
+                      type="button"
+                      className="nav-conn-footer-link"
+                      onClick={() => {
+                        setIsConnDropdownOpen(false);
+                        setActiveTab('connections');
+                      }}
+                    >
+                      <Server size={12} color="#38bdf8" />
+                      <span>Connections Studio...</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="nav-conn-footer-link"
+                      onClick={() => {
+                        setIsConnDropdownOpen(false);
+                        onOpenLiveModal();
+                      }}
+                    >
+                      <span>Custom Dialog</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
 
             <button
               type="button"
@@ -581,7 +760,33 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="category-offline-pill">100% Offline</span>
             </button>
           </div>
+
+          {/* Category 6: DB Connections (SQLite Persisted) */}
+          <div className="nav-dropdown-item-wrap">
+            <button
+              type="button"
+              className={`nav-category-btn ${activeTab === 'connections' ? 'active' : ''}`}
+              onClick={(e) => handleSelectTab('connections', e)}
+              title="Manage saved SQL Server connection profiles in SQLite database"
+            >
+              <Server size={14} color={activeTab === 'connections' ? '#38bdf8' : '#94a3b8'} />
+              <span className="category-title">Connections</span>
+              <span
+                style={{
+                  fontSize: '9.5px',
+                  fontWeight: 700,
+                  padding: '1px 5px',
+                  borderRadius: '4px',
+                  background: 'rgba(56, 189, 248, 0.15)',
+                  color: '#38bdf8',
+                }}
+              >
+                SQLite
+              </span>
+            </button>
+          </div>
         </div>
+
       </div>
     </header>
   );

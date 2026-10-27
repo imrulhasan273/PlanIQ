@@ -157,6 +157,24 @@ The compiled binary will be placed in `build/bin/`.
 - Click **Run AI Advisory Analysis** to trigger the Deterministic DBA Rule Engine.
 - Inspect the optimized query in the **Side-by-Side Monaco Diff Viewer** with highlighted structural improvements.
 
+### 5. Deadlock Graph (.xdl) Visualizer
+- Click **Deadlocks (.xdl)** in the top navigation bar.
+- Open any `.xdl` file exported from SSMS, Extended Events, or error logs (or drag and drop into the app).
+- Or click **Sample Plan** to inspect an instant interactive demonstration.
+- **Interactive Dependency Graph:** Highlights the fatal circular lock cycle with red pulse glow and flags victim SPIDs rolled back by the engine.
+- **Step Timeline:** Chronological step-by-step playback of lock acquisition and lock collision.
+- **Side-by-Side Session Diff:** Compare statement text, isolation levels, transactions, and SPIDs.
+- **Lock Granularity Matrix:** Deep breakdown of Key, Page, Object, and Exchange locks.
+- **Remediation Scripts:** Production-tested T-SQL and EF Core code snippets to permanently eliminate the deadlock.
+- **Export:** One-click high-resolution PNG and vector SVG exports for incident response reports.
+
+### 6. Live Radar & Wait Trend (SolarWinds DPA Style)
+- Connect safely to your live SQL Server instance with read-only intent (`READ UNCOMMITTED`, `LOCK_TIMEOUT 3000ms`).
+- **Wait Trend:** Day-wise and hourly wait category history (CPU, Lock, Latch, Memory, Buffer I/O) aggregated from Query Store.
+- **Advisors:** Automated detection of plan regressions, parameter sniffing, and query anomalies.
+- **Live Deadlocks:** Stream deadlocks directly from the `system_health` Extended Events ring buffer and event file targets.
+- **Buffer Pool Inspector:** Instant partition-level memory cache inspection without buffer latch contention.
+
 ---
 
 ## 🛡️ Security & Privacy

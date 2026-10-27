@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"sqlplan-advisor/pkg/advisor"
+	"sqlplan-advisor/pkg/configdb"
 	"sqlplan-advisor/pkg/livedb"
 	"sqlplan-advisor/pkg/sqlplan"
 )
@@ -265,6 +268,107 @@ func (a *App) GetLiveDuplicateIndexes() ([]livedb.DuplicateIndex, error) {
 func (a *App) GetLiveEngineInternals() (*livedb.EngineInternalsReport, error) {
 	client := livedb.GetClient()
 	return client.GetEngineInternals(a.ctx)
+}
+
+// GetRadarPagePollingConfig retrieves per-subtab polling settings from SQLite
+func (a *App) GetRadarPagePollingConfig() (map[string]bool, error) {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	return store.GetRadarPagePollingConfig()
+}
+
+// SetRadarPagePolling persists polling enable/disable toggle for a Live Radar subtab to SQLite
+func (a *App) SetRadarPagePolling(pageID string, enabled bool) error {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return err
+	}
+	return store.SetRadarPagePolling(pageID, enabled)
+}
+
+// GetSavedDBConnections retrieves all saved database connection profiles from SQLite
+func (a *App) GetSavedDBConnections() ([]configdb.DBConnectionProfile, error) {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	return store.GetDBConnections()
+}
+
+// SaveDBConnection saves or updates a connection profile in SQLite
+func (a *App) SaveDBConnection(p configdb.DBConnectionProfile) (*configdb.DBConnectionProfile, error) {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	return store.SaveDBConnection(p)
+}
+
+// DeleteDBConnection removes a connection profile from SQLite
+func (a *App) DeleteDBConnection(id string) error {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return err
+	}
+	return store.DeleteDBConnection(id)
+}
+
+// SetDefaultDBConnection sets a connection profile as default in SQLite
+func (a *App) SetDefaultDBConnection(id string) error {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return err
+	}
+	return store.SetDefaultDBConnection(id)
+}
+
+// TestDBConnection validates connection parameters against SQL Server without mutating current app state
+func (a *App) TestDBConnection(cfg livedb.ConnectionConfig) (*livedb.ConnectionStatus, error) {
+	client := livedb.GetClient()
+	return client.TestConnection(a.ctx, cfg)
+}
+
+
+// WindowsUserInfo contains logged-in Windows user details
+type WindowsUserInfo struct {
+	Username    string `json:"username"`
+	Domain      string `json:"domain"`
+	FullAccount string `json:"fullAccount"`
+}
+
+// GetCurrentWindowsUser returns the logged-in Windows OS user and domain
+func (a *App) GetCurrentWindowsUser() WindowsUserInfo {
+	domain := os.Getenv("USERDOMAIN")
+	username := os.Getenv("USERNAME")
+	full := username
+
+	u, err := user.Current()
+	if err == nil && u.Username != "" {
+		full = u.Username
+		parts := strings.Split(u.Username, "\\")
+		if len(parts) > 1 {
+			domain = parts[0]
+			username = parts[1]
+		} else {
+			username = u.Username
+		}
+	}
+	if username == "" {
+		username = os.Getenv("USER")
+	}
+	if username == "" {
+		username = "User"
+	}
+	if domain != "" && !strings.Contains(full, "\\") {
+		full = fmt.Sprintf("%s\\%s", domain, username)
+	}
+	return WindowsUserInfo{
+		Username:    username,
+		Domain:      domain,
+		FullAccount: full,
+	}
 }
 
 

@@ -297,3 +297,29 @@ export interface EngineInternalsReport {
   numaNodes: NUMANodeInfo[];
 }
 
+export interface WindowsUserInfo {
+  username: string;
+  domain: string;
+  fullAccount: string;
+}
+
+export interface DBConnectionProfile {
+  id: string;
+  name: string;
+  server: string;
+  port: number;
+  database: string;
+  authType: string;
+  username?: string;
+  password?: string;
+  encrypt: boolean;
+  trustServerCertificate: boolean;
+  applicationIntent: string;
+  timeoutSeconds: number;
+  isDefault: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+
+

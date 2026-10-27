@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -137,11 +138,39 @@ func (c *Client) Connect(ctx context.Context, cfg ConnectionConfig) (*Connection
 
 	if err := db.PingContext(pingCtx); err != nil {
 		_ = db.Close()
-		c.status = ConnectionStatus{
-			Connected:    false,
-			ErrorMessage: fmt.Sprintf("Failed to connect: %v", err),
+
+		// If URL-encoded ping failed and SQL authentication is used, attempt ADO format with literal curly-bracketed password
+		if cfg.AuthType != "windows" {
+			adoConnStr := fmt.Sprintf("server=%s;port=%d;database=%s;user id=%s;password={%s};connection timeout=%d;app name=PlanIQ-Live-Radar;ApplicationIntent=ReadOnly",
+				cfg.Server, cfg.Port, cfg.Database, cfg.Username, cfg.Password, cfg.TimeoutSeconds)
+			if cfg.Encrypt {
+				adoConnStr += ";encrypt=true"
+			} else {
+				adoConnStr += ";encrypt=disable"
+			}
+			if cfg.TrustServerCertificate {
+				adoConnStr += ";trustservercertificate=true"
+			}
+
+			if db2, err2 := sql.Open("sqlserver", adoConnStr); err2 == nil {
+				pingCtx2, cancel2 := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
+				defer cancel2()
+				if err3 := db2.PingContext(pingCtx2); err3 == nil {
+					db = db2
+					err = nil
+				} else {
+					_ = db2.Close()
+				}
+			}
 		}
-		return &c.status, err
+
+		if err != nil {
+			c.status = ConnectionStatus{
+				Connected:    false,
+				ErrorMessage: fmt.Sprintf("Failed to connect: %v", err),
+			}
+			return &c.status, err
+		}
 	}
 	latency := time.Since(start).Milliseconds()
 
@@ -177,6 +206,137 @@ func (c *Client) Connect(ctx context.Context, cfg ConnectionConfig) (*Connection
 
 	return &c.status, nil
 }
+
+// TestConnection tests a SQL Server connection without changing the active client state
+func (c *Client) TestConnection(ctx context.Context, cfg ConnectionConfig) (*ConnectionStatus, error) {
+	if cfg.AuthType == "demo" || strings.ToLower(cfg.Server) == "demo" || strings.ToLower(cfg.Server) == "localhost-demo" {
+		return &ConnectionStatus{
+			Connected:      true,
+			ServerVersion:  "Microsoft SQL Server 2022 (RTM-CU12) (KB5033663) - 16.0.4115.5 (X64) Enterprise Edition",
+			ServerName:     "PROD-SQL01.corp.internal",
+			DatabaseName:   "SalesDB",
+			ActiveSessions: 14,
+			LatencyMs:      8,
+			IsReadOnly:     true,
+			IsDemo:         true,
+		}, nil
+	}
+
+	if cfg.Port == 0 {
+		cfg.Port = 1433
+	}
+	if cfg.TimeoutSeconds == 0 {
+		cfg.TimeoutSeconds = 4
+	}
+
+	query := url.Values{}
+	query.Add("database", cfg.Database)
+	query.Add("connection timeout", fmt.Sprintf("%d", cfg.TimeoutSeconds))
+	query.Add("app name", "PlanIQ-Test-Connection")
+	query.Add("ApplicationIntent", "ReadOnly")
+	query.Add("dial timeout", "5")
+
+	if cfg.Encrypt {
+		query.Add("encrypt", "true")
+	} else {
+		query.Add("encrypt", "disable")
+	}
+
+	if cfg.TrustServerCertificate {
+		query.Add("trustservercertificate", "true")
+	}
+
+	var connStr string
+	if cfg.AuthType == "windows" {
+		connStr = fmt.Sprintf("server=%s;port=%d;integrated security=SSPI;%s", cfg.Server, cfg.Port, query.Encode())
+	} else {
+		u := &url.URL{
+			Scheme:   "sqlserver",
+			User:     url.UserPassword(cfg.Username, cfg.Password),
+			Host:     fmt.Sprintf("%s:%d", cfg.Server, cfg.Port),
+			RawQuery: query.Encode(),
+		}
+		connStr = u.String()
+	}
+
+	db, err := sql.Open("sqlserver", connStr)
+	if err != nil {
+		return &ConnectionStatus{
+			Connected:    false,
+			ErrorMessage: fmt.Sprintf("Failed to initialize driver: %v", err),
+		}, err
+	}
+	defer db.Close()
+
+	start := time.Now()
+	pingCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(pingCtx); err != nil {
+		_ = db.Close()
+
+		// If URL-encoded ping failed and SQL authentication is used, attempt ADO format with literal curly-bracketed password
+		if cfg.AuthType != "windows" {
+			adoConnStr := fmt.Sprintf("server=%s;port=%d;database=%s;user id=%s;password={%s};connection timeout=%d;app name=PlanIQ-Test-Connection;ApplicationIntent=ReadOnly",
+				cfg.Server, cfg.Port, cfg.Database, cfg.Username, cfg.Password, cfg.TimeoutSeconds)
+			if cfg.Encrypt {
+				adoConnStr += ";encrypt=true"
+			} else {
+				adoConnStr += ";encrypt=disable"
+			}
+			if cfg.TrustServerCertificate {
+				adoConnStr += ";trustservercertificate=true"
+			}
+
+			if db2, err2 := sql.Open("sqlserver", adoConnStr); err2 == nil {
+				pingCtx2, cancel2 := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
+				defer cancel2()
+				if err3 := db2.PingContext(pingCtx2); err3 == nil {
+					db = db2
+					err = nil
+				} else {
+					_ = db2.Close()
+				}
+			}
+		}
+
+		if err != nil {
+			return &ConnectionStatus{
+				Connected:    false,
+				ErrorMessage: fmt.Sprintf("Connection failed: %v", err),
+			}, err
+		}
+	}
+	latency := time.Since(start).Milliseconds()
+
+	var version, srvName, dbName string
+	queryCtx, cancelQuery := context.WithTimeout(ctx, 3*time.Second)
+	defer cancelQuery()
+
+	row := db.QueryRowContext(queryCtx, `
+		SELECT 
+			SUBSTRING(@@VERSION, 1, CHARINDEX(' - ', @@VERSION) - 1),
+			@@SERVERNAME,
+			DB_NAME();
+	`)
+	if err := row.Scan(&version, &srvName, &dbName); err != nil {
+		version = "Microsoft SQL Server"
+		srvName = cfg.Server
+		dbName = cfg.Database
+	}
+
+	return &ConnectionStatus{
+		Connected:      true,
+		ServerVersion:  version,
+		ServerName:     srvName,
+		DatabaseName:   dbName,
+		ActiveSessions: 1,
+		LatencyMs:      latency,
+		IsReadOnly:     true,
+		IsDemo:         false,
+	}, nil
+}
+
 
 // Disconnect closes active connection
 func (c *Client) Disconnect() error {
@@ -539,7 +699,118 @@ func (c *Client) GetQueryStoreTop(ctx context.Context, orderBy string, topN int)
 	return entries, nil
 }
 
-// GetLiveDeadlocks queries the default system_health Extended Events ring buffer
+var (
+	rxVictimProc = regexp.MustCompile(`(?i)<victimProcess\s+id="([^"]+)"`)
+	rxVictimAttr = regexp.MustCompile(`(?i)<deadlock\s+[^>]*victim="([^"]+)"`)
+	rxProcess    = regexp.MustCompile(`(?i)<process\s+[^>]*id="([^"]+)"[^>]*spid="(\d+)"`)
+	rxProcessAlt = regexp.MustCompile(`(?i)<process\s+[^>]*spid="(\d+)"[^>]*id="([^"]+)"`)
+	rxKeyLock    = regexp.MustCompile(`(?i)<keylock\b`)
+	rxPageLock   = regexp.MustCompile(`(?i)<pagelock\b`)
+	rxObjectLock = regexp.MustCompile(`(?i)<objectlock\b`)
+	rxExchange   = regexp.MustCompile(`(?i)<exchangeEvent\b`)
+	rxObjectName = regexp.MustCompile(`(?i)objectname="([^"]+)"`)
+)
+
+func parseDeadlockMetadata(xmlStr string) (victimSpid int, procCount int, resCount int, dlType string, summary string) {
+	// 1. Find victim process id
+	var victimProcID string
+	if m := rxVictimProc.FindStringSubmatch(xmlStr); len(m) > 1 {
+		victimProcID = m[1]
+	} else if m := rxVictimAttr.FindStringSubmatch(xmlStr); len(m) > 1 {
+		victimProcID = m[1]
+	}
+
+	// 2. Map process id -> spid
+	procSpidMap := make(map[string]int)
+	var spids []int
+
+	for _, m := range rxProcess.FindAllStringSubmatch(xmlStr, -1) {
+		if len(m) > 2 {
+			pID := m[1]
+			spid, _ := strconv.Atoi(m[2])
+			if spid > 0 {
+				procSpidMap[pID] = spid
+				spids = append(spids, spid)
+			}
+		}
+	}
+	for _, m := range rxProcessAlt.FindAllStringSubmatch(xmlStr, -1) {
+		if len(m) > 2 {
+			spid, _ := strconv.Atoi(m[1])
+			pID := m[2]
+			if spid > 0 && procSpidMap[pID] == 0 {
+				procSpidMap[pID] = spid
+				spids = append(spids, spid)
+			}
+		}
+	}
+
+	procCount = len(procSpidMap)
+	if procCount == 0 {
+		procCount = len(spids)
+	}
+
+	if victimProcID != "" && procSpidMap[victimProcID] > 0 {
+		victimSpid = procSpidMap[victimProcID]
+	} else if len(spids) > 0 {
+		victimSpid = spids[0]
+	}
+
+	// 3. Count lock resource types
+	keyCount := len(rxKeyLock.FindAllString(xmlStr, -1))
+	pageCount := len(rxPageLock.FindAllString(xmlStr, -1))
+	objCount := len(rxObjectLock.FindAllString(xmlStr, -1))
+	exchCount := len(rxExchange.FindAllString(xmlStr, -1))
+	resCount = keyCount + pageCount + objCount + exchCount
+	if resCount == 0 {
+		resCount = 2
+	}
+
+	// 4. Deadlock classification
+	if exchCount > 0 {
+		dlType = "Parallelism / Exchange Deadlock"
+	} else if pageCount > 0 {
+		dlType = "Page Lock Contention (PAGELOCK)"
+	} else if objCount > 0 {
+		dlType = "Table / Object Lock Escalation"
+	} else if keyCount > 0 {
+		dlType = "Reverse Order Key Lock Contention"
+	} else {
+		dlType = "Resource Deadlock Cycle"
+	}
+
+	// 5. Extract table/index object names
+	var objNames []string
+	for _, m := range rxObjectName.FindAllStringSubmatch(xmlStr, -1) {
+		if len(m) > 1 && m[1] != "" {
+			name := m[1]
+			found := false
+			for _, existing := range objNames {
+				if existing == name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				objNames = append(objNames, name)
+			}
+		}
+	}
+
+	if len(spids) >= 2 && len(objNames) >= 1 {
+		summary = fmt.Sprintf("SPID #%d and SPID #%d deadlocked on %s", spids[0], spids[1], strings.Join(objNames, " & "))
+	} else if len(spids) >= 2 {
+		summary = fmt.Sprintf("Circular lock dependency between SPID #%d and SPID #%d", spids[0], spids[1])
+	} else if len(objNames) >= 1 {
+		summary = fmt.Sprintf("Deadlock on locked resource %s", strings.Join(objNames, " & "))
+	} else {
+		summary = "Deadlock cycle extracted from system_health session"
+	}
+
+	return
+}
+
+// GetLiveDeadlocks queries the default system_health Extended Events ring buffer & event file
 func (c *Client) GetLiveDeadlocks(ctx context.Context, limit int) ([]LiveDeadlockReport, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -552,15 +823,17 @@ func (c *Client) GetLiveDeadlocks(ctx context.Context, limit int) ([]LiveDeadloc
 		return getDemoDeadlocks(), nil
 	}
 
-	if limit <= 0 || limit > 20 {
-		limit = 10
+	if limit <= 0 || limit > 25 {
+		limit = 15
 	}
 
-	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	queryCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
 
-	const xelQuery = `
+	// 1. Primary: Query the in-memory ring buffer (fastest, 0 disk I/O)
+	const xelRingBufferQuery = `
 	SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+	SET LOCK_TIMEOUT 3000;
 	WITH DeadlockEvents AS (
 		SELECT 
 			CAST(target_data AS XML) AS TargetData
@@ -569,7 +842,7 @@ func (c *Client) GetLiveDeadlocks(ctx context.Context, limit int) ([]LiveDeadloc
 		WHERE s.name = 'system_health'
 		  AND st.target_name = 'ring_buffer'
 	)
-	SELECT TOP 10
+	SELECT TOP 15
 		e.x.value('@timestamp', 'datetime2') AS [Timestamp],
 		e.x.query('.') AS DeadlockReportXML
 	FROM DeadlockEvents de
@@ -577,31 +850,66 @@ func (c *Client) GetLiveDeadlocks(ctx context.Context, limit int) ([]LiveDeadloc
 	ORDER BY e.x.value('@timestamp', 'datetime2') DESC;
 	`
 
-	rows, err := c.db.QueryContext(queryCtx, xelQuery)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query system_health deadlocks: %w", err)
-	}
-	defer rows.Close()
-
 	var reports []LiveDeadlockReport
-	for rows.Next() {
-		var ts time.Time
-		var xmlContent sql.NullString
-		if err := rows.Scan(&ts, &xmlContent); err != nil {
-			continue
-		}
-		if xmlContent.Valid && len(xmlContent.String) > 0 {
-			reports = append(reports, LiveDeadlockReport{
-				Timestamp:        ts.Format("2006-01-02 15:04:05"),
-				DeadlockGraphXML: xmlContent.String,
-				Summary:          "Deadlock extracted from live system_health session buffer",
-			})
+	rows, err := c.db.QueryContext(queryCtx, xelRingBufferQuery)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var ts time.Time
+			var xmlContent sql.NullString
+			if err := rows.Scan(&ts, &xmlContent); err != nil {
+				continue
+			}
+			if xmlContent.Valid && len(xmlContent.String) > 0 {
+				vSpid, pCount, rCount, dType, sum := parseDeadlockMetadata(xmlContent.String)
+				reports = append(reports, LiveDeadlockReport{
+					Timestamp:           ts.Format("2006-01-02 15:04:05"),
+					VictimSPID:          vSpid,
+					ProcessCount:        pCount,
+					LockedResourceCount: rCount,
+					DeadlockType:        dType,
+					DeadlockGraphXML:    xmlContent.String,
+					Summary:             sum,
+				})
+			}
 		}
 	}
 
+	// 2. Fallback: If ring buffer had 0 deadlocks or was wrapped, try system_health event_file (.xel)
 	if len(reports) == 0 {
-		// Return demo or empty
-		return []LiveDeadlockReport{}, nil
+		const xelFileQuery = `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SET LOCK_TIMEOUT 3000;
+		SELECT TOP 10
+			CAST(event_data AS XML).value('(event/@timestamp)[1]', 'datetime2') AS [Timestamp],
+			CAST(event_data AS XML).query('(event/data[@name="xml_report"]/value/deadlock)[1]') AS DeadlockReportXML
+		FROM sys.fn_xe_file_target_read_file('system_health*.xel', null, null, null)
+		WHERE object_name = 'xml_deadlock_report'
+		ORDER BY [Timestamp] DESC;
+		`
+		fileRows, fileErr := c.db.QueryContext(queryCtx, xelFileQuery)
+		if fileErr == nil {
+			defer fileRows.Close()
+			for fileRows.Next() {
+				var ts time.Time
+				var xmlContent sql.NullString
+				if err := fileRows.Scan(&ts, &xmlContent); err != nil {
+					continue
+				}
+				if xmlContent.Valid && len(xmlContent.String) > 0 {
+					vSpid, pCount, rCount, dType, sum := parseDeadlockMetadata(xmlContent.String)
+					reports = append(reports, LiveDeadlockReport{
+						Timestamp:           ts.Format("2006-01-02 15:04:05"),
+						VictimSPID:          vSpid,
+						ProcessCount:        pCount,
+						LockedResourceCount: rCount,
+						DeadlockType:        dType,
+						DeadlockGraphXML:    xmlContent.String,
+						Summary:             sum,
+					})
+				}
+			}
+		}
 	}
 
 	return reports, nil

@@ -12,16 +12,20 @@ import {
   Cpu,
   Zap,
   Activity,
-  HardDrive
+  HardDrive,
+  ExternalLink,
+  Plus
 } from 'lucide-react';
-import { ConnectionConfig, ConnectionStatus } from '../types/livedb';
-import { ConnectLiveDB, DisconnectLiveDB, GetLiveDBStatus } from '../../wailsjs/go/main/App';
+import { ConnectionConfig, ConnectionStatus, DBConnectionProfile } from '../types/livedb';
+import { ConnectLiveDB, DisconnectLiveDB, GetLiveDBStatus, GetSavedDBConnections, SaveDBConnection } from '../../wailsjs/go/main/App';
 
 interface LiveConnectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   status: ConnectionStatus | null;
   onStatusChange: (status: ConnectionStatus | null) => void;
+  defaultUsername?: string;
+  onOpenConnectionsTab?: () => void;
 }
 
 export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
@@ -29,12 +33,21 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
   onClose,
   status,
   onStatusChange,
+  defaultUsername,
+  onOpenConnectionsTab,
 }) => {
+  const [savedProfiles, setSavedProfiles] = useState<DBConnectionProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('');
+
   const [config, setConfig] = useState<ConnectionConfig>(() => {
     const saved = localStorage.getItem('planiq_live_conn');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (defaultUsername && (!parsed.username || parsed.username === 'sa')) {
+          parsed.username = defaultUsername;
+        }
+        return parsed;
       } catch {}
     }
     return {
@@ -42,7 +55,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
       port: 1433,
       database: 'SalesDB',
       authType: 'sql',
-      username: 'sa',
+      username: defaultUsername || 'sa',
       password: '',
       encrypt: false,
       trustServerCertificate: true,
@@ -50,6 +63,87 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
       timeoutSeconds: 4,
     };
   });
+
+  // When defaultUsername arrives, update username if it's currently unset or default
+  useEffect(() => {
+    if (defaultUsername) {
+      setConfig((prev) => {
+        if (!prev.username || prev.username === 'sa') {
+          return { ...prev, username: defaultUsername };
+        }
+        return prev;
+      });
+    }
+  }, [defaultUsername]);
+
+  // Load saved profiles from SQLite when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      loadSavedProfiles();
+    }
+  }, [isOpen]);
+
+  const loadSavedProfiles = async () => {
+    try {
+      if (typeof window !== 'undefined' && (window as any).go?.main?.App?.GetSavedDBConnections) {
+        const list = await GetSavedDBConnections();
+        if (Array.isArray(list)) {
+          setSavedProfiles(list);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load saved DB connections:', err);
+    }
+  };
+
+  const handleSelectSavedProfile = (id: string) => {
+    setSelectedProfileId(id);
+    const found = savedProfiles.find((p) => p.id === id);
+    if (found) {
+      setConfig({
+        server: found.server,
+        port: found.port || 1433,
+        database: found.database,
+        authType: found.authType as any,
+        username: found.username || '',
+        password: found.password || '',
+        encrypt: found.encrypt,
+        trustServerCertificate: found.trustServerCertificate,
+        applicationIntent: found.applicationIntent || 'ReadOnly',
+        timeoutSeconds: found.timeoutSeconds || 4,
+      });
+      setSuccessMsg(`Loaded "${found.name}" profile settings`);
+      setTimeout(() => setSuccessMsg(null), 3000);
+    }
+  };
+
+  const handleSaveCurrentToSQLite = async () => {
+    try {
+      const name = prompt('Enter a profile name for SQLite storage:', `${config.server} (${config.database})`);
+      if (!name) return;
+      await SaveDBConnection({
+        id: '',
+        name,
+        server: config.server,
+        port: config.port,
+        database: config.database,
+        authType: config.authType,
+        username: config.username || '',
+        password: config.password || '',
+        encrypt: config.encrypt ?? false,
+        trustServerCertificate: config.trustServerCertificate ?? true,
+        applicationIntent: config.applicationIntent || 'ReadOnly',
+        timeoutSeconds: config.timeoutSeconds || 4,
+        isDefault: false,
+        createdAt: '',
+        updatedAt: '',
+      } as any);
+      setSuccessMsg(`Saved profile "${name}" to SQLite!`);
+      loadSavedProfiles();
+    } catch (err: any) {
+      setErrorMsg(`Save failed: ${err?.message || err}`);
+    }
+  };
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -205,6 +299,100 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
               </button>
             </div>
           ) : null}
+
+          {/* SQLite Saved Connection Dropdown */}
+          <div
+            style={{
+              background: 'rgba(15, 23, 42, 0.75)',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <HardDrive size={13} color="#34d399" />
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#f8fafc' }}>
+                  Load Saved SQLite Profile
+                </span>
+                <span
+                  style={{
+                    fontSize: '9.5px',
+                    fontWeight: 700,
+                    padding: '1px 5px',
+                    borderRadius: '4px',
+                    background: 'rgba(52, 211, 153, 0.15)',
+                    color: '#34d399',
+                  }}
+                >
+                  {savedProfiles.length} Saved
+                </span>
+              </div>
+              {onOpenConnectionsTab && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenConnectionsTab();
+                  }}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#38bdf8',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <span>Open Studio</span>
+                  <ExternalLink size={10} />
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <select
+                value={selectedProfileId}
+                onChange={(e) => handleSelectSavedProfile(e.target.value)}
+                style={{
+                  flex: 1,
+                  background: 'rgba(2, 6, 23, 0.8)',
+                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                  borderRadius: '6px',
+                  color: '#e2e8f0',
+                  padding: '7px 10px',
+                  fontSize: '12px',
+                  outline: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <option value="">-- Choose from Saved SQLite Connections --</option>
+                {savedProfiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.server}:{p.port || 1433} / {p.database}) {p.isDefault ? '★' : ''}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleSaveCurrentToSQLite}
+                title="Save current parameters to SQLite database"
+                style={{ whiteSpace: 'nowrap' }}
+              >
+                <Plus size={11} />
+                <span>Save Current</span>
+              </button>
+            </div>
+          </div>
+
 
           {/* Quick Demo Sandbox Button */}
           <div

@@ -10,12 +10,20 @@ export function ConnectLiveDB(arg1) {
   return window['go']['main']['App']['ConnectLiveDB'](arg1);
 }
 
+export function DeleteDBConnection(arg1) {
+  return window['go']['main']['App']['DeleteDBConnection'](arg1);
+}
+
 export function DisconnectLiveDB() {
   return window['go']['main']['App']['DisconnectLiveDB']();
 }
 
 export function GetAIAdvice(arg1) {
   return window['go']['main']['App']['GetAIAdvice'](arg1);
+}
+
+export function GetCurrentWindowsUser() {
+  return window['go']['main']['App']['GetCurrentWindowsUser']();
 }
 
 export function GetLiveActiveSessions(arg1) {
@@ -86,6 +94,14 @@ export function GetLiveWaitStats(arg1) {
   return window['go']['main']['App']['GetLiveWaitStats'](arg1);
 }
 
+export function GetRadarPagePollingConfig() {
+  return window['go']['main']['App']['GetRadarPagePollingConfig']();
+}
+
+export function GetSavedDBConnections() {
+  return window['go']['main']['App']['GetSavedDBConnections']();
+}
+
 export function LoadSamplePlan() {
   return window['go']['main']['App']['LoadSamplePlan']();
 }
@@ -100,4 +116,20 @@ export function OpenFilePicker() {
 
 export function ParsePlan(arg1, arg2) {
   return window['go']['main']['App']['ParsePlan'](arg1, arg2);
+}
+
+export function SaveDBConnection(arg1) {
+  return window['go']['main']['App']['SaveDBConnection'](arg1);
+}
+
+export function SetDefaultDBConnection(arg1) {
+  return window['go']['main']['App']['SetDefaultDBConnection'](arg1);
+}
+
+export function SetRadarPagePolling(arg1, arg2) {
+  return window['go']['main']['App']['SetRadarPagePolling'](arg1, arg2);
+}
+
+export function TestDBConnection(arg1) {
+  return window['go']['main']['App']['TestDBConnection'](arg1);
 }
