@@ -53,7 +53,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
     return {
       server: 'localhost',
       port: 1433,
-      database: 'SalesDB',
+      database: 'master',
       authType: 'sql',
       username: defaultUsername || 'sa',
       password: '',
@@ -156,46 +156,22 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
     localStorage.setItem('planiq_live_conn', JSON.stringify(cfg));
   };
 
-  const handleConnect = async (isDemo = false) => {
+  const handleConnect = async () => {
     setIsLoading(true);
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    const targetConfig: ConnectionConfig = isDemo
-      ? {
-          server: 'demo',
-          port: 1433,
-          database: 'SalesDB',
-          authType: 'demo',
-          applicationIntent: 'ReadOnly',
-          timeoutSeconds: 3,
-        }
-      : config;
-
     try {
       if (typeof window !== 'undefined' && (window as any).go?.main?.App?.ConnectLiveDB) {
-        const res = await ConnectLiveDB(targetConfig as any);
+        const res = await ConnectLiveDB(config as any);
         onStatusChange(res);
         setSuccessMsg(`Successfully connected to ${res.serverName} (${res.databaseName})`);
-        handleSaveConfig(targetConfig);
+        handleSaveConfig(config);
         setTimeout(() => {
           onClose();
         }, 800);
       } else {
-        // Fallback demo in browser mode
-        const demoStatus: ConnectionStatus = {
-          connected: true,
-          serverVersion: 'Microsoft SQL Server 2022 (RTM-CU12) Enterprise',
-          serverName: 'PROD-SQL01.corp.internal',
-          databaseName: 'SalesDB',
-          activeSessions: 14,
-          latencyMs: 12,
-          isReadOnly: true,
-          isDemo: true,
-        };
-        onStatusChange(demoStatus);
-        setSuccessMsg('Connected in Demo Sandbox mode!');
-        setTimeout(() => onClose(), 800);
+        setErrorMsg('Live database connection requires running PlanIQ as a desktop application.');
       }
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to connect to SQL Server');
@@ -293,7 +269,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                 className="btn btn-secondary btn-sm"
                 onClick={handleDisconnect}
                 disabled={isLoading}
-                style={{ borderColor: 'rgba(244, 63, 94, 0.4)', color: '#f43f5e' }}
+                style={{ borderColor: 'rgba(244, 63, 94, 0.4)', color: '#f43f5e', flexShrink: 0 }}
               >
                 Disconnect
               </button>
@@ -356,12 +332,13 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%' }}>
               <select
                 value={selectedProfileId}
                 onChange={(e) => handleSelectSavedProfile(e.target.value)}
                 style={{
                   flex: 1,
+                  minWidth: 0,
                   background: 'rgba(2, 6, 23, 0.8)',
                   border: '1px solid rgba(56, 189, 248, 0.25)',
                   borderRadius: '6px',
@@ -370,6 +347,8 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                   fontSize: '12px',
                   outline: 'none',
                   cursor: 'pointer',
+                  textOverflow: 'ellipsis',
+                  overflow: 'hidden',
                 }}
               >
                 <option value="">-- Choose from Saved SQLite Connections --</option>
@@ -385,7 +364,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                 className="btn btn-secondary btn-sm"
                 onClick={handleSaveCurrentToSQLite}
                 title="Save current parameters to SQLite database"
-                style={{ whiteSpace: 'nowrap' }}
+                style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
               >
                 <Plus size={11} />
                 <span>Save Current</span>
@@ -394,36 +373,6 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
           </div>
 
 
-          {/* Quick Demo Sandbox Button */}
-          <div
-            style={{
-              background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.08) 0%, rgba(129, 140, 248, 0.08) 100%)',
-              border: '1px solid rgba(56, 189, 248, 0.25)',
-              borderRadius: '8px',
-              padding: '12px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <div>
-              <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#38bdf8' }}>
-                🚀 Try Live Demo Sandbox
-              </span>
-              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#94a3b8' }}>
-                Instant simulation with blocked sessions, Query Store entries, and system_health deadlocks.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => handleConnect(true)}
-              disabled={isLoading}
-              style={{ background: 'rgba(56, 189, 248, 0.15)', borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
-            >
-              Launch Demo
-            </button>
-          </div>
 
           {/* Connection Form */}
           <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '12px' }}>
@@ -589,7 +538,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
           <button
             type="button"
             className="btn btn-primary"
-            onClick={() => handleConnect(false)}
+            onClick={() => handleConnect()}
             disabled={isLoading || !config.server || !config.database}
           >
             {isLoading ? <RefreshCw size={14} className="spin" /> : <Zap size={14} />}

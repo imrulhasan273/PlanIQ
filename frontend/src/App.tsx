@@ -32,7 +32,7 @@ import {
 import { exportDiagnosticReportHTML } from './utils/reportExporter';
 import { parseShowPlanXMLClient } from './utils/clientPlanParser';
 import { sanitizePlan } from './utils/sanitizePlan';
-import { Loader2, Database, Upload, FileCode2, ShieldAlert } from 'lucide-react';
+import { Loader2, Database, Upload, FileCode2, ShieldAlert, Zap } from 'lucide-react';
 import './App.css';
 
 import samplePlanData from './sample_plan.json';
@@ -146,10 +146,8 @@ export function App() {
     localStorage.setItem('planiq_ai_config', JSON.stringify(newConfig));
   };
 
-  // Auto-load explan.xml on first launch, get windows user, and check live connection status
+  // Check live connection status and get windows user on launch (NO auto-loading mock data)
   useEffect(() => {
-    handleLoadSample();
-
     // Fetch logged in Windows user
     if (typeof window !== 'undefined' && (window as any).go?.main?.App?.GetCurrentWindowsUser) {
       GetCurrentWindowsUser().then((u) => {
@@ -163,7 +161,11 @@ export function App() {
 
     if (typeof window !== 'undefined' && (window as any).go?.main?.App?.GetLiveDBStatus) {
       GetLiveDBStatus().then((st) => {
-        if (st && st.connected) setLiveStatus(st);
+        if (st && st.connected) {
+          setLiveStatus(st);
+          // Auto-route to Live Radar if connected to live SQL Server
+          setActiveTab('liveradar');
+        }
       }).catch(() => {});
     }
   }, []);
@@ -505,9 +507,13 @@ export function App() {
                   <span>Open .sqlplan File</span>
                 </button>
 
-                <button className="btn btn-secondary btn-lg" onClick={handleLoadSample}>
-                  <FileCode2 size={18} />
-                  <span>Load Demo Sample Plan</span>
+                <button
+                  className="btn btn-secondary btn-lg"
+                  onClick={() => setIsLiveConnOpen(true)}
+                  style={{ borderColor: 'rgba(56, 189, 248, 0.4)' }}
+                >
+                  <Zap size={18} color="#38bdf8" />
+                  <span>Connect to SQL Server</span>
                 </button>
 
                 <button

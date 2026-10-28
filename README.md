@@ -125,6 +125,7 @@ PlanIQ is built with a decoupled, high-performance architecture:
   ```
 
 #### Live Development
+
 ```bash
 wails dev
 ```

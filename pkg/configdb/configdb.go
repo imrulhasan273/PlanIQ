@@ -104,6 +104,9 @@ func GetDB() (*Store, error) {
 			return
 		}
 
+		// Purge any legacy demo mock connection from SQLite
+		_, _ = db.Exec(`DELETE FROM db_connections WHERE id = 'conn_demo_prod' OR auth_type = 'demo' OR server = 'demo';`)
+
 		// Seed initial connections if empty
 		var count int
 		_ = db.QueryRow(`SELECT COUNT(*) FROM db_connections;`).Scan(&count)
@@ -115,16 +118,12 @@ func GetDB() (*Store, error) {
 				encrypt, trust_server_certificate, application_intent, timeout_seconds,
 				is_default, created_at, updated_at
 			) VALUES 
-			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
 			(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 			`
 			_, _ = db.Exec(seedSQL,
-				// Demo instance
-				"conn_demo_prod", "DC-DBPROD1 (AmmisOnlineProd)", "demo", 1433, "AmmisOnlineProd", "demo", "sa", "",
-				0, 1, "ReadOnly", 4, 1, now, now,
 				// Localhost template
 				"conn_local_sql", "Local SQL Server (localhost)", "localhost", 1433, "master", "sql", "sa", "",
-				0, 1, "ReadOnly", 4, 0, now, now,
+				0, 1, "ReadOnly", 4, 1, now, now,
 			)
 		}
 

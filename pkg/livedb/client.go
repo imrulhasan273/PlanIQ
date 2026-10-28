@@ -60,20 +60,9 @@ func (c *Client) Connect(ctx context.Context, cfg ConnectionConfig) (*Connection
 		c.db = nil
 	}
 
-	// Demo mode for testing/showcase
+	// Demo mode is prohibited - only real database connections allowed
 	if cfg.AuthType == "demo" || strings.ToLower(cfg.Server) == "demo" || strings.ToLower(cfg.Server) == "localhost-demo" {
-		c.config = cfg
-		c.status = ConnectionStatus{
-			Connected:      true,
-			ServerVersion:  "Microsoft SQL Server 2022 (RTM-CU12) (KB5033663) - 16.0.4115.5 (X64) Enterprise Edition",
-			ServerName:     "PROD-SQL01.corp.internal",
-			DatabaseName:   "SalesDB",
-			ActiveSessions: 14,
-			LatencyMs:      12,
-			IsReadOnly:     true,
-			IsDemo:         true,
-		}
-		return &c.status, nil
+		return nil, fmt.Errorf("demo mode is disabled; please connect to a valid SQL Server instance")
 	}
 
 	if cfg.Port == 0 {
@@ -210,16 +199,7 @@ func (c *Client) Connect(ctx context.Context, cfg ConnectionConfig) (*Connection
 // TestConnection tests a SQL Server connection without changing the active client state
 func (c *Client) TestConnection(ctx context.Context, cfg ConnectionConfig) (*ConnectionStatus, error) {
 	if cfg.AuthType == "demo" || strings.ToLower(cfg.Server) == "demo" || strings.ToLower(cfg.Server) == "localhost-demo" {
-		return &ConnectionStatus{
-			Connected:      true,
-			ServerVersion:  "Microsoft SQL Server 2022 (RTM-CU12) (KB5033663) - 16.0.4115.5 (X64) Enterprise Edition",
-			ServerName:     "PROD-SQL01.corp.internal",
-			DatabaseName:   "SalesDB",
-			ActiveSessions: 14,
-			LatencyMs:      8,
-			IsReadOnly:     true,
-			IsDemo:         true,
-		}, nil
+		return nil, fmt.Errorf("demo mode is disabled; please connect to a valid SQL Server instance")
 	}
 
 	if cfg.Port == 0 {
@@ -366,7 +346,7 @@ func (c *Client) GetActiveSessions(ctx context.Context, limit int) ([]ActiveSess
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected to SQL Server")
 	}
 
@@ -374,14 +354,6 @@ func (c *Client) GetActiveSessions(ctx context.Context, limit int) ([]ActiveSess
 		limit = 200
 	} else if limit > 10000 {
 		limit = 10000
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		demos := getDemoActiveSessions()
-		if limit < len(demos) {
-			return demos[:limit], nil
-		}
-		return demos, nil
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -482,12 +454,8 @@ func (c *Client) GetSessionPlan(ctx context.Context, planHandleHex string) (stri
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return "", fmt.Errorf("not connected to database")
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		return getDemoShowPlanXML(), nil
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -605,12 +573,8 @@ func (c *Client) GetQueryStoreTopWindow(ctx context.Context, orderBy string, top
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		return getDemoQueryStoreEntries(), nil
 	}
 
 	if topN <= 0 || topN > 50 {
@@ -864,12 +828,8 @@ func (c *Client) GetLiveDPAPerspective(ctx context.Context, perspective string) 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		return getDemoDPAPerspective(perspective), nil
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -1176,12 +1136,8 @@ func (c *Client) GetLiveDeadlocks(ctx context.Context, limit int) ([]LiveDeadloc
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		return getDemoDeadlocks(), nil
 	}
 
 	if limit <= 0 || limit > 25 {
@@ -1281,20 +1237,8 @@ func (c *Client) GetServerVitals(ctx context.Context) (*ServerVitals, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		return &ServerVitals{
-			CPUQueueTasks:       1,
-			SignalWaitPct:       8.4,
-			MemoryGrantsPending: 0,
-			AvailableMemoryMB:   18432.0,
-			TempDBUserObjectsMB: 420.5,
-			TempDBInternalMB:    128.0,
-			BatchRequestsPerSec: 1420.0,
-		}, nil
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -1394,12 +1338,8 @@ func (c *Client) GetWaitStats(ctx context.Context, limit int) ([]LiveWaitStat, e
 		limit = 500
 	}
 
-	if c.status.IsDemo || c.db == nil {
-		demos := getDemoWaitStats()
-		if limit < len(demos) {
-			return demos[:limit], nil
-		}
-		return demos, nil
+	if !c.status.Connected || c.db == nil {
+		return nil, fmt.Errorf("not connected")
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -1496,12 +1436,8 @@ func (c *Client) GetBlockingSessions(ctx context.Context) ([]LiveBlockingSession
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		return getDemoBlockingSessions(), nil
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -1572,7 +1508,7 @@ func (c *Client) GetMissingIndexes(ctx context.Context, limit int) ([]LiveMissin
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1582,22 +1518,14 @@ func (c *Client) GetMissingIndexes(ctx context.Context, limit int) ([]LiveMissin
 		limit = 500
 	}
 
-	if c.status.IsDemo || c.db == nil {
-		demos := getDemoMissingIndexes()
-		if limit < len(demos) {
-			return demos[:limit], nil
-		}
-		return demos, nil
-	}
-
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 
 	sqlIndexes := fmt.Sprintf(`
 	SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
 	SELECT TOP (%d)
-		ISNULL(DB_NAME(d.database_id), 'SalesDB') AS database_name,
-		ISNULL(d.statement, 'dbo.Table') AS table_name,
+		ISNULL(DB_NAME(d.database_id), DB_NAME()) AS database_name,
+		ISNULL(d.statement, '') AS table_name,
 		ROUND(s.avg_total_user_cost * s.avg_user_impact * (s.user_seeks + s.user_scans), 1) AS impact_score,
 		s.user_seeks,
 		s.user_scans,
@@ -1653,7 +1581,7 @@ func (c *Client) GetTempDBUsage(ctx context.Context, limit int) ([]LiveTempDBUsa
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1661,14 +1589,6 @@ func (c *Client) GetTempDBUsage(ctx context.Context, limit int) ([]LiveTempDBUsa
 		limit = 100
 	} else if limit > 1000 {
 		limit = 1000
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		demos := getDemoTempDBUsage()
-		if limit < len(demos) {
-			return demos[:limit], nil
-		}
-		return demos, nil
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -1731,7 +1651,7 @@ func (c *Client) GetIdleSessions(ctx context.Context, limit int) ([]IdleSession,
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1739,14 +1659,6 @@ func (c *Client) GetIdleSessions(ctx context.Context, limit int) ([]IdleSession,
 		limit = 500
 	} else if limit > 10000 {
 		limit = 10000
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		demos := getDemoIdleSessions()
-		if limit < len(demos) {
-			return demos[:limit], nil
-		}
-		return demos, nil
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -1825,12 +1737,8 @@ func (c *Client) GetPerformanceAdvisors(ctx context.Context) ([]PerformanceAdvis
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		return getDemoAdvisors(), nil
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -1945,12 +1853,8 @@ func (c *Client) GetWaitHistory(ctx context.Context) ([]WaitTimeHistoryPoint, er
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		return getDemoWaitHistory(), nil
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
@@ -2027,7 +1931,7 @@ func (c *Client) GetBufferPoolUsage(ctx context.Context, limit int) ([]BufferPoo
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -2035,14 +1939,6 @@ func (c *Client) GetBufferPoolUsage(ctx context.Context, limit int) ([]BufferPoo
 		limit = 50
 	} else if limit > 200 {
 		limit = 200
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		demos := getDemoBufferPool()
-		if limit < len(demos) {
-			return demos[:limit], nil
-		}
-		return demos, nil
 	}
 
 	// Use a moderate timeout: 25s covers slow WAN links but caps runaway queries.
@@ -2125,7 +2021,7 @@ func (c *Client) GetUnusedIndexes(ctx context.Context, limit int) ([]UnusedIndex
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -2133,14 +2029,6 @@ func (c *Client) GetUnusedIndexes(ctx context.Context, limit int) ([]UnusedIndex
 		limit = 30
 	} else if limit > 200 {
 		limit = 200
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		demos := getDemoUnusedIndexes()
-		if limit < len(demos) {
-			return demos[:limit], nil
-		}
-		return demos, nil
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -2209,12 +2097,8 @@ func (c *Client) GetDuplicateIndexes(ctx context.Context) ([]DuplicateIndex, err
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		return getDemoDuplicateIndexes(), nil
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -2283,12 +2167,8 @@ func (c *Client) GetEngineInternals(ctx context.Context) (*EngineInternalsReport
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
-	}
-
-	if c.status.IsDemo || c.db == nil {
-		return getDemoEngineInternals(), nil
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

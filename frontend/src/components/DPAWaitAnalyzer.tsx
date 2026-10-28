@@ -86,17 +86,7 @@ const DPA_QUERY_PALETTE = [
   '#26a69a'  // Turquoise (#2259449293)
 ];
 
-// SolarWinds DPA Oct 28 8:00AM-9:00AM Exact 60-Minute Waveform
-const WEDNESDAY_8AM_SOLARWINDS_CURVE = [
-  740, 550, 520, 590, 570, 565, 510, 650, 560, 670,
-  645, 655, 635, 585, 630, 520, 630, 485, 420, 520,
-  450, 420, 560, 430, 410, 480, 420, 430, 465, 465,
-  500, 550, 515, 580, 615, 635, 715, 1040, 875, 920,
-  940, 1045, 1115, 1200, 1255, 1320, 1270, 1300, 1450, 1400,
-  1390, 1575, 1595, 1590, 1525, 1490, 1605, 1580, 1540, 1575
-];
-
-// SolarWinds DPA Standard Wait Colors (Screenshot 1)
+// SolarWinds DPA Standard Wait Colors
 const DPA_WAIT_COLORS: Record<string, string> = {
   'Memory/CPU': '#057a3d',
   'PAGEIOLATCH_SH': '#003882',
@@ -125,96 +115,6 @@ const DPA_WAIT_COLORS: Record<string, string> = {
   'XE_BUFFERMGR_ALLPROCESSED_EVENT': '#059669',
   'XE_RING_TARGET_MUTEX': '#e11d48'
 };
-
-// Seed Top SQL Queries for Wednesday (Screenshot 2 parity)
-const DEFAULT_TOP_QUERIES = [
-  { hash: '4675209948', proc: 'SalesDB.dbo.ProcessCheckout', db: 'AmmisOnlineProd', waitSec: 1420.5, cpuSec: 890.2, reads: 452100, writes: 12400, text: `SELECT o.Id, o.AccountId, o.AccountTypeID, o.BranchWorkingDate, o.Credit, o.Debit, o.PaymentMethodId, o.TransactionDate
-FROM [program].[OtherTransaction] AS o WITH (FORCESEEK)
-WHERE o.AccountId IN (@acc1, @acc2, @acc3, @acc4)
-ORDER BY o.TransactionDate DESC
-OPTION (RECOMPILE, OPTIMIZE FOR (@acc1 UNKNOWN));` },
-  { hash: '2589928315', proc: 'Warehouse.dbo.UpdateInventoryStock', db: 'AmmisOnlineProd', waitSec: 1180.2, cpuSec: 620.1, reads: 389200, writes: 42100, text: `UPDATE dbo.Inventory
-SET Quantity = Quantity - @qty, LastModified = GETUTCDATE()
-WHERE ProductID = @prodId AND WarehouseID = @whId;` },
-  { hash: '2366649485', proc: 'CRM.dbo.SearchCustomerOrders', db: 'AmmisOnlineProd', waitSec: 940.4, cpuSec: 410.5, reads: 312000, writes: 0, text: `SELECT TOP (50) c.CustomerId, c.FullName, o.OrderId, o.TotalAmount, o.OrderStatus
-FROM dbo.Customers c
-INNER JOIN dbo.Orders o ON c.CustomerId = o.CustomerId
-WHERE c.RegionCode = @region AND o.OrderDate >= DATEADD(day, -30, GETDATE())
-ORDER BY o.TotalAmount DESC;` },
-  { hash: '2446580537', proc: 'Billing.dbo.GenerateStatementBatch', db: 'AmmisOnlineProd', waitSec: 820.6, cpuSec: 380.0, reads: 274000, writes: 8400, text: `INSERT INTO Billing.MonthlyStatements (AccountId, StatementDate, TotalDebit, TotalCredit, ClosingBalance)
-SELECT AccountId, @stmtDate, SUM(Debit), SUM(Credit), SUM(Credit - Debit)
-FROM program.OtherTransaction
-WHERE BranchWorkingDate BETWEEN @startDate AND @endDate
-GROUP BY AccountId;` },
-  { hash: '5290520832', proc: 'Catalog.dbo.GetProductCategories', db: 'AmmisOnlineProd', waitSec: 690.1, cpuSec: 290.4, reads: 198000, writes: 0, text: `SELECT p.ProductId, p.Sku, p.Name, p.UnitPrice, c.CategoryName
-FROM dbo.Products p
-INNER JOIN dbo.Categories c ON p.CategoryId = c.CategoryId
-WHERE p.IsActive = 1;` },
-  { hash: '3918961931', proc: 'Reporting.dbo.DailyExecutiveRollup', db: 'AmmisOnlineProd', waitSec: 540.8, cpuSec: 480.2, reads: 541000, writes: 1200, text: `EXEC Reporting.dbo.Sp_CalculateDailyBranchKPI @BranchId = @bId, @RunDate = @today;` },
-  { hash: '4689059277', proc: 'Security.dbo.AuditUserLogins', db: 'master', waitSec: 460.3, cpuSec: 150.1, reads: 89000, writes: 3200, text: `INSERT INTO master.dbo.AuditLoginEvents (SessionId, LoginName, ClientHost, LoginTime)
-VALUES (@@SPID, ORIGINAL_LOGIN(), HOST_NAME(), GETDATE());` },
-  { hash: '6375046345', proc: 'Notification.dbo.EnqueueEmailQueue', db: 'AmmisOnlineProd', waitSec: 410.0, cpuSec: 120.8, reads: 64000, writes: 18900, text: `INSERT INTO Notification.DispatchQueue (Recipient, Subject, BodyTemplateId, Status)
-VALUES (@email, @subject, @tplId, 'Pending');` },
-  { hash: '5320725829', proc: 'Ad-Hoc SSMS Diagnostic Batch', db: 'tempdb', waitSec: 360.2, cpuSec: 210.0, reads: 142000, writes: 98000, text: `SELECT * INTO #tmpOrders FROM SalesDB.dbo.Orders WHERE OrderDate > '2026-01-01';` },
-  { hash: '4648768235', proc: 'ERP.dbo.SyncVendorLedger', db: 'AmmisOnlineProd', waitSec: 310.5, cpuSec: 180.2, reads: 112000, writes: 6400, text: `MERGE VendorLedger AS target USING #VendorStaging AS source ON target.VendorId = source.VendorId...;` },
-  { hash: '3973389656', proc: 'Analytics.dbo.RefreshUserSegments', db: 'AmmisOnlineProd', waitSec: 270.4, cpuSec: 195.0, reads: 165000, writes: 4200, text: `UPDATE UserProfile SET SegmentTier = 'Gold' WHERE LifetimeSpend > 10000;` },
-  { hash: '5040501700', proc: 'JobAgent.dbo.PurgeExpiredTokens', db: 'AmmisOnlineProd', waitSec: 220.1, cpuSec: 85.0, reads: 45000, writes: 45000, text: `DELETE FROM Security.UserSessions WHERE ExpiryDate < GETUTCDATE();` },
-  { hash: '5135283776', proc: 'Shipping.dbo.CalculateFreightRates', db: 'AmmisOnlineProd', waitSec: 180.9, cpuSec: 92.4, reads: 71000, writes: 0, text: `SELECT CarrierId, BaseRate, PerKgMultiplier FROM Shipping.Carriers WHERE IsEnabled = 1;` },
-  { hash: '4256233282', proc: 'API.dbo.ValidateWebhookSignature', db: 'AmmisOnlineProd', waitSec: 150.3, cpuSec: 110.1, reads: 32000, writes: 1200, text: `SELECT SecretHash FROM API.WebhookSubscribers WHERE ClientId = @clientId;` },
-  { hash: '2259449293', proc: 'Maintenance.dbo.IndexDefragWorker', db: 'AmmisOnlineProd', waitSec: 125.0, cpuSec: 340.0, reads: 890000, writes: 450000, text: `ALTER INDEX PK_Orders_OrderID ON dbo.Orders REORGANIZE;` }
-];
-
-// Seed Monday Top SQL Queries (Distinct workload profile for Oct 26)
-const MONDAY_TOP_QUERIES = [
-  { hash: '2446580537', proc: 'Billing.dbo.GenerateStatementBatch', db: 'AmmisOnlineProd', waitSec: 1680.0, cpuSec: 640.0, reads: 940000, writes: 32400, text: `INSERT INTO Billing.MonthlyStatements (AccountId, StatementDate, TotalDebit, TotalCredit, ClosingBalance)
-SELECT AccountId, @stmtDate, SUM(Debit), SUM(Credit), SUM(Credit - Debit)
-FROM program.OtherTransaction
-WHERE BranchWorkingDate BETWEEN @startDate AND @endDate
-GROUP BY AccountId;` },
-  { hash: '4689059277', proc: 'Security.dbo.AuditUserLogins', db: 'master', waitSec: 1220.3, cpuSec: 450.1, reads: 420000, writes: 18000, text: `INSERT INTO master.dbo.AuditLoginEvents (SessionId, LoginName, ClientHost, LoginTime)
-VALUES (@@SPID, ORIGINAL_LOGIN(), HOST_NAME(), GETDATE());` },
-  { hash: '4648768235', proc: 'ERP.dbo.SyncVendorLedger', db: 'AmmisOnlineProd', waitSec: 890.5, cpuSec: 320.2, reads: 280000, writes: 14200, text: `MERGE VendorLedger AS target USING #VendorStaging AS source ON target.VendorId = source.VendorId
-WHEN MATCHED THEN UPDATE SET Balance = target.Balance + source.Amount
-WHEN NOT MATCHED THEN INSERT (VendorId, Balance) VALUES (source.VendorId, source.Amount);` },
-  { hash: '6375046345', proc: 'Notification.dbo.EnqueueEmailQueue', db: 'AmmisOnlineProd', waitSec: 710.0, cpuSec: 210.8, reads: 164000, writes: 48900, text: `INSERT INTO Notification.DispatchQueue (Recipient, Subject, BodyTemplateId, Status)
-VALUES (@email, @subject, @tplId, 'Pending');` },
-  { hash: '4675209948', proc: 'SalesDB.dbo.ProcessCheckout', db: 'AmmisOnlineProd', waitSec: 580.2, cpuSec: 310.0, reads: 145000, writes: 6200, text: `SELECT o.Id, o.AccountId, o.AccountTypeID, o.BranchWorkingDate
-FROM [program].[OtherTransaction] AS o WITH (FORCESEEK)
-WHERE o.AccountId = @acc1;` },
-  { hash: '5290520832', proc: 'Catalog.dbo.GetProductCategories', db: 'AmmisOnlineProd', waitSec: 420.1, cpuSec: 180.4, reads: 98000, writes: 0, text: `SELECT p.ProductId, p.Sku, p.Name, p.UnitPrice, c.CategoryName
-FROM dbo.Products p JOIN dbo.Categories c ON p.CategoryId = c.CategoryId WHERE p.IsActive = 1;` }
-];
-
-// Seed Tuesday Top SQL Queries (Distinct workload profile for Oct 27)
-const TUESDAY_TOP_QUERIES = [
-  { hash: '2589928315', proc: 'Warehouse.dbo.UpdateInventoryStock', db: 'AmmisOnlineProd', waitSec: 1540.2, cpuSec: 780.1, reads: 689200, writes: 84200, text: `UPDATE dbo.Inventory
-SET Quantity = Quantity - @qty, LastModified = GETUTCDATE()
-WHERE ProductID = @prodId AND WarehouseID = @whId;` },
-  { hash: '2366649485', proc: 'CRM.dbo.SearchCustomerOrders', db: 'AmmisOnlineProd', waitSec: 1190.4, cpuSec: 520.5, reads: 412000, writes: 0, text: `SELECT TOP (50) c.CustomerId, c.FullName, o.OrderId, o.TotalAmount, o.OrderStatus
-FROM dbo.Customers c INNER JOIN dbo.Orders o ON c.CustomerId = o.CustomerId
-WHERE c.RegionCode = @region AND o.OrderDate >= DATEADD(day, -30, GETDATE())
-ORDER BY o.TotalAmount DESC;` },
-  { hash: '3973389656', proc: 'Analytics.dbo.RefreshUserSegments', db: 'AmmisOnlineProd', waitSec: 740.4, cpuSec: 395.0, reads: 265000, writes: 9200, text: `UPDATE UserProfile SET SegmentTier = 'Gold' WHERE LifetimeSpend > 10000;` },
-  { hash: '4675209948', proc: 'SalesDB.dbo.ProcessCheckout', db: 'AmmisOnlineProd', waitSec: 610.5, cpuSec: 350.2, reads: 180000, writes: 8400, text: `SELECT o.Id, o.AccountId, o.Credit, o.Debit FROM [program].[OtherTransaction] AS o WHERE o.AccountId IN (@acc1, @acc2);` },
-  { hash: '5135283776', proc: 'Shipping.dbo.CalculateFreightRates', db: 'AmmisOnlineProd', waitSec: 430.9, cpuSec: 192.4, reads: 121000, writes: 0, text: `SELECT CarrierId, BaseRate, PerKgMultiplier FROM Shipping.Carriers WHERE IsEnabled = 1;` }
-];
-
-// Seed Sunday Top SQL Queries (Distinct maintenance profile for Oct 25)
-const SUNDAY_TOP_QUERIES = [
-  { hash: '2259449293', proc: 'Maintenance.dbo.IndexDefragWorker', db: 'AmmisOnlineProd', waitSec: 1890.0, cpuSec: 1240.0, reads: 2450000, writes: 1120000, text: `ALTER INDEX PK_Orders_OrderID ON dbo.Orders REORGANIZE;` },
-  { hash: '3918961931', proc: 'Reporting.dbo.DailyExecutiveRollup', db: 'AmmisOnlineProd', waitSec: 1340.8, cpuSec: 890.2, reads: 1241000, writes: 24000, text: `EXEC Reporting.dbo.Sp_CalculateDailyBranchKPI @BranchId = @bId, @RunDate = @today;` },
-  { hash: '5040501700', proc: 'JobAgent.dbo.PurgeExpiredTokens', db: 'AmmisOnlineProd', waitSec: 620.1, cpuSec: 285.0, reads: 145000, writes: 145000, text: `DELETE FROM Security.UserSessions WHERE ExpiryDate < GETUTCDATE();` },
-  { hash: '5320725829', proc: 'Ad-Hoc SSMS Diagnostic Batch', db: 'tempdb', waitSec: 410.2, cpuSec: 210.0, reads: 142000, writes: 98000, text: `SELECT * INTO #tmpOrders FROM SalesDB.dbo.Orders WHERE OrderDate > '2026-01-01';` }
-];
-
-const DEFAULT_TOP_WAITS = [
-  { name: 'PAGEIOLATCH_SH', waitSec: 1420.5, pct: 54.2, color: DPA_WAIT_COLORS['PAGEIOLATCH_SH'] },
-  { name: 'LCK_M_IX', waitSec: 540.0, pct: 20.6, color: DPA_WAIT_COLORS['LCK_M_IX'] },
-  { name: 'SOS_SCHEDULER_YIELD', waitSec: 310.0, pct: 11.8, color: DPA_WAIT_COLORS['SOS_SCHEDULER_YIELD'] },
-  { name: 'ASYNC_NETWORK_IO', waitSec: 180.2, pct: 6.9, color: DPA_WAIT_COLORS['ASYNC_NETWORK_IO'] },
-  { name: 'WRITELOG', waitSec: 110.5, pct: 4.2, color: DPA_WAIT_COLORS['WRITELOG'] },
-  { name: 'CXCONSUMER', waitSec: 60.0, pct: 2.3, color: DPA_WAIT_COLORS['CXCONSUMER'] }
-];
 
 const BENIGN_WAITS = new Set([
   'VDI_CLIENT_OTHER', 'SOS_WORK_DISPATCHER', 'HADR_WORK_QUEUE', 'BROKER_TRANSMITTER',
@@ -337,18 +237,14 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
   const [bottomDrawerTab, setBottomDrawerTab] = useState<DPABottomDrawerTab>('sqltext');
 
   // Filter Bar state
-  const [selectedDay, setSelectedDay] = useState<string>('Wed, 28 Oct');
-  const [selectedTimeRange, setSelectedTimeRange] = useState<string>('8:00AM to 9:00AM');
-  const [selectedInterval, setSelectedInterval] = useState<string>('1 minute');
+  const [selectedTimeRange, setSelectedTimeRange] = useState<string>('Last 1 Hour');
+  const [selectedInterval, setSelectedInterval] = useState<string>('5 minute');
   const [showTips, setShowTips] = useState<boolean>(true);
   const [copiedSQL, setCopiedSQL] = useState<boolean>(false);
 
-  // Data mode: 'solarwinds' matches SolarWinds DPA baseline 1:1, 'live' displays real Query Store DMVs
-  const [dataMode, setDataMode] = useState<'solarwinds' | 'live'>('solarwinds');
-
   // Active selected item for drilldown
-  const [selectedQueryHash, setSelectedQueryHash] = useState<string>('4675209948');
-  const [selectedWaitType, setSelectedWaitType] = useState<string>('PAGEIOLATCH_SH');
+  const [selectedQueryHash, setSelectedQueryHash] = useState<string>('');
+  const [selectedWaitType, setSelectedWaitType] = useState<string>('');
   const [selectedSliceIndex, setSelectedSliceIndex] = useState<number | null>(null);
 
   // Active perspective telemetry (Programs, Databases, DB Users, Machines, Files, Drives)
@@ -356,8 +252,8 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
   const [isPerspectiveLoading, setIsPerspectiveLoading] = useState<boolean>(false);
 
   // Active host/database title
-  const hostName = status?.serverName || 'DC-DBPROD1';
-  const dbName = status?.databaseName || 'AmmsOnlineProd';
+  const hostName = status?.serverName || '';
+  const dbName = status?.databaseName || '';
 
   // Live queries dynamically loaded for the chosen time window
   const [windowQueries, setWindowQueries] = useState<QueryStoreEntry[]>([]);
@@ -382,13 +278,14 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
         const app = (window as any).go?.main?.App;
         if (app?.GetLiveQueryStoreWindow) {
           const res = await app.GetLiveQueryStoreWindow('duration', 25, windowHours);
-          if (isMounted && res && res.length > 0) {
-            setWindowQueries(res);
+          if (isMounted) {
+            setWindowQueries(res || []);
             return;
           }
         }
       } catch (err) {
         console.warn('[DPA] Fetch window queries failed:', err);
+        if (isMounted) setWindowQueries([]);
       }
     };
     fetchWindowQueries();
@@ -400,12 +297,8 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
 
   // Formatted date string for chart title
   const formattedDay = useMemo(() => {
-    if (selectedDay.includes('26')) return 'October 26, 2026';
-    if (selectedDay.includes('27')) return 'October 27, 2026';
-    if (selectedDay.includes('28')) return 'October 28, 2026';
-    if (selectedDay.includes('25')) return 'October 25, 2026';
-    return selectedDay;
-  }, [selectedDay]);
+    return new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }, []);
 
   // Parse hour, minute, AM/PM, step, and total bars from filters
   const { startHour, ampm, intervalStep, totalBars } = useMemo(() => {
@@ -524,105 +417,91 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
     };
   }, [activePerspective, activeSessions, dbName]);
 
-  // Map Top Queries with Color assignment (SolarWinds exact baseline vs Live DB Query Store)
+  // Map Top Queries with Color assignment (Live DB Query Store / In-Flight DMVs)
   const topQueries = useMemo(() => {
-    if (dataMode === 'live') {
-      const activeStore = (windowQueries.length > 0 ? windowQueries : queryStore) || [];
-      if (activeStore && activeStore.length > 0) {
-        const mapped = activeStore.map((q, idx) => {
-          let procName = `Query #${q.queryId}`;
-          const text = q.queryText || '';
-          const procMatch = text.match(/(?:CREATE\s+PROCEDURE|ALTER\s+PROCEDURE|EXEC|EXECUTE)\s+([a-zA-Z0-9_.\[\]]+)/i);
-          if (procMatch && procMatch[1]) {
-            procName = procMatch[1].replace(/[\[\]]/g, '');
-          } else {
-            const fromMatch = text.match(/(?:FROM|INTO|UPDATE)\s+([a-zA-Z0-9_.\[\]]+)/i);
-            if (fromMatch && fromMatch[1]) {
-              const verb = text.trim().split(/\s+/)[0].toUpperCase();
-              procName = `${verb} ${fromMatch[1].replace(/[\[\]]/g, '')}`;
-            } else {
-              procName = text.trim().slice(0, 36).replace(/\s+/g, ' ');
-            }
-          }
-
-          const elapsedSec = (q.totalDurationMs || 0) / 1000.0;
-          const cpuSec = (q.totalCpuMs || 0) / 1000.0;
-          const rawWaitSec = q.totalDurationMs > q.totalCpuMs ? (q.totalDurationMs - q.totalCpuMs) / 1000.0 : elapsedSec * 0.15;
-          const idSeed = Math.abs(Number(q.queryId) || (idx + 1) * 31);
-          const distinctWait = rawWaitSec > 0.05 ? rawWaitSec : Math.max(0.04, elapsedSec > 0 ? elapsedSec : (((idSeed % 11) + 1) * 0.28));
-
-          return {
-            hash: String(q.queryId || (idx + 1001)),
-            proc: procName,
-            db: dbName,
-            waitSec: Math.round(distinctWait * 100) / 100,
-            cpuSec: Math.round(cpuSec * 100) / 100,
-            reads: q.totalLogicalReads,
-            writes: q.totalPhysicalReads,
-            text: q.queryText,
-            planXml: q.planXml,
-            executionCount: q.executionCount,
-            avgDurationMs: q.avgDurationMs,
-            color: DPA_QUERY_PALETTE[idx % DPA_QUERY_PALETTE.length]
-          };
-        });
-
-        mapped.sort((a, b) => b.waitSec - a.waitSec);
-        return mapped.map((item, idx) => ({
-          ...item,
-          color: DPA_QUERY_PALETTE[idx % DPA_QUERY_PALETTE.length]
-        }));
-      }
-
-      if (activeSessions && activeSessions.some(s => s.queryText && s.queryText.trim().length > 5)) {
-        const activeWithQueries = activeSessions.filter(s => s.queryText && s.queryText.trim().length > 5);
-        const mapped = activeWithQueries.slice(0, 15).map((s, idx) => {
-          let procName = `SPID #${s.spid} (${s.command || 'Query'})`;
-          const text = s.queryText || '';
+    const activeStore = (windowQueries.length > 0 ? windowQueries : queryStore) || [];
+    if (activeStore && activeStore.length > 0) {
+      const mapped = activeStore.map((q, idx) => {
+        let procName = `Query #${q.queryId}`;
+        const text = q.queryText || '';
+        const procMatch = text.match(/(?:CREATE\s+PROCEDURE|ALTER\s+PROCEDURE|EXEC|EXECUTE)\s+([a-zA-Z0-9_.\[\]]+)/i);
+        if (procMatch && procMatch[1]) {
+          procName = procMatch[1].replace(/[\[\]]/g, '');
+        } else {
           const fromMatch = text.match(/(?:FROM|INTO|UPDATE)\s+([a-zA-Z0-9_.\[\]]+)/i);
           if (fromMatch && fromMatch[1]) {
             const verb = text.trim().split(/\s+/)[0].toUpperCase();
             procName = `${verb} ${fromMatch[1].replace(/[\[\]]/g, '')}`;
+          } else {
+            procName = text.trim().slice(0, 36).replace(/\s+/g, ' ');
           }
-          const waitSec = Math.max(0.05, Math.round((s.waitTimeMs / 1000) * 100) / 100);
-          return {
-            hash: String(s.spid * 10000 + (s.sqlHandle ? Math.abs(s.sqlHandle.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }, 0)) % 10000 : idx)),
-            proc: procName,
-            db: s.databaseName || dbName,
-            waitSec,
-            cpuSec: Math.round((s.cpuTimeMs / 1000) * 100) / 100,
-            reads: s.logicalReads,
-            writes: s.writes,
-            text: s.queryText,
-            planXml: '',
-            executionCount: 1,
-            avgDurationMs: s.totalElapsedTimeMs,
-            color: DPA_QUERY_PALETTE[idx % DPA_QUERY_PALETTE.length]
-          };
-        });
-        mapped.sort((a, b) => b.waitSec - a.waitSec);
-        return mapped.map((item, idx) => ({
-          ...item,
+        }
+
+        const elapsedSec = (q.totalDurationMs || 0) / 1000.0;
+        const cpuSec = (q.totalCpuMs || 0) / 1000.0;
+        const rawWaitSec = q.totalDurationMs > q.totalCpuMs ? (q.totalDurationMs - q.totalCpuMs) / 1000.0 : elapsedSec * 0.15;
+        const idSeed = Math.abs(Number(q.queryId) || (idx + 1) * 31);
+        const distinctWait = rawWaitSec > 0.05 ? rawWaitSec : Math.max(0.04, elapsedSec > 0 ? elapsedSec : (((idSeed % 11) + 1) * 0.28));
+
+        return {
+          hash: String(q.queryId || (idx + 1001)),
+          proc: procName,
+          db: dbName,
+          waitSec: Math.round(distinctWait * 100) / 100,
+          cpuSec: Math.round(cpuSec * 100) / 100,
+          reads: q.totalLogicalReads,
+          writes: q.totalPhysicalReads,
+          text: q.queryText,
+          planXml: q.planXml,
+          executionCount: q.executionCount,
+          avgDurationMs: q.avgDurationMs,
           color: DPA_QUERY_PALETTE[idx % DPA_QUERY_PALETTE.length]
-        }));
-      }
+        };
+      });
+
+      mapped.sort((a, b) => b.waitSec - a.waitSec);
+      return mapped.map((item, idx) => ({
+        ...item,
+        color: DPA_QUERY_PALETTE[idx % DPA_QUERY_PALETTE.length]
+      }));
     }
 
-    // SolarWinds Benchmark Mode: Exact 15 SolarWinds Statement Hashes
-    let source = DEFAULT_TOP_QUERIES;
-    if (selectedDay.includes('26')) {
-      source = MONDAY_TOP_QUERIES;
-    } else if (selectedDay.includes('27')) {
-      source = TUESDAY_TOP_QUERIES;
-    } else if (selectedDay.includes('25')) {
-      source = SUNDAY_TOP_QUERIES;
+    if (activeSessions && activeSessions.some(s => s.queryText && s.queryText.trim().length > 5)) {
+      const activeWithQueries = activeSessions.filter(s => s.queryText && s.queryText.trim().length > 5);
+      const mapped = activeWithQueries.slice(0, 15).map((s, idx) => {
+        let procName = `SPID #${s.spid} (${s.command || 'Query'})`;
+        const text = s.queryText || '';
+        const fromMatch = text.match(/(?:FROM|INTO|UPDATE)\s+([a-zA-Z0-9_.\[\]]+)/i);
+        if (fromMatch && fromMatch[1]) {
+          const verb = text.trim().split(/\s+/)[0].toUpperCase();
+          procName = `${verb} ${fromMatch[1].replace(/[\[\]]/g, '')}`;
+        }
+        const waitSec = Math.max(0.05, Math.round((s.waitTimeMs / 1000) * 100) / 100);
+        return {
+          hash: String(s.spid * 10000 + (s.sqlHandle ? Math.abs(s.sqlHandle.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a; }, 0)) % 10000 : idx)),
+          proc: procName,
+          db: s.databaseName || dbName,
+          waitSec,
+          cpuSec: Math.round((s.cpuTimeMs / 1000) * 100) / 100,
+          reads: s.logicalReads,
+          writes: s.writes,
+          text: s.queryText,
+          planXml: '',
+          executionCount: 1,
+          avgDurationMs: s.totalElapsedTimeMs,
+          color: DPA_QUERY_PALETTE[idx % DPA_QUERY_PALETTE.length]
+        };
+      });
+      mapped.sort((a, b) => b.waitSec - a.waitSec);
+      return mapped.map((item, idx) => ({
+        ...item,
+        color: DPA_QUERY_PALETTE[idx % DPA_QUERY_PALETTE.length]
+      }));
     }
 
-    return source.map((q, idx) => ({
-      ...q,
-      color: DPA_QUERY_PALETTE[idx % DPA_QUERY_PALETTE.length]
-    }));
-  }, [dataMode, windowQueries, queryStore, activeSessions, selectedDay, dbName]);
+    // No mock data fallback - return empty array
+    return [];
+  }, [windowQueries, queryStore, activeSessions, dbName]);
 
   // Keep selected query in sync with list
   useEffect(() => {
@@ -630,16 +509,23 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
       if (!topQueries.some(q => q.hash === selectedQueryHash)) {
         setSelectedQueryHash(topQueries[0].hash);
       }
+    } else {
+      setSelectedQueryHash('');
     }
     setSelectedSliceIndex(null);
-  }, [selectedDay, selectedTimeRange, topQueries]);
+  }, [selectedTimeRange, topQueries]);
 
   const activeSelectedQuery = useMemo(() => {
-    return topQueries.find((q) => q.hash === selectedQueryHash) || topQueries[0];
+    if (topQueries.length === 0) return null;
+    return topQueries.find((q) => q.hash === selectedQueryHash) || topQueries[0] || null;
   }, [topQueries, selectedQueryHash]);
 
-  // Generate Timeslice bars dynamically reflecting the selected Day, Time Range, and Interval
+  // Generate Timeslice bars dynamically from real waitHistory or real queries
   const timesliceBars = useMemo(() => {
+    if (topQueries.length === 0 && (!waitHistory || waitHistory.length === 0)) {
+      return [];
+    }
+
     const bars: Array<{
       index: number;
       timeLabel: string;
@@ -648,166 +534,62 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
       slices: Array<{ hash: string; color: string; valueSec: number; pct: number }>;
     }> = [];
 
-    const isMon = selectedDay.includes('26');
-    const isTue = selectedDay.includes('27');
-    const isSun = selectedDay.includes('25');
+    if (waitHistory && waitHistory.length > 0) {
+      waitHistory.forEach((pt, i) => {
+        const totalHeightSec = Math.max(0.1, (pt.totalWaitMs || 0) / 1000.0);
+        const queryCount = Math.min(topQueries.length, 10);
+        const slices = queryCount > 0
+          ? topQueries.slice(0, queryCount).map((q) => {
+              const weight = 1 / queryCount;
+              const val = totalHeightSec * weight;
+              return {
+                hash: q.hash,
+                color: q.color,
+                valueSec: val,
+                pct: (val / totalHeightSec) * 100
+              };
+            })
+          : [];
 
-    let barCount = 60;
-    let getLabel = (idx: number) => '';
-    let isTick = (idx: number) => false;
-    let baseWaveMultiplier = 1.0;
-
-    if (selectedTimeRange === 'Last 7 Days') {
-      barCount = 7;
-      const days = ['Thu Oct 22', 'Fri Oct 23', 'Sat Oct 24', 'Sun Oct 25', 'Mon Oct 26', 'Tue Oct 27', 'Wed Oct 28'];
-      getLabel = (idx) => days[idx] || `Day ${idx + 1}`;
-      isTick = () => true;
-      baseWaveMultiplier = 4.2;
-    } else if (selectedTimeRange === 'Last 2 Days') {
-      barCount = 24;
-      getLabel = (idx) => {
-        const hour = (idx * 2) % 24;
-        const dayPrefix = idx < 12 ? 'Oct 27' : 'Oct 28';
-        return `${dayPrefix} ${hour < 10 ? '0' : ''}${hour}:00`;
-      };
-      isTick = (idx) => idx % 4 === 0;
-      baseWaveMultiplier = 2.4;
-    } else if (selectedTimeRange === 'Last 24 Hours') {
-      barCount = 24;
-      getLabel = (idx) => {
-        const h = idx % 12 || 12;
-        const p = idx < 12 ? 'AM' : 'PM';
-        return `${h}${p}`;
-      };
-      isTick = (idx) => idx % 3 === 0;
-      baseWaveMultiplier = 1.8;
-    } else if (selectedTimeRange === 'Last 12 Hours') {
-      barCount = 24;
-      getLabel = (idx) => {
-        const totalMin = idx * 30;
-        const h = Math.floor(totalMin / 60) % 12 || 12;
-        const m = totalMin % 60;
-        return `${h}:${m < 10 ? '0' : ''}${m}`;
-      };
-      isTick = (idx) => idx % 4 === 0;
-      baseWaveMultiplier = 1.4;
-    } else if (selectedTimeRange === 'Last 6 Hours') {
-      barCount = 24;
-      getLabel = (idx) => {
-        const totalMin = idx * 15;
-        const h = Math.floor(totalMin / 60) % 12 || 12;
-        const m = totalMin % 60;
-        return `${h}:${m < 10 ? '0' : ''}${m}`;
-      };
-      isTick = (idx) => idx % 4 === 0;
-      baseWaveMultiplier = 1.25;
-    } else if (selectedTimeRange === 'Last 3 Hours') {
-      barCount = 36;
-      getLabel = (idx) => {
-        const totalMin = idx * 5;
-        const h = Math.floor(totalMin / 60) % 12 || 12;
-        const m = totalMin % 60;
-        return `${h}:${m < 10 ? '0' : ''}${m}`;
-      };
-      isTick = (idx) => idx % 6 === 0;
-      baseWaveMultiplier = 1.1;
-    } else {
-      // 1-Hour window (either Last 1 Hour or specific slot)
-      barCount = 60;
-      let slotHour = 8;
-      let slotAmPm = 'AM';
-      const match = selectedTimeRange.match(/(\d+):00(AM|PM)/i);
-      if (match) {
-        slotHour = parseInt(match[1], 10);
-        slotAmPm = match[2].toUpperCase();
-      } else if (selectedTimeRange.includes('Last 1 Hour')) {
-        const now = new Date();
-        slotHour = now.getHours() % 12 || 12;
-        slotAmPm = now.getHours() >= 12 ? 'PM' : 'AM';
-      }
-      getLabel = (idx) => {
-        const minStr = idx < 10 ? `0${idx}` : `${idx}`;
-        return `${slotHour}:${minStr}${slotAmPm}`;
-      };
-      // SolarWinds ticks labeled every 4 minutes (8:00AM, 8:04AM, ..., 8:56AM)
-      isTick = (idx) => idx % 4 === 0;
-      baseWaveMultiplier = 0.85 + ((slotHour * 9) % 13) * 0.07;
+        bars.push({
+          index: i,
+          timeLabel: pt.intervalLabel || `${i}:00`,
+          isLabeledTick: i % 4 === 0,
+          totalHeightSec,
+          slices
+        });
+      });
+      return bars;
     }
 
-    for (let i = 0; i < barCount; i++) {
-      let totalHeightSec = 0;
-      if (isMon) {
-        if (i < barCount * 0.35) {
-          totalHeightSec = 1420 - i * 18 + Math.sin(i * 1.5) * 50;
-        } else if (i < barCount * 0.65) {
-          totalHeightSec = 740 + (i - barCount * 0.35) * 12 + Math.cos(i) * 45;
-        } else {
-          totalHeightSec = 960 + Math.sin(i * 0.9) * 70;
-        }
-      } else if (isTue) {
-        if (i < barCount * 0.4) {
-          totalHeightSec = 540 + i * 10 + Math.cos(i) * 35;
-        } else if (i < barCount * 0.75) {
-          totalHeightSec = 1380 - Math.abs(i - barCount * 0.55) * 35 + Math.sin(i) * 40;
-        } else {
-          totalHeightSec = 690 + Math.sin(i) * 35;
-        }
-      } else if (isSun) {
-        const cycle = i % 8;
-        totalHeightSec = cycle < 3 ? 1260 - cycle * 90 : 390 + Math.cos(i) * 35;
-      } else {
-        // Wednesday profile: Exact 60-point SolarWinds DPA screenshot parity when on 8:00AM-9:00AM
-        if (selectedTimeRange.includes('8:00AM') && dataMode === 'solarwinds') {
-          totalHeightSec = WEDNESDAY_8AM_SOLARWINDS_CURVE[i] || 600;
-        } else if (i < barCount * 0.3) {
-          totalHeightSec = 720 - i * 12 + Math.sin(i * 1.6) * 45;
-        } else if (i < barCount * 0.6) {
-          totalHeightSec = 440 + (i - barCount * 0.3) * 18 + Math.cos(i) * 40;
-        } else if (i < barCount * 0.85) {
-          totalHeightSec = 660 + (i - barCount * 0.6) * 45 + (i % 3) * 25;
-        } else {
-          totalHeightSec = 1480 + Math.sin(i * 55);
-        }
+    if (topQueries.length > 0) {
+      const barCount = 12;
+      const queryCount = Math.min(10, topQueries.length);
+      const totalWait = topQueries.slice(0, queryCount).reduce((acc, q) => acc + q.waitSec, 0);
+      const totalHeightSec = Math.max(0.1, totalWait / barCount);
+      for (let i = 0; i < barCount; i++) {
+        const slices = topQueries.slice(0, queryCount).map((q) => {
+          const val = q.waitSec / barCount;
+          return {
+            hash: q.hash,
+            color: q.color,
+            valueSec: val,
+            pct: totalHeightSec > 0 ? (val / totalHeightSec) * 100 : 0
+          };
+        });
+        bars.push({
+          index: i,
+          timeLabel: `${(i + 1) * 5}m`,
+          isLabeledTick: i % 3 === 0,
+          totalHeightSec,
+          slices
+        });
       }
-
-      if (!(selectedTimeRange.includes('8:00AM') && dataMode === 'solarwinds')) {
-        totalHeightSec = Math.max(120, totalHeightSec * baseWaveMultiplier);
-      }
-
-      const queryCount = Math.min(15, topQueries.length);
-      const solarWindsWeights = [0.22, 0.16, 0.12, 0.09, 0.08, 0.065, 0.055, 0.045, 0.04, 0.035, 0.03, 0.025, 0.02, 0.018, 0.017];
-      const slices = topQueries.slice(0, queryCount).map((q, qIdx) => {
-        let weight = solarWindsWeights[qIdx] || (1 / queryCount);
-        if (dataMode === 'live') {
-          weight = 0.28 / (qIdx * 0.7 + 1);
-          if (qIdx === 0) weight = isMon ? (i < barCount * 0.4 ? 0.38 : 0.22) : 0.28;
-          if (qIdx === 1) weight = 0.18 + (i % 2 === 0 ? 0.02 : 0);
-          if (qIdx === 2) weight = 0.14;
-          if (qIdx === 3) weight = 0.10;
-          if (qIdx === 4) weight = 0.08;
-          if (qIdx >= 5) weight = 0.04;
-        }
-
-        const val = totalHeightSec * weight;
-        return {
-          hash: q.hash,
-          color: q.color,
-          valueSec: val,
-          pct: (val / totalHeightSec) * 100
-        };
-      });
-
-      bars.push({
-        index: i,
-        timeLabel: getLabel(i),
-        isLabeledTick: isTick(i),
-        totalHeightSec,
-        slices
-      });
+      return bars;
     }
 
-    return bars;
-  }, [dataMode, selectedDay, selectedTimeRange, topQueries]);
+    return [];
+  }, [waitHistory, topQueries]);
 
   // Waits Data (Excludes background benign system waits; uses real waitStats when connected)
   const topWaitsData = useMemo(() => {
@@ -859,40 +641,8 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
       return mapped.slice(0, 10);
     }
 
-    if (selectedDay.includes('26')) {
-      return [
-        { name: 'PAGEIOLATCH_SH', category: 'Disk I/O', waitSec: 1420.5, pct: 58.4, tasksCount: 14200, signalWaitMs: 320, color: DPA_WAIT_COLORS['PAGEIOLATCH_SH'] },
-        { name: 'ASYNC_NETWORK_IO', category: 'Network Fetch', waitSec: 420.2, pct: 17.3, tasksCount: 8400, signalWaitMs: 95, color: DPA_WAIT_COLORS['ASYNC_NETWORK_IO'] },
-        { name: 'SOS_SCHEDULER_YIELD', category: 'CPU / Yield', waitSec: 310.0, pct: 12.7, tasksCount: 65000, signalWaitMs: 1420, color: DPA_WAIT_COLORS['SOS_SCHEDULER_YIELD'] },
-        { name: 'LCK_M_IX', category: 'Locking', waitSec: 180.5, pct: 7.4, tasksCount: 320, signalWaitMs: 12, color: DPA_WAIT_COLORS['LCK_M_IX'] },
-        { name: 'WRITELOG', category: 'Disk I/O', waitSec: 102.0, pct: 4.2, tasksCount: 5200, signalWaitMs: 40, color: DPA_WAIT_COLORS['WRITELOG'] }
-      ];
-    }
-    if (selectedDay.includes('27')) {
-      return [
-        { name: 'LCK_M_IX', category: 'Locking', waitSec: 1680.0, pct: 54.0, tasksCount: 890, signalWaitMs: 25, color: DPA_WAIT_COLORS['LCK_M_IX'] },
-        { name: 'PAGEIOLATCH_SH', category: 'Disk I/O', waitSec: 740.5, pct: 23.8, tasksCount: 9200, signalWaitMs: 180, color: DPA_WAIT_COLORS['PAGEIOLATCH_SH'] },
-        { name: 'SOS_SCHEDULER_YIELD', category: 'CPU / Yield', waitSec: 440.0, pct: 14.1, tasksCount: 48000, signalWaitMs: 1120, color: DPA_WAIT_COLORS['SOS_SCHEDULER_YIELD'] },
-        { name: 'WRITELOG', category: 'Disk I/O', waitSec: 150.2, pct: 4.8, tasksCount: 4100, signalWaitMs: 50, color: DPA_WAIT_COLORS['WRITELOG'] },
-        { name: 'ASYNC_NETWORK_IO', category: 'Network Fetch', waitSec: 104.0, pct: 3.3, tasksCount: 3200, signalWaitMs: 80, color: DPA_WAIT_COLORS['ASYNC_NETWORK_IO'] }
-      ];
-    }
-    if (selectedDay.includes('25')) {
-      return [
-        { name: 'PAGEIOLATCH_EX', category: 'Disk I/O', waitSec: 1890.0, pct: 61.2, tasksCount: 16400, signalWaitMs: 420, color: DPA_WAIT_COLORS['PAGEIOLATCH_EX'] },
-        { name: 'WRITELOG', category: 'Disk I/O', waitSec: 680.5, pct: 22.0, tasksCount: 9800, signalWaitMs: 110, color: DPA_WAIT_COLORS['WRITELOG'] },
-        { name: 'SOS_SCHEDULER_YIELD', category: 'CPU / Yield', waitSec: 320.0, pct: 10.4, tasksCount: 38000, signalWaitMs: 890, color: DPA_WAIT_COLORS['SOS_SCHEDULER_YIELD'] },
-        { name: 'PAGEIOLATCH_SH', category: 'Disk I/O', waitSec: 200.0, pct: 6.4, tasksCount: 4100, signalWaitMs: 65, color: DPA_WAIT_COLORS['PAGEIOLATCH_SH'] }
-      ];
-    }
-
-    return DEFAULT_TOP_WAITS.map((w) => ({
-      ...w,
-      category: w.name.startsWith('PAGEIO') ? 'Disk I/O' : w.name.startsWith('LCK') ? 'Locking' : w.name === 'SOS_SCHEDULER_YIELD' ? 'CPU / Yield' : 'General Wait',
-      tasksCount: 1200,
-      signalWaitMs: 40
-    }));
-  }, [waitStats, selectedDay]);
+    return [];
+  }, [waitStats]);
 
   // Keep selected wait in sync with topWaitsData
   useEffect(() => {
@@ -900,19 +650,14 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
       if (!topWaitsData.some((w) => w.name === selectedWaitType)) {
         setSelectedWaitType(topWaitsData[0].name);
       }
+    } else {
+      setSelectedWaitType('');
     }
   }, [topWaitsData, selectedWaitType]);
 
   const activeSelectedWait = useMemo(() => {
-    return topWaitsData.find((w) => w.name === selectedWaitType) || topWaitsData[0] || {
-      name: 'PAGEIOLATCH_SH',
-      category: 'Disk I/O',
-      waitSec: 0,
-      pct: 0,
-      tasksCount: 0,
-      signalWaitMs: 0,
-      color: '#0284c7'
-    };
+    if (topWaitsData.length === 0) return null;
+    return topWaitsData.find((w) => w.name === selectedWaitType) || topWaitsData[0] || null;
   }, [topWaitsData, selectedWaitType]);
 
   const handleCopySQL = (text: string) => {
@@ -923,36 +668,12 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
 
   return (
     <div className="dpa-container glass-panel" style={{ borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      {/* ── TOP CONTROL BAR (Day, Time, Trends) ── */}
+      {/* ── TOP CONTROL BAR (Time Range & Live Connection Status) ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          {/* Day Picker */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Day:</span>
-            <select
-              value={selectedDay}
-              onChange={(e) => setSelectedDay(e.target.value)}
-              className="dpa-select"
-              style={{
-                background: 'var(--bg-canvas)',
-                color: 'var(--text-main)',
-                border: '1px solid var(--border-medium)',
-                borderRadius: '4px',
-                padding: '4px 8px',
-                fontSize: '12px',
-                fontWeight: 600
-              }}
-            >
-              <option value="Wed, 28 Oct">Wed, 28 Oct (Today)</option>
-              <option value="Tue, 27 Oct">Tue, 27 Oct</option>
-              <option value="Mon, 26 Oct">Mon, 26 Oct</option>
-              <option value="Sun, 25 Oct">Sun, 25 Oct</option>
-            </select>
-          </div>
-
           {/* Time Range Picker */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Time:</span>
+            <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>Time Window:</span>
             <select
               value={selectedTimeRange}
               onChange={(e) => setSelectedTimeRange(e.target.value)}
@@ -967,84 +688,25 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
                 fontWeight: 600
               }}
             >
-              <optgroup label="Relative Time Windows">
-                <option value="Last 1 Hour">Last 1 Hour (Realtime)</option>
-                <option value="Last 3 Hours">Last 3 Hours</option>
-                <option value="Last 6 Hours">Last 6 Hours</option>
-                <option value="Last 12 Hours">Last 12 Hours</option>
-                <option value="Last 24 Hours">Last 24 Hours (1 Day)</option>
-                <option value="Last 2 Days">Last 2 Days (48 Hours)</option>
-                <option value="Last 7 Days">Last 7 Days (1 Week)</option>
-              </optgroup>
-              <optgroup label="Hourly Periods (Today)">
-                <option value="8:00AM to 9:00AM">8:00AM to 9:00AM (Active Period)</option>
-                <option value="9:00AM to 10:00AM">9:00AM to 10:00AM</option>
-                <option value="10:00AM to 11:00AM">10:00AM to 11:00AM</option>
-                <option value="11:00AM to 12:00PM">11:00AM to 12:00PM</option>
-                <option value="12:00PM to 1:00PM">12:00PM to 1:00PM</option>
-                <option value="1:00PM to 2:00PM">1:00PM to 2:00PM</option>
-                <option value="2:00PM to 3:00PM">2:00PM to 3:00PM</option>
-                <option value="3:00PM to 4:00PM">3:00PM to 4:00PM</option>
-                <option value="4:00PM to 5:00PM">4:00PM to 5:00PM</option>
-              </optgroup>
+              <option value="Last 1 Hour">Last 1 Hour (Realtime)</option>
+              <option value="Last 3 Hours">Last 3 Hours</option>
+              <option value="Last 6 Hours">Last 6 Hours</option>
+              <option value="Last 12 Hours">Last 12 Hours</option>
+              <option value="Last 24 Hours">Last 24 Hours (1 Day)</option>
+              <option value="Last 2 Days">Last 2 Days (48 Hours)</option>
+              <option value="Last 7 Days">Last 7 Days (1 Week)</option>
             </select>
           </div>
         </div>
 
-        {/* Right Action Pill / Breadcrumb & SolarWinds Benchmark Toggle */}
+        {/* Right Action Pill / Breadcrumb */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {/* Data Mode Switcher (SolarWinds Benchmark vs Live DB Telemetry) */}
-          <div style={{ display: 'inline-flex', alignItems: 'center', background: 'var(--bg-canvas)', borderRadius: '6px', border: '1px solid var(--border-medium)', padding: '2px', gap: '2px' }}>
-            <button
-              type="button"
-              onClick={() => setDataMode('solarwinds')}
-              style={{
-                padding: '3px 9px',
-                fontSize: '11px',
-                fontWeight: 700,
-                borderRadius: '4px',
-                border: 'none',
-                cursor: 'pointer',
-                background: dataMode === 'solarwinds' ? '#0284c7' : 'transparent',
-                color: dataMode === 'solarwinds' ? '#ffffff' : 'var(--text-muted)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                transition: 'all 0.15s ease'
-              }}
-              title="Match SolarWinds DPA benchmark screenshot (1600s scale, 15 query hashes)"
-            >
-              <Sparkles size={11} /> SolarWinds Benchmark
-            </button>
-            <button
-              type="button"
-              onClick={() => setDataMode('live')}
-              style={{
-                padding: '3px 9px',
-                fontSize: '11px',
-                fontWeight: 700,
-                borderRadius: '4px',
-                border: 'none',
-                cursor: 'pointer',
-                background: dataMode === 'live' ? '#10b981' : 'transparent',
-                color: dataMode === 'live' ? '#ffffff' : 'var(--text-muted)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                transition: 'all 0.15s ease'
-              }}
-              title="Query active Query Store & DMV telemetry from connected database"
-            >
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: dataMode === 'live' ? '#ffffff' : '#10b981', display: 'inline-block' }} /> Live DB Telemetry
-            </button>
-          </div>
-
           <span className="badge badge-info" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 9px' }}>
             <Server size={12} /> {hostName} ({dbName})
           </span>
-          <span className={`badge ${dataMode === 'solarwinds' ? 'badge-info' : isRealData ? 'badge-success' : 'badge-warning'}`} style={{ padding: '3px 9px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: dataMode === 'solarwinds' ? '#0284c7' : isRealData ? '#10b981' : '#f59e0b', display: 'inline-block' }} />
-            {dataMode === 'solarwinds' ? '● SolarWinds Baseline (15 Hashes)' : isRealData ? `● Real Live Data (${topQueries.length} Queries)` : '● Workload Profile'}
+          <span className={`badge ${isRealData ? 'badge-success' : 'badge-neutral'}`} style={{ padding: '3px 9px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isRealData ? '#10b981' : '#64748b', display: 'inline-block' }} />
+            {isRealData ? `● Live Data (${topQueries.length} Queries)` : '● Live Database (0 Active Wait Queries)'}
           </span>
         </div>
       </div>
@@ -1178,188 +840,208 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
           </div>
 
           {/* Timeslice Stacked Bar Chart & Right Legend Split */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(450px, 1fr) 220px', gap: '14px', border: '1px solid var(--border-subtle)', borderTop: 'none', padding: '14px 10px', background: 'var(--bg-canvas)' }}>
-            {/* Chart Area with Y-axis & Stacked Bars */}
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'flex', height: '240px', position: 'relative' }}>
-                {(() => {
-                  const maxVal = Math.max(...timesliceBars.map(b => b.totalHeightSec), 120);
-                  const is1600Standard = (dataMode === 'solarwinds' && selectedTimeRange.includes('8:00AM')) || maxVal <= 1650;
-                  const maxScale = is1600Standard ? 1600 : Math.ceil(maxVal / 200) * 200;
-                  const step = maxScale === 1600 ? 100 : (maxScale <= 2000 ? 200 : 400);
-                  const tickSteps: number[] = [];
-                  for (let v = maxScale; v >= 0; v -= step) {
-                    tickSteps.push(v);
-                  }
-                  return (
-                    <>
-                      {/* Dynamic Y-Axis Scale */}
-                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', paddingRight: '8px', fontSize: '9.5px', color: 'var(--text-muted)', textAlign: 'right', width: '38px', flexShrink: 0 }}>
-                        {tickSteps.map((tick, tIdx) => (
-                          <span key={tIdx}>{tick}</span>
-                        ))}
+          {timesliceBars.length === 0 ? (
+            <div style={{ border: '1px solid var(--border-subtle)', borderTop: 'none', padding: '40px 20px', textAlign: 'center', background: 'var(--bg-canvas)', borderRadius: '0 0 8px 8px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)', marginBottom: '6px' }}>
+                No Timeslice Wait History Available
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '520px', margin: '0 auto' }}>
+                No query wait telemetry was recorded for the selected window ({selectedTimeRange}) on {hostName} ({dbName}). Active query wait times will graph here automatically as workload executes.
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(450px, 1fr) 220px', gap: '14px', border: '1px solid var(--border-subtle)', borderTop: 'none', padding: '14px 10px', background: 'var(--bg-canvas)' }}>
+              {/* Chart Area with Y-axis & Stacked Bars */}
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', height: '240px', position: 'relative' }}>
+                  {(() => {
+                    const maxVal = Math.max(...timesliceBars.map(b => b.totalHeightSec), 1);
+                    const maxScale = Math.max(10, Math.ceil(maxVal / 20) * 20);
+                    const step = Math.max(2, Math.ceil(maxScale / 5));
+                    const tickSteps: number[] = [];
+                    for (let v = maxScale; v >= 0; v -= step) {
+                      tickSteps.push(v);
+                    }
+                    return (
+                      <>
+                        {/* Dynamic Y-Axis Scale */}
+                        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', paddingRight: '8px', fontSize: '9.5px', color: 'var(--text-muted)', textAlign: 'right', width: '38px', flexShrink: 0 }}>
+                          {tickSteps.map((tick, tIdx) => (
+                            <span key={tIdx}>{tick}</span>
+                          ))}
+                        </div>
+
+                        {/* Bars & Gridlines Canvas */}
+                        <div style={{ flex: 1, position: 'relative', borderLeft: '1px solid var(--border-medium)', borderBottom: '1px solid var(--border-medium)', display: 'flex', alignItems: 'flex-end', gap: '1.5px', paddingLeft: '2px', paddingRight: '4px' }}>
+                          {/* Background Gridlines */}
+                          {tickSteps.map((gridVal, gIdx) => {
+                            const bottomPct = (gridVal / maxScale) * 100;
+                            return (
+                              <div
+                                key={gIdx}
+                                style={{
+                                  position: 'absolute',
+                                  left: 0,
+                                  right: 0,
+                                  bottom: `${bottomPct}%`,
+                                  borderBottom: '1px dashed var(--border-subtle)',
+                                  pointerEvents: 'none',
+                                  opacity: 0.6
+                                }}
+                              />
+                            );
+                          })}
+
+                          {/* Stacked Columns */}
+                          {timesliceBars.map((bar) => {
+                            const barHeightPct = Math.min(100, (bar.totalHeightSec / maxScale) * 100);
+                            const isSelected = selectedSliceIndex === bar.index;
+
+                            return (
+                              <div
+                                key={bar.index}
+                                onClick={() => setSelectedSliceIndex(bar.index)}
+                                style={{
+                                  flex: 1,
+                                  height: `${barHeightPct}%`,
+                                  display: 'flex',
+                                  flexDirection: 'column-reverse',
+                                  cursor: 'pointer',
+                                  position: 'relative',
+                                  zIndex: 2,
+                                  outline: isSelected ? '1.5px solid #ffffff' : undefined,
+                                  boxShadow: isSelected ? '0 0 8px rgba(56, 189, 248, 0.6)' : undefined
+                                }}
+                                title={`${bar.timeLabel}: ${bar.totalHeightSec.toFixed(1)}s total wait time`}
+                              >
+                                {bar.slices.map((slice, sIdx) => {
+                                  const isHighlighted = selectedQueryHash === slice.hash;
+                                  return (
+                                    <div
+                                      key={sIdx}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedQueryHash(slice.hash);
+                                        setSelectedSliceIndex(bar.index);
+                                      }}
+                                      style={{
+                                        height: `${slice.pct}%`,
+                                        background: slice.color,
+                                        borderTop: '0.5px solid rgba(255,255,255,0.15)',
+                                        opacity: !selectedQueryHash || isHighlighted ? 1 : 0.45,
+                                        transition: 'opacity 0.15s ease'
+                                      }}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+
+                {/* X-Axis Timestamps aligned directly under each bar */}
+                <div style={{ position: 'relative', height: '18px', marginLeft: '38px', marginTop: '6px' }}>
+                  {timesliceBars.map((bar) => {
+                    if (!bar.isLabeledTick) return null;
+                    const leftPct = (bar.index / timesliceBars.length) * 100;
+                    return (
+                      <div
+                        key={bar.index}
+                        style={{
+                          position: 'absolute',
+                          left: `${leftPct}%`,
+                          transform: 'translateX(-25%)',
+                          fontSize: '9.5px',
+                          color: '#0284c7',
+                          fontWeight: 700,
+                          textDecoration: 'underline',
+                          whiteSpace: 'nowrap',
+                          fontFamily: 'var(--font-mono)'
+                        }}
+                      >
+                        {bar.timeLabel}
                       </div>
+                    );
+                  })}
+                </div>
 
-                      {/* Bars & Gridlines Canvas */}
-                      <div style={{ flex: 1, position: 'relative', borderLeft: '1px solid var(--border-medium)', borderBottom: '1px solid var(--border-medium)', display: 'flex', alignItems: 'flex-end', gap: '1.5px', paddingLeft: '2px', paddingRight: '4px' }}>
-                        {/* Background Gridlines */}
-                        {tickSteps.map((gridVal, gIdx) => {
-                          const bottomPct = (gridVal / maxScale) * 100;
-                          return (
-                            <div
-                              key={gIdx}
-                              style={{
-                                position: 'absolute',
-                                left: 0,
-                                right: 0,
-                                bottom: `${bottomPct}%`,
-                                borderBottom: '1px dashed var(--border-subtle)',
-                                pointerEvents: 'none',
-                                opacity: 0.6
-                              }}
-                            />
-                          );
-                        })}
-
-                        {/* Stacked Columns */}
-                        {timesliceBars.map((bar) => {
-                          const barHeightPct = Math.min(100, (bar.totalHeightSec / maxScale) * 100);
-                          const isSelected = selectedSliceIndex === bar.index;
-
-                          return (
-                            <div
-                              key={bar.index}
-                              onClick={() => setSelectedSliceIndex(bar.index)}
-                              style={{
-                                flex: 1,
-                                height: `${barHeightPct}%`,
-                                display: 'flex',
-                                flexDirection: 'column-reverse',
-                                cursor: 'pointer',
-                                position: 'relative',
-                                zIndex: 2,
-                                outline: isSelected ? '1.5px solid #ffffff' : undefined,
-                                boxShadow: isSelected ? '0 0 8px rgba(56, 189, 248, 0.6)' : undefined
-                              }}
-                              title={`${bar.timeLabel}: ${bar.totalHeightSec.toFixed(1)}s total wait time`}
-                            >
-                              {bar.slices.map((slice, sIdx) => {
-                                const isHighlighted = selectedQueryHash === slice.hash;
-                                return (
-                                  <div
-                                    key={sIdx}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedQueryHash(slice.hash);
-                                      setSelectedSliceIndex(bar.index);
-                                    }}
-                                    style={{
-                                      height: `${slice.pct}%`,
-                                      background: slice.color,
-                                      borderTop: '0.5px solid rgba(255,255,255,0.15)',
-                                      opacity: !selectedQueryHash || isHighlighted ? 1 : 0.45,
-                                      transition: 'opacity 0.15s ease'
-                                    }}
-                                  />
-                                );
-                              })}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </>
-                  );
-                })()}
+                {/* Anomaly Detection Caption */}
+                <div style={{ textAlign: 'center', marginTop: '14px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                  <strong>Anomaly Detection</strong>: Anomaly chart is displayed for one hour intervals. Current workload variance is within ±1.2σ.
+                </div>
               </div>
 
-              {/* X-Axis Timestamps (8:00AM, 8:04AM, ..., 8:56AM) aligned directly under each bar */}
-              <div style={{ position: 'relative', height: '18px', marginLeft: '38px', marginTop: '6px' }}>
-                {timesliceBars.map((bar) => {
-                  if (!bar.isLabeledTick) return null;
-                  const leftPct = (bar.index / timesliceBars.length) * 100;
+              {/* Right Legend: Clickable Top SQL Statement Hashes */}
+              <div style={{ borderLeft: '1px solid var(--border-subtle)', paddingLeft: '10px', display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: '310px', overflowY: 'auto' }}>
+                <div style={{ fontSize: '10.5px', fontWeight: 800, color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase' }}>
+                  Top SQL (Hash)
+                </div>
+                {topQueries.map((q) => {
+                  const isSelected = selectedQueryHash === q.hash;
                   return (
                     <div
-                      key={bar.index}
+                      key={q.hash}
+                      onClick={() => setSelectedQueryHash(q.hash)}
                       style={{
-                        position: 'absolute',
-                        left: `${leftPct}%`,
-                        transform: 'translateX(-25%)',
-                        fontSize: '9.5px',
-                        color: '#0284c7',
-                        fontWeight: 700,
-                        textDecoration: 'underline',
-                        whiteSpace: 'nowrap',
-                        fontFamily: 'var(--font-mono)'
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        cursor: 'pointer',
+                        padding: '2px 4px',
+                        borderRadius: '3px',
+                        background: isSelected ? 'var(--bg-card-hover)' : 'transparent',
+                        border: isSelected ? '1px solid var(--border-accent)' : '1px solid transparent'
                       }}
+                      title={`${q.proc} (${q.waitSec.toFixed(1)}s)`}
                     >
-                      {bar.timeLabel}
+                      <span style={{ width: '9px', height: '9px', background: q.color, flexShrink: 0, borderRadius: '1.5px' }} />
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          color: isSelected ? '#0284c7' : 'var(--text-main)',
+                          fontWeight: isSelected ? 800 : 600,
+                          textDecoration: 'underline',
+                          fontFamily: 'var(--font-mono)'
+                        }}
+                      >
+                        {q.hash}
+                      </span>
                     </div>
                   );
                 })}
               </div>
-
-              {/* Anomaly Detection Caption */}
-              <div style={{ textAlign: 'center', marginTop: '14px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                <strong>Anomaly Detection</strong>: Anomaly chart is displayed for one hour intervals. Current workload variance is within ±1.2σ.
-              </div>
             </div>
-
-            {/* Right Legend: Clickable Top SQL Statement Hashes */}
-            <div style={{ borderLeft: '1px solid var(--border-subtle)', paddingLeft: '10px', display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: '310px', overflowY: 'auto' }}>
-              <div style={{ fontSize: '10.5px', fontWeight: 800, color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase' }}>
-                Top SQL (Hash)
-              </div>
-              {topQueries.map((q) => {
-                const isSelected = selectedQueryHash === q.hash;
-                return (
-                  <div
-                    key={q.hash}
-                    onClick={() => setSelectedQueryHash(q.hash)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      cursor: 'pointer',
-                      padding: '2px 4px',
-                      borderRadius: '3px',
-                      background: isSelected ? 'var(--bg-card-hover)' : 'transparent',
-                      border: isSelected ? '1px solid var(--border-accent)' : '1px solid transparent'
-                    }}
-                    title={`${q.proc} (${q.waitSec.toFixed(1)}s)`}
-                  >
-                    <span style={{ width: '9px', height: '9px', background: q.color, flexShrink: 0, borderRadius: '1.5px' }} />
-                    <span
-                      style={{
-                        fontSize: '11px',
-                        color: isSelected ? '#0284c7' : 'var(--text-main)',
-                        fontWeight: isSelected ? 800 : 600,
-                        textDecoration: 'underline',
-                        fontFamily: 'var(--font-mono)'
-                      }}
-                    >
-                      {q.hash}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          )}
         </div>
       )}
 
       {/* ── PERSPECTIVE VIEW 2: TOP WAITS (EXECUTIVE COMPACT & ACTIONABLE) ── */}
-      {activePerspective === 'waits' && (() => {
-        const totalWaitSec = topWaitsData.reduce((acc, w) => acc + w.waitSec, 0);
-        const totalTasks = topWaitsData.reduce((acc, w) => acc + (w.tasksCount || 0), 0);
-        const totalSignalMs = topWaitsData.reduce((acc, w) => acc + (w.signalWaitMs || 0), 0);
-        const signalRatioPct = totalWaitSec > 0 ? ((totalSignalMs / 1000) / totalWaitSec) * 100 : 0;
-        const maxWaitSec = Math.max(...topWaitsData.map(w => w.waitSec), 0.1);
-        const dominantWait = topWaitsData[0] || { name: 'None', category: 'Idle', waitSec: 0, pct: 0 };
-        const waitDef = WAIT_DEFINITIONS[activeSelectedWait.name] || {
-          desc: `Active engine wait state '${activeSelectedWait.name}' in category ${activeSelectedWait.category}.`,
-          cause: 'Query or thread execution contention requiring SQL Server resource acquisition.',
-          fix: 'Review top queries consuming this wait state in the Query Store and Plan IQ Advisor tabs.'
-        };
+      {activePerspective === 'waits' && (
+        topWaitsData.length === 0 ? (
+          <div className="dpa-chart-card glass-panel" style={{ border: '1px solid var(--border-medium)', borderRadius: '10px', padding: '36px 20px', textAlign: 'center', background: 'var(--bg-canvas)' }}>
+            <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-main)', marginBottom: '6px' }}>
+              No Significant Query Wait Delays
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '520px', margin: '0 auto' }}>
+              No bottleneck wait stats were recorded on {hostName} ({dbName}). The SQL Server database is operating smoothly with minimal resource contention.
+            </div>
+          </div>
+        ) : (() => {
+          const totalWaitSec = topWaitsData.reduce((acc, w) => acc + w.waitSec, 0);
+          const totalTasks = topWaitsData.reduce((acc, w) => acc + (w.tasksCount || 0), 0);
+          const totalSignalMs = topWaitsData.reduce((acc, w) => acc + (w.signalWaitMs || 0), 0);
+          const signalRatioPct = totalWaitSec > 0 ? ((totalSignalMs / 1000) / totalWaitSec) * 100 : 0;
+          const maxWaitSec = Math.max(...topWaitsData.map(w => w.waitSec), 0.1);
+          const dominantWait = topWaitsData[0] || { name: 'None', category: 'Idle', waitSec: 0, pct: 0 };
+          const waitDef = (activeSelectedWait && WAIT_DEFINITIONS[activeSelectedWait.name]) || {
+            desc: `Active engine wait state in category ${activeSelectedWait?.category || 'General'}.`,
+            cause: 'Query or thread execution contention requiring SQL Server resource acquisition.',
+            fix: 'Review top queries consuming this wait state in the Query Store and Plan IQ Advisor tabs.'
+          };
 
         return (
           <div className="dpa-chart-card glass-panel" style={{ border: '1px solid var(--border-medium)', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -1596,7 +1278,7 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
             </div>
           </div>
         );
-      })()}
+      })())}
 
       {/* ── PERSPECTIVE VIEW 3: SQL STATEMENTS TAB ── */}
       {activePerspective === 'sql' && (
@@ -1608,50 +1290,59 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
             <span className="badge badge-info">{topQueries.length} Top Batches</span>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {topQueries.map((q, idx) => {
-              const maxWait = topQueries[0]?.waitSec || 1;
-              const widthPct = Math.max(3, (q.waitSec / maxWait) * 100);
-              const isSelected = selectedQueryHash === q.hash;
+          {topQueries.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--text-muted)', fontSize: '12px', background: 'var(--bg-canvas)', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)', marginBottom: '6px' }}>No Queries With Measurable Wait Time</div>
+              <div style={{ maxWidth: '520px', margin: '0 auto' }}>
+                Query Store and DMV plan cache on {hostName} ({dbName}) have not captured queries with wait delays in this time window ({selectedTimeRange}). As workload runs on your database, top queries will appear here automatically.
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {topQueries.map((q, idx) => {
+                const maxWait = topQueries[0]?.waitSec || 1;
+                const widthPct = Math.max(3, (q.waitSec / maxWait) * 100);
+                const isSelected = selectedQueryHash === q.hash;
 
-              return (
-                <div
-                  key={q.hash}
-                  onClick={() => setSelectedQueryHash(q.hash)}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '120px 220px 1fr 100px',
-                    alignItems: 'center',
-                    gap: '12px',
-                    padding: '8px 10px',
-                    borderRadius: '6px',
-                    background: isSelected ? 'var(--bg-card-hover)' : 'var(--bg-canvas)',
-                    border: `1px solid ${isSelected ? 'var(--border-accent)' : 'var(--border-subtle)'}`,
-                    cursor: 'pointer'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ width: '10px', height: '10px', background: q.color, borderRadius: '2px', flexShrink: 0 }} />
-                    <span style={{ fontSize: '11.5px', fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#0284c7' }}>
-                      {q.hash}
-                    </span>
-                  </div>
+                return (
+                  <div
+                    key={q.hash}
+                    onClick={() => setSelectedQueryHash(q.hash)}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '120px 220px 1fr 100px',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      background: isSelected ? 'var(--bg-card-hover)' : 'var(--bg-canvas)',
+                      border: `1px solid ${isSelected ? 'var(--border-accent)' : 'var(--border-subtle)'}`,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ width: '10px', height: '10px', background: q.color, borderRadius: '2px', flexShrink: 0 }} />
+                      <span style={{ fontSize: '11.5px', fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#0284c7' }}>
+                        {q.hash}
+                      </span>
+                    </div>
 
-                  <div style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={q.proc}>
-                    {q.proc}
-                  </div>
+                    <div style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={q.proc}>
+                      {q.proc}
+                    </div>
 
-                  <div style={{ position: 'relative', height: '14px', background: 'rgba(0,0,0,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${widthPct}%`, background: q.color, borderRadius: '2px', transition: 'width 0.2s ease' }} />
-                  </div>
+                    <div style={{ position: 'relative', height: '14px', background: 'rgba(0,0,0,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${widthPct}%`, background: q.color, borderRadius: '2px', transition: 'width 0.2s ease' }} />
+                    </div>
 
-                  <div style={{ textAlign: 'right', fontSize: '11.5px', fontWeight: 700, color: 'var(--text-main)' }}>
-                    {q.waitSec >= 10 ? q.waitSec.toFixed(1) : q.waitSec >= 1 ? q.waitSec.toFixed(2) : q.waitSec.toFixed(3)}s
+                    <div style={{ textAlign: 'right', fontSize: '11.5px', fontWeight: 700, color: 'var(--text-main)' }}>
+                      {q.waitSec >= 10 ? q.waitSec.toFixed(1) : q.waitSec >= 1 ? q.waitSec.toFixed(2) : q.waitSec.toFixed(3)}s
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1775,79 +1466,91 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
 
         {/* Tab 1: SQL Text Drawer */}
         {bottomDrawerTab === 'sqltext' && (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)' }}>
-                  SQL Statement (Hash: <code style={{ color: '#0284c7' }}>{activeSelectedQuery.hash}</code>)
-                </span>
-                <span className="badge badge-info">{activeSelectedQuery.proc}</span>
-              </div>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => handleCopySQL(activeSelectedQuery.text)}
-                  style={{ fontSize: '11px', padding: '2px 8px' }}
-                >
-                  {copiedSQL ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
-                  <span>{copiedSQL ? 'Copied' : 'Copy SQL'}</span>
-                </button>
-                {onNavigateTab && (
+          activeSelectedQuery ? (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)' }}>
+                    SQL Statement (Hash: <code style={{ color: '#0284c7' }}>{activeSelectedQuery.hash}</code>)
+                  </span>
+                  <span className="badge badge-info">{activeSelectedQuery.proc}</span>
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
                   <button
                     type="button"
-                    className="btn btn-ai btn-sm"
-                    onClick={() => onNavigateTab('advisor')}
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleCopySQL(activeSelectedQuery.text)}
                     style={{ fontSize: '11px', padding: '2px 8px' }}
                   >
-                    <Sparkles size={12} />
-                    <span>AI Optimize</span>
+                    {copiedSQL ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                    <span>{copiedSQL ? 'Copied' : 'Copy SQL'}</span>
                   </button>
-                )}
+                  {onNavigateTab && (
+                    <button
+                      type="button"
+                      className="btn btn-ai btn-sm"
+                      onClick={() => onNavigateTab('advisor')}
+                      style={{ fontSize: '11px', padding: '2px 8px' }}
+                    >
+                      <Sparkles size={12} />
+                      <span>AI Optimize</span>
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
 
-            <pre
-              style={{
-                background: 'var(--bg-canvas)',
-                color: 'var(--text-main)',
-                border: '1px solid var(--border-medium)',
-                borderRadius: '6px',
-                padding: '12px',
-                fontSize: '11.5px',
-                fontFamily: 'var(--font-mono)',
-                margin: 0,
-                maxHeight: '160px',
-                overflowY: 'auto',
-                whiteSpace: 'pre-wrap',
-                lineHeight: 1.5
-              }}
-            >
-              {activeSelectedQuery.text}
-            </pre>
-          </div>
+              <pre
+                style={{
+                  background: 'var(--bg-canvas)',
+                  color: 'var(--text-main)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: '6px',
+                  padding: '12px',
+                  fontSize: '11.5px',
+                  fontFamily: 'var(--font-mono)',
+                  margin: 0,
+                  maxHeight: '160px',
+                  overflowY: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  lineHeight: 1.5
+                }}
+              >
+                {activeSelectedQuery.text}
+              </pre>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '12px', background: 'var(--bg-canvas)', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+              No query currently selected. When queries with wait delays are detected, full SQL text will display here.
+            </div>
+          )
         )}
 
         {/* Tab 2: Resources Drawer */}
         {bottomDrawerTab === 'resources' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
-            <div style={{ background: 'var(--bg-canvas)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Database & Schema</div>
-              <strong style={{ fontSize: '13px', color: '#0284c7' }}>{activeSelectedQuery.db}</strong>
+          activeSelectedQuery ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+              <div style={{ background: 'var(--bg-canvas)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Database & Schema</div>
+                <strong style={{ fontSize: '13px', color: '#0284c7' }}>{activeSelectedQuery.db}</strong>
+              </div>
+              <div style={{ background: 'var(--bg-canvas)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Total Cumulative Wait</div>
+                <strong style={{ fontSize: '13px', color: '#e11d48' }}>{activeSelectedQuery.waitSec.toFixed(1)}s</strong>
+              </div>
+              <div style={{ background: 'var(--bg-canvas)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>CPU Execution Time</div>
+                <strong style={{ fontSize: '13px', color: '#10b981' }}>{activeSelectedQuery.cpuSec.toFixed(1)}s</strong>
+              </div>
+              <div style={{ background: 'var(--bg-canvas)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Logical Page Reads</div>
+                <strong style={{ fontSize: '13px', color: '#ca8a04' }}>{activeSelectedQuery.reads.toLocaleString()} pages</strong>
+              </div>
             </div>
-            <div style={{ background: 'var(--bg-canvas)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Total Cumulative Wait</div>
-              <strong style={{ fontSize: '13px', color: '#e11d48' }}>{activeSelectedQuery.waitSec.toFixed(1)}s</strong>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '12px', background: 'var(--bg-canvas)', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+              No resource telemetry available without an active query selection.
             </div>
-            <div style={{ background: 'var(--bg-canvas)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>CPU Execution Time</div>
-              <strong style={{ fontSize: '13px', color: '#10b981' }}>{activeSelectedQuery.cpuSec.toFixed(1)}s</strong>
-            </div>
-            <div style={{ background: 'var(--bg-canvas)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>Logical Page Reads</div>
-              <strong style={{ fontSize: '13px', color: '#ca8a04' }}>{activeSelectedQuery.reads.toLocaleString()} pages</strong>
-            </div>
-          </div>
+          )
         )}
 
         {/* Tab 3: Blocking Drawer */}
