@@ -16,6 +16,8 @@ export function DisconnectLiveDB():Promise<void>;
 
 export function GetAIAdvice(arg1:advisor.AIRequest):Promise<advisor.AIResponse>;
 
+export function GetAppTheme():Promise<string>;
+
 export function GetCurrentWindowsUser():Promise<main.WindowsUserInfo>;
 
 export function GetLiveActiveSessions(arg1:number):Promise<Array<livedb.ActiveSession>>;
@@ -28,6 +30,8 @@ export function GetLiveBufferPool(arg1:number):Promise<Array<livedb.BufferPoolCo
 
 export function GetLiveDBStatus():Promise<livedb.ConnectionStatus>;
 
+export function GetLiveDPAPerspective(arg1:string):Promise<Array<livedb.DPAPerspectiveItem>>;
+
 export function GetLiveDeadlocks(arg1:number):Promise<Array<livedb.LiveDeadlockReport>>;
 
 export function GetLiveDuplicateIndexes():Promise<Array<livedb.DuplicateIndex>>;
@@ -39,6 +43,8 @@ export function GetLiveIdleSessions(arg1:number):Promise<Array<livedb.IdleSessio
 export function GetLiveMissingIndexes(arg1:number):Promise<Array<livedb.LiveMissingIndex>>;
 
 export function GetLiveQueryStore(arg1:string,arg2:number):Promise<Array<livedb.QueryStoreEntry>>;
+
+export function GetLiveQueryStoreWindow(arg1:string,arg2:number,arg3:number):Promise<Array<livedb.QueryStoreEntry>>;
 
 export function GetLiveServerVitals():Promise<livedb.ServerVitals>;
 
@@ -65,6 +71,8 @@ export function OpenFilePicker():Promise<main.SelectedPlanFile>;
 export function ParsePlan(arg1:string,arg2:string):Promise<sqlplan.PlanAnalysis>;
 
 export function SaveDBConnection(arg1:configdb.DBConnectionProfile):Promise<configdb.DBConnectionProfile>;
+
+export function SetAppTheme(arg1:string):Promise<void>;
 
 export function SetDefaultDBConnection(arg1:string):Promise<void>;
 

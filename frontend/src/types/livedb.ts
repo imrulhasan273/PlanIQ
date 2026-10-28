@@ -321,5 +321,17 @@ export interface DBConnectionProfile {
   updatedAt?: string;
 }
 
+export interface DPAPerspectiveItem {
+  name: string;
+  secondary?: string;
+  sessionCount: number;
+  waitSec: number;
+  cpuSec: number;
+  execCount: number;
+  logicalReads: number;
+  writes: number;
+  percentage: number;
+}
+
 
 

@@ -627,15 +627,15 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Layers size={14} color="#38bdf8" />
-              <span style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0' }}>Interactive Dependency Graph</span>
+              <span className="deadlock-graph-section-title" style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0' }}>Interactive Dependency Graph</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '11px' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#34d399' }}>
-                <span style={{ width: '12px', height: '3px', background: '#34d399', borderRadius: '2px' }} />
+              <span className="deadlock-legend-owner" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#34d399' }}>
+                <span style={{ width: '12px', height: '3px', background: 'currentColor', borderRadius: '2px' }} />
                 Holds Lock (Owner)
               </span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#f43f5e' }}>
-                <span style={{ width: '12px', height: '3px', background: '#f43f5e', borderRadius: '2px', borderBottom: '1px dashed #f43f5e' }} />
+              <span className="deadlock-legend-waiter" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#f43f5e' }}>
+                <span style={{ width: '12px', height: '3px', background: 'currentColor', borderRadius: '2px', borderBottom: '1px dashed currentColor' }} />
                 Waiting (Blocked)
               </span>
             </div>
@@ -765,6 +765,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
               return (
                 <g
                   key={r.id}
+                  className={`deadlock-res-node ${isSelected ? 'is-selected' : ''}`}
                   transform={`translate(${pos.x - boxW / 2}, ${pos.y - boxH / 2})`}
                   onClick={() => {
                     setSelectedResourceId(r.id);
@@ -773,6 +774,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                   style={{ cursor: 'pointer' }}
                 >
                   <rect
+                    className="deadlock-res-box"
                     width={boxW}
                     height={boxH}
                     rx="8"
@@ -782,14 +784,16 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                     filter={isSelected ? 'url(#glow-cycle)' : undefined}
                   />
                   <rect
+                    className="deadlock-res-pill"
                     x="0"
                     y="0"
                     width={boxW}
                     height="18"
                     rx="8"
-                    fill="rgba(56, 189, 248, 0.12)"
+                    fill="rgba(56, 189, 248, 0.15)"
                   />
                   <text
+                    className="deadlock-res-pill-text"
                     x={boxW / 2}
                     y="13"
                     fill="#38bdf8"
@@ -801,6 +805,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                     🔒 {r.type.toUpperCase()} ({r.mode || 'X'})
                   </text>
                   <text
+                    className="deadlock-res-title"
                     x={boxW / 2}
                     y="32"
                     fill="#f8fafc"
@@ -811,9 +816,10 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                     {r.objectname ? r.objectname.split('.').pop() : 'Resource'}
                   </text>
                   <text
+                    className="deadlock-res-sub"
                     x={boxW / 2}
                     y="47"
-                    fill="#94a3b8"
+                    fill="#cbd5e1"
                     fontSize="9"
                     textAnchor="middle"
                   >
@@ -835,6 +841,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
               return (
                 <g
                   key={p.id}
+                  className={`deadlock-proc-node ${isVictim ? 'is-victim' : ''} ${isSelected ? 'is-selected' : ''}`}
                   transform={`translate(${pos.x - boxW / 2}, ${pos.y - boxH / 2})`}
                   onClick={() => {
                     setSelectedProcessId(p.id);
@@ -843,28 +850,31 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                   style={{ cursor: 'pointer' }}
                 >
                   <rect
+                    className="deadlock-proc-box"
                     width={boxW}
                     height={boxH}
                     rx="10"
-                    fill={isVictim ? 'rgba(244, 63, 94, 0.16)' : isSelected ? '#1e293b' : '#0f172a'}
-                    stroke={isVictim ? '#f43f5e' : isSelected ? '#38bdf8' : '#475569'}
+                    fill={isVictim ? (isSelected ? '#5c081e' : '#450a14') : isSelected ? '#1e293b' : '#0f172a'}
+                    stroke={isVictim ? (isSelected ? '#ff4d6d' : '#f43f5e') : isSelected ? '#38bdf8' : '#475569'}
                     strokeWidth={isSelected || isVictim ? '2.5' : '1.5'}
                     strokeDasharray={isVictim ? 'none' : undefined}
                     filter={isVictim ? 'url(#glow-cycle)' : undefined}
                   />
                   {/* Top Pill / Badge */}
                   <rect
+                    className="deadlock-proc-pill"
                     x="0"
                     y="0"
                     width={boxW}
                     height="20"
                     rx="10"
-                    fill={isVictim ? 'rgba(244, 63, 94, 0.35)' : 'rgba(56, 189, 248, 0.15)'}
+                    fill={isVictim ? '#881337' : 'rgba(56, 189, 248, 0.15)'}
                   />
                   <text
+                    className="deadlock-proc-pill-text"
                     x={boxW / 2}
                     y="14"
-                    fill={isVictim ? '#fda4af' : '#38bdf8'}
+                    fill={isVictim ? '#ffffff' : '#38bdf8'}
                     fontSize="10"
                     fontWeight="800"
                     textAnchor="middle"
@@ -872,9 +882,10 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                     {isVictim ? '💀 VICTIM (SPID ' + p.spid + ')' : 'SPID #' + p.spid + ' (' + (p.status || 'Active') + ')'}
                   </text>
                   <text
+                    className="deadlock-proc-title"
                     x={boxW / 2}
                     y="36"
-                    fill="#fff"
+                    fill="#ffffff"
                     fontSize="11.5"
                     fontWeight="700"
                     textAnchor="middle"
@@ -882,9 +893,10 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                     {p.clientapp || p.loginname || 'Process'}
                   </text>
                   <text
+                    className="deadlock-proc-sub"
                     x={boxW / 2}
                     y="53"
-                    fill="#94a3b8"
+                    fill={isVictim ? '#fecdd3' : '#cbd5e1'}
                     fontSize="9.5"
                     textAnchor="middle"
                   >
@@ -895,7 +907,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
             })}
           </svg>
 
-          <div style={{ marginTop: 'auto', paddingTop: '10px', display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b' }}>
+          <div className="deadlock-graph-footer-hint" style={{ marginTop: 'auto', paddingTop: '10px', display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b' }}>
             <span>Click any Process or Lock node to inspect full metadata & query text</span>
             <span>Cycle Detection: Directed Graph BFS/DFS</span>
           </div>
@@ -914,6 +926,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                 </div>
                 {selectedProcess.isVictim && (
                   <span
+                    className="deadlock-victim-badge"
                     style={{
                       background: 'rgba(244, 63, 94, 0.2)',
                       color: '#f43f5e',
@@ -934,6 +947,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
 
               {/* Meta Grid */}
               <div
+                className="deadlock-meta-grid"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '1fr 1fr',

@@ -22,6 +22,10 @@ export function GetAIAdvice(arg1) {
   return window['go']['main']['App']['GetAIAdvice'](arg1);
 }
 
+export function GetAppTheme() {
+  return window['go']['main']['App']['GetAppTheme']();
+}
+
 export function GetCurrentWindowsUser() {
   return window['go']['main']['App']['GetCurrentWindowsUser']();
 }
@@ -46,6 +50,10 @@ export function GetLiveDBStatus() {
   return window['go']['main']['App']['GetLiveDBStatus']();
 }
 
+export function GetLiveDPAPerspective(arg1) {
+  return window['go']['main']['App']['GetLiveDPAPerspective'](arg1);
+}
+
 export function GetLiveDeadlocks(arg1) {
   return window['go']['main']['App']['GetLiveDeadlocks'](arg1);
 }
@@ -68,6 +76,10 @@ export function GetLiveMissingIndexes(arg1) {
 
 export function GetLiveQueryStore(arg1, arg2) {
   return window['go']['main']['App']['GetLiveQueryStore'](arg1, arg2);
+}
+
+export function GetLiveQueryStoreWindow(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetLiveQueryStoreWindow'](arg1, arg2, arg3);
 }
 
 export function GetLiveServerVitals() {
@@ -120,6 +132,10 @@ export function ParsePlan(arg1, arg2) {
 
 export function SaveDBConnection(arg1) {
   return window['go']['main']['App']['SaveDBConnection'](arg1);
+}
+
+export function SetAppTheme(arg1) {
+  return window['go']['main']['App']['SetAppTheme'](arg1);
 }
 
 export function SetDefaultDBConnection(arg1) {

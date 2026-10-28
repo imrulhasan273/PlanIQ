@@ -19,7 +19,16 @@ import { PlanAnalysis, StatementAnalysis } from './types/plan';
 import { DeadlockGraph } from './types/deadlock';
 import { ConnectionStatus, WindowsUserInfo } from './types/livedb';
 import { SAMPLE_DEADLOCK_XDL, isDeadlockXML, parseDeadlockXML, readFileAsDecodedText } from './utils/deadlockParser';
-import { LoadSamplePlan, OpenFileAndParse, OpenFilePicker, ParsePlan, GetLiveDBStatus, GetCurrentWindowsUser } from '../wailsjs/go/main/App';
+import {
+  LoadSamplePlan,
+  OpenFileAndParse,
+  OpenFilePicker,
+  ParsePlan,
+  GetLiveDBStatus,
+  GetCurrentWindowsUser,
+  GetAppTheme,
+  SetAppTheme,
+} from '../wailsjs/go/main/App';
 import { exportDiagnosticReportHTML } from './utils/reportExporter';
 import { parseShowPlanXMLClient } from './utils/clientPlanParser';
 import { sanitizePlan } from './utils/sanitizePlan';
@@ -56,16 +65,38 @@ export function App() {
   const [deadlockGraphs, setDeadlockGraphs] = useState<DeadlockGraph[]>([]);
   const [windowsUser, setWindowsUser] = useState<WindowsUserInfo | null>(null);
 
-  // Theme: default dark, persist to localStorage
+  // Theme: default dark, persist to SQLite and localStorage
   const [isDark, setIsDark] = useState<boolean>(() => {
     const saved = localStorage.getItem('planiq_theme');
     return saved !== null ? saved === 'dark' : true;
   });
 
+  // Load authoritative theme preference from SQLite DB on startup
+  useEffect(() => {
+    GetAppTheme()
+      .then((theme) => {
+        if (theme === 'light') {
+          setIsDark(false);
+          localStorage.setItem('planiq_theme', 'light');
+        } else if (theme === 'dark') {
+          setIsDark(true);
+          localStorage.setItem('planiq_theme', 'dark');
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to load theme from SQLite config DB:', err);
+      });
+  }, []);
+
   const handleToggleTheme = () => {
     setIsDark((prev) => {
       const next = !prev;
-      localStorage.setItem('planiq_theme', next ? 'dark' : 'light');
+      const themeStr = next ? 'dark' : 'light';
+      localStorage.setItem('planiq_theme', themeStr);
+      // Persist to SQLite DB so reopening the app preserves the theme
+      SetAppTheme(themeStr).catch((err) => {
+        console.warn('Failed to save theme to SQLite config DB:', err);
+      });
       return next;
     });
   };

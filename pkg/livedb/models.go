@@ -322,3 +322,16 @@ type EngineInternalsReport struct {
 	NUMANodes              []NUMANodeInfo        `json:"numaNodes"`
 }
 
+// DPAPerspectiveItem represents real aggregated telemetry for SolarWinds DPA perspective views
+type DPAPerspectiveItem struct {
+	Name         string  `json:"name"`
+	Secondary    string  `json:"secondary"`
+	SessionCount int     `json:"sessionCount"`
+	WaitSec      float64 `json:"waitSec"`
+	CPUSec       float64 `json:"cpuSec"`
+	ExecCount    int64   `json:"execCount"`
+	LogicalReads int64   `json:"logicalReads"`
+	Writes       int64   `json:"writes"`
+	Percentage   float64 `json:"percentage"`
+}
+

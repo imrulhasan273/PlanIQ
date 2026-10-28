@@ -595,8 +595,13 @@ func (c *Client) GetSessionPlan(ctx context.Context, planHandleHex string) (stri
 	return planXML.String, nil
 }
 
-// GetQueryStoreTop queries top queries by CPU, duration, or reads from Query Store
+// GetQueryStoreTop queries top queries by CPU, duration, or reads from Query Store (default 24h)
 func (c *Client) GetQueryStoreTop(ctx context.Context, orderBy string, topN int) ([]QueryStoreEntry, error) {
+	return c.GetQueryStoreTopWindow(ctx, orderBy, topN, 24)
+}
+
+// GetQueryStoreTopWindow queries top queries by CPU, duration, or reads within a specified hours window
+func (c *Client) GetQueryStoreTopWindow(ctx context.Context, orderBy string, topN int, hours int) ([]QueryStoreEntry, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -610,6 +615,9 @@ func (c *Client) GetQueryStoreTop(ctx context.Context, orderBy string, topN int)
 
 	if topN <= 0 || topN > 50 {
 		topN = 15
+	}
+	if hours <= 0 {
+		hours = 24
 	}
 
 	var sortCol string
@@ -648,55 +656,408 @@ func (c *Client) GetQueryStoreTop(ctx context.Context, orderBy string, topN int)
 	JOIN sys.query_store_plan p ON q.query_id = p.query_id
 	JOIN sys.query_store_query_text qt ON q.query_text_id = qt.query_text_id
 	JOIN sys.query_store_runtime_stats rs ON p.plan_id = rs.plan_id
-	WHERE rs.last_execution_time >= DATEADD(HOUR, -24, GETUTCDATE())
+	WHERE rs.last_execution_time >= DATEADD(HOUR, -%d, GETUTCDATE())
 	GROUP BY q.query_id, p.plan_id, qt.query_sql_text, p.query_plan
 	ORDER BY %s;
-	`, topN, sortCol)
+	`, topN, hours, sortCol)
 
 	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	rows, err := c.db.QueryContext(queryCtx, sqlQuery)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query Query Store: %w", err)
-	}
-	defer rows.Close()
-
 	var entries []QueryStoreEntry
-	for rows.Next() {
-		var e QueryStoreEntry
-		var qText, planXML sql.NullString
 
-		err := rows.Scan(
-			&e.QueryID,
-			&e.PlanID,
-			&qText,
-			&e.ExecutionCount,
-			&e.TotalCPUMs,
-			&e.AvgCPUMs,
-			&e.TotalDurationMs,
-			&e.AvgDurationMs,
-			&e.TotalLogicalReads,
-			&e.AvgLogicalReads,
-			&e.TotalPhysicalReads,
-			&e.AvgPhysicalReads,
-			&e.TotalSpillsMB,
-			&e.LastExecutionTime,
-			&planXML,
-		)
-		if err != nil {
-			continue
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var e QueryStoreEntry
+			var qText, planXML sql.NullString
+
+			err := rows.Scan(
+				&e.QueryID,
+				&e.PlanID,
+				&qText,
+				&e.ExecutionCount,
+				&e.TotalCPUMs,
+				&e.AvgCPUMs,
+				&e.TotalDurationMs,
+				&e.AvgDurationMs,
+				&e.TotalLogicalReads,
+				&e.AvgLogicalReads,
+				&e.TotalPhysicalReads,
+				&e.AvgPhysicalReads,
+				&e.TotalSpillsMB,
+				&e.LastExecutionTime,
+				&planXML,
+			)
+			if err != nil {
+				continue
+			}
+			if qText.Valid {
+				e.QueryText = strings.TrimSpace(qText.String)
+			}
+			if planXML.Valid {
+				e.PlanXML = planXML.String
+			}
+			entries = append(entries, e)
 		}
-		if qText.Valid {
-			e.QueryText = strings.TrimSpace(qText.String)
+	}
+
+	// If Query Store returned 0 rows or is not enabled, seamlessly pull real queries from DMV plan cache (sys.dm_exec_query_stats)
+	if len(entries) == 0 {
+		dmvEntries, dmvErr := c.getTopQueriesFromDMV(ctx, orderBy, topN, hours)
+		if dmvErr == nil && len(dmvEntries) > 0 {
+			return dmvEntries, nil
 		}
-		if planXML.Valid {
-			e.PlanXML = planXML.String
-		}
-		entries = append(entries, e)
 	}
 
 	return entries, nil
+}
+
+// getTopQueriesFromDMV extracts real queries directly from sys.dm_exec_query_stats
+func (c *Client) getTopQueriesFromDMV(ctx context.Context, orderBy string, topN int, hours int) ([]QueryStoreEntry, error) {
+	if hours <= 0 {
+		hours = 24
+	}
+	var dmvSort string
+	switch strings.ToLower(orderBy) {
+	case "cpu":
+		dmvSort = "qs.total_worker_time DESC"
+	case "duration":
+		dmvSort = "qs.total_elapsed_time DESC"
+	case "reads":
+		dmvSort = "qs.total_logical_reads DESC"
+	case "spills":
+		dmvSort = "qs.total_logical_reads DESC"
+	default:
+		dmvSort = "qs.total_worker_time DESC"
+	}
+
+	// Window-filtered query
+	dmvQuery := fmt.Sprintf(`
+	SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+	SELECT TOP %d
+		ABS(CAST(CHECKSUM(qs.query_hash) AS BIGINT)) AS query_id,
+		0 AS plan_id,
+		ISNULL(SUBSTRING(st.text, (qs.statement_start_offset/2)+1, 
+			((CASE qs.statement_end_offset
+			  WHEN -1 THEN DATALENGTH(st.text)
+			  ELSE qs.statement_end_offset
+			  END - qs.statement_start_offset)/2) + 1), st.text) AS query_sql_text,
+		qs.execution_count AS total_executions,
+		qs.total_worker_time / 1000.0 AS total_cpu_ms,
+		(qs.total_worker_time / 1000.0) / NULLIF(qs.execution_count, 0) AS avg_cpu_ms,
+		qs.total_elapsed_time / 1000.0 AS total_duration_ms,
+		(qs.total_elapsed_time / 1000.0) / NULLIF(qs.execution_count, 0) AS avg_duration_ms,
+		qs.total_logical_reads AS total_logical_reads,
+		qs.total_logical_reads / NULLIF(qs.execution_count, 0) AS avg_logical_reads,
+		qs.total_physical_reads AS total_physical_reads,
+		qs.total_physical_reads / NULLIF(qs.execution_count, 0) AS avg_physical_reads,
+		0.0 AS total_spills_mb,
+		CONVERT(VARCHAR(19), qs.last_execution_time, 120) AS last_execution_time
+	FROM sys.dm_exec_query_stats qs
+	CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+	WHERE st.text IS NOT NULL AND st.text NOT LIKE '%%%%dm_exec_query_stats%%%%'
+	  AND qs.last_execution_time >= DATEADD(HOUR, -%d, GETDATE())
+	ORDER BY %s;
+	`, topN, hours, dmvSort)
+
+	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+
+	rows, err := c.db.QueryContext(queryCtx, dmvQuery)
+	var entries []QueryStoreEntry
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var e QueryStoreEntry
+			var qText sql.NullString
+			if err := rows.Scan(
+				&e.QueryID,
+				&e.PlanID,
+				&qText,
+				&e.ExecutionCount,
+				&e.TotalCPUMs,
+				&e.AvgCPUMs,
+				&e.TotalDurationMs,
+				&e.AvgDurationMs,
+				&e.TotalLogicalReads,
+				&e.AvgLogicalReads,
+				&e.TotalPhysicalReads,
+				&e.AvgPhysicalReads,
+				&e.TotalSpillsMB,
+				&e.LastExecutionTime,
+			); err == nil {
+				if qText.Valid {
+					e.QueryText = strings.TrimSpace(qText.String)
+				}
+				entries = append(entries, e)
+			}
+		}
+	}
+
+	// If no queries returned for the window, fall back to recent plan cache
+	if len(entries) == 0 {
+		fallbackQuery := fmt.Sprintf(`
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT TOP %d
+			ABS(CAST(CHECKSUM(qs.query_hash) AS BIGINT)) AS query_id,
+			0 AS plan_id,
+			ISNULL(SUBSTRING(st.text, (qs.statement_start_offset/2)+1, 
+				((CASE qs.statement_end_offset
+				  WHEN -1 THEN DATALENGTH(st.text)
+				  ELSE qs.statement_end_offset
+				  END - qs.statement_start_offset)/2) + 1), st.text) AS query_sql_text,
+			qs.execution_count AS total_executions,
+			qs.total_worker_time / 1000.0 AS total_cpu_ms,
+			(qs.total_worker_time / 1000.0) / NULLIF(qs.execution_count, 0) AS avg_cpu_ms,
+			qs.total_elapsed_time / 1000.0 AS total_duration_ms,
+			(qs.total_elapsed_time / 1000.0) / NULLIF(qs.execution_count, 0) AS avg_duration_ms,
+			qs.total_logical_reads AS total_logical_reads,
+			qs.total_logical_reads / NULLIF(qs.execution_count, 0) AS avg_logical_reads,
+			qs.total_physical_reads AS total_physical_reads,
+			qs.total_physical_reads / NULLIF(qs.execution_count, 0) AS avg_physical_reads,
+			0.0 AS total_spills_mb,
+			CONVERT(VARCHAR(19), qs.last_execution_time, 120) AS last_execution_time
+		FROM sys.dm_exec_query_stats qs
+		CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+		WHERE st.text IS NOT NULL AND st.text NOT LIKE '%%%%dm_exec_query_stats%%%%'
+		ORDER BY %s;
+		`, topN, dmvSort)
+
+		fbRows, fbErr := c.db.QueryContext(queryCtx, fallbackQuery)
+		if fbErr == nil {
+			defer fbRows.Close()
+			for fbRows.Next() {
+				var e QueryStoreEntry
+				var qText sql.NullString
+				if err := fbRows.Scan(
+					&e.QueryID,
+					&e.PlanID,
+					&qText,
+					&e.ExecutionCount,
+					&e.TotalCPUMs,
+					&e.AvgCPUMs,
+					&e.TotalDurationMs,
+					&e.AvgDurationMs,
+					&e.TotalLogicalReads,
+					&e.AvgLogicalReads,
+					&e.TotalPhysicalReads,
+					&e.AvgPhysicalReads,
+					&e.TotalSpillsMB,
+					&e.LastExecutionTime,
+				); err == nil {
+					if qText.Valid {
+						e.QueryText = strings.TrimSpace(qText.String)
+					}
+					entries = append(entries, e)
+				}
+			}
+		}
+	}
+
+	return entries, nil
+}
+
+// GetLiveDPAPerspective extracts real telemetry for Programs, Databases, Machines, Users, Files, Drives
+func (c *Client) GetLiveDPAPerspective(ctx context.Context, perspective string) ([]DPAPerspectiveItem, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.status.Connected {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	if c.status.IsDemo || c.db == nil {
+		return getDemoDPAPerspective(perspective), nil
+	}
+
+	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+
+	var sqlQuery string
+	switch strings.ToLower(perspective) {
+	case "programs":
+		sqlQuery = `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT TOP 20
+			ISNULL(NULLIF(s.program_name, ''), 'Unknown Application') AS item_name,
+			'' AS secondary,
+			COUNT(s.session_id) AS session_count,
+			CAST(ISNULL(SUM(CAST(s.total_elapsed_time AS BIGINT)), 0) / 1000.0 AS FLOAT) AS wait_sec,
+			CAST(ISNULL(SUM(CAST(s.cpu_time AS BIGINT)), 0) / 1000.0 AS FLOAT) AS cpu_sec,
+			ISNULL(SUM(CAST(s.logical_reads AS BIGINT)), 0) AS logical_reads,
+			ISNULL(SUM(CAST(s.writes AS BIGINT)), 0) AS writes
+		FROM sys.dm_exec_sessions s
+		WHERE s.is_user_process = 1
+		GROUP BY s.program_name
+		ORDER BY wait_sec DESC, cpu_sec DESC;
+		`
+	case "dbusers":
+		sqlQuery = `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT TOP 20
+			ISNULL(NULLIF(s.login_name, ''), 'Unknown Login') AS item_name,
+			'' AS secondary,
+			COUNT(s.session_id) AS session_count,
+			CAST(ISNULL(SUM(CAST(s.total_elapsed_time AS BIGINT)), 0) / 1000.0 AS FLOAT) AS wait_sec,
+			CAST(ISNULL(SUM(CAST(s.cpu_time AS BIGINT)), 0) / 1000.0 AS FLOAT) AS cpu_sec,
+			ISNULL(SUM(CAST(s.logical_reads AS BIGINT)), 0) AS logical_reads,
+			ISNULL(SUM(CAST(s.writes AS BIGINT)), 0) AS writes
+		FROM sys.dm_exec_sessions s
+		WHERE s.is_user_process = 1
+		GROUP BY s.login_name
+		ORDER BY wait_sec DESC, cpu_sec DESC;
+		`
+	case "machines":
+		sqlQuery = `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT TOP 20
+			ISNULL(NULLIF(s.host_name, ''), 'Localhost') AS item_name,
+			'' AS secondary,
+			COUNT(s.session_id) AS session_count,
+			CAST(ISNULL(SUM(CAST(s.total_elapsed_time AS BIGINT)), 0) / 1000.0 AS FLOAT) AS wait_sec,
+			CAST(ISNULL(SUM(CAST(s.cpu_time AS BIGINT)), 0) / 1000.0 AS FLOAT) AS cpu_sec,
+			ISNULL(SUM(CAST(s.logical_reads AS BIGINT)), 0) AS logical_reads,
+			ISNULL(SUM(CAST(s.writes AS BIGINT)), 0) AS writes
+		FROM sys.dm_exec_sessions s
+		WHERE s.is_user_process = 1
+		GROUP BY s.host_name
+		ORDER BY wait_sec DESC, cpu_sec DESC;
+		`
+	case "databases":
+		sqlQuery = `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT TOP 20
+			d.name AS item_name,
+			'' AS secondary,
+			COUNT(s.session_id) AS session_count,
+			CAST(ISNULL(SUM(vfs.io_stall), 0) / 1000.0 AS FLOAT) AS wait_sec,
+			CAST(ISNULL(SUM(CAST(s.cpu_time AS BIGINT)), 0) / 1000.0 AS FLOAT) AS cpu_sec,
+			ISNULL(SUM(CAST(s.logical_reads AS BIGINT)), 0) AS logical_reads,
+			ISNULL(SUM(CAST(s.writes AS BIGINT)), 0) AS writes
+		FROM sys.databases d
+		LEFT JOIN sys.dm_exec_sessions s ON s.database_id = d.database_id AND s.is_user_process = 1
+		LEFT JOIN sys.dm_io_virtual_file_stats(NULL, NULL) vfs ON vfs.database_id = d.database_id
+		GROUP BY d.name
+		ORDER BY wait_sec DESC, session_count DESC;
+		`
+	case "files":
+		sqlQuery = `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT TOP 20
+			mf.name + ' (' + DB_NAME(mf.database_id) + ')' AS item_name,
+			mf.physical_name AS secondary,
+			1 AS session_count,
+			CAST(ISNULL(vfs.io_stall, 0) / 1000.0 AS FLOAT) AS wait_sec,
+			CAST(ISNULL(vfs.io_stall_read_ms, 0) / 1000.0 AS FLOAT) AS cpu_sec,
+			ISNULL(vfs.num_of_reads, 0) AS logical_reads,
+			ISNULL(vfs.num_of_writes, 0) AS writes
+		FROM sys.dm_io_virtual_file_stats(NULL, NULL) vfs
+		JOIN sys.master_files mf ON vfs.database_id = mf.database_id AND vfs.file_id = mf.file_id
+		ORDER BY vfs.io_stall DESC;
+		`
+	case "drives":
+		sqlQuery = `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT TOP 10
+			UPPER(SUBSTRING(mf.physical_name, 1, 2)) AS item_name,
+			'' AS secondary,
+			COUNT(DISTINCT mf.database_id) AS session_count,
+			CAST(ISNULL(SUM(vfs.io_stall), 0) / 1000.0 AS FLOAT) AS wait_sec,
+			CAST(ISNULL(SUM(vfs.io_stall_read_ms), 0) / 1000.0 AS FLOAT) AS cpu_sec,
+			ISNULL(SUM(vfs.num_of_reads), 0) AS logical_reads,
+			ISNULL(SUM(vfs.num_of_writes), 0) AS writes
+		FROM sys.dm_io_virtual_file_stats(NULL, NULL) vfs
+		JOIN sys.master_files mf ON vfs.database_id = mf.database_id AND vfs.file_id = mf.file_id
+		WHERE mf.physical_name LIKE '[A-Za-z]:%'
+		GROUP BY UPPER(SUBSTRING(mf.physical_name, 1, 2))
+		ORDER BY wait_sec DESC;
+		`
+	case "sessions":
+		sqlQuery = `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT TOP 25
+			'SPID #' + CAST(s.session_id AS VARCHAR(10)) + ' (' + ISNULL(NULLIF(s.login_name, ''), 'Session') + ')' AS item_name,
+			ISNULL(s.program_name, '') AS secondary,
+			1 AS session_count,
+			CAST(ISNULL(r.wait_time, 0) / 1000.0 AS FLOAT) AS wait_sec,
+			CAST(ISNULL(s.cpu_time, 0) / 1000.0 AS FLOAT) AS cpu_sec,
+			ISNULL(s.logical_reads, 0) AS logical_reads,
+			ISNULL(s.writes, 0) AS writes
+		FROM sys.dm_exec_sessions s
+		LEFT JOIN sys.dm_exec_requests r ON s.session_id = r.session_id
+		WHERE s.is_user_process = 1
+		ORDER BY wait_sec DESC, s.cpu_time DESC;
+		`
+	case "blockers":
+		sqlQuery = `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT TOP 25
+			'Blocker SPID #' + CAST(wt.blocking_session_id AS VARCHAR(10)) + ' (Blocking SPID #' + CAST(wt.session_id AS VARCHAR(10)) + ')' AS item_name,
+			ISNULL(wt.wait_type, 'LCK') AS secondary,
+			1 AS session_count,
+			CAST(ISNULL(wt.wait_duration_ms, 0) / 1000.0 AS FLOAT) AS wait_sec,
+			0.0 AS cpu_sec,
+			0 AS logical_reads,
+			0 AS writes
+		FROM sys.dm_os_waiting_tasks wt
+		WHERE wt.blocking_session_id IS NOT NULL AND wt.blocking_session_id != wt.session_id
+		ORDER BY wt.wait_duration_ms DESC;
+		`
+	case "plans":
+		sqlQuery = `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT TOP 25
+			'Plan 0x' + SUBSTRING(CONVERT(VARCHAR(64), qs.plan_handle, 1), 3, 10) + ' (' + ISNULL(SUBSTRING(st.text, 1, 28), 'Query') + ')' AS item_name,
+			ISNULL(DB_NAME(st.dbid), '') AS secondary,
+			CAST(qs.execution_count AS INT) AS session_count,
+			CAST(ISNULL(qs.total_elapsed_time - qs.total_worker_time, 0) / 1000.0 AS FLOAT) AS wait_sec,
+			CAST(ISNULL(qs.total_worker_time, 0) / 1000.0 AS FLOAT) AS cpu_sec,
+			ISNULL(qs.total_logical_reads, 0) AS logical_reads,
+			ISNULL(qs.total_physical_reads, 0) AS writes
+		FROM sys.dm_exec_query_stats qs
+		CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+		ORDER BY wait_sec DESC;
+		`
+	default:
+		return nil, fmt.Errorf("unsupported perspective: %s", perspective)
+	}
+
+	rows, err := c.db.QueryContext(queryCtx, sqlQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query perspective %s: %w", perspective, err)
+	}
+	defer rows.Close()
+
+	var items []DPAPerspectiveItem
+	var totalWait float64
+	for rows.Next() {
+		var item DPAPerspectiveItem
+		if err := rows.Scan(
+			&item.Name,
+			&item.Secondary,
+			&item.SessionCount,
+			&item.WaitSec,
+			&item.CPUSec,
+			&item.LogicalReads,
+			&item.Writes,
+		); err != nil {
+			continue
+		}
+		totalWait += item.WaitSec
+		items = append(items, item)
+	}
+
+	for i := range items {
+		if totalWait > 0 {
+			items[i].Percentage = (items[i].WaitSec / totalWait) * 100.0
+		} else {
+			items[i].Percentage = 0.0
+		}
+	}
+
+	return items, nil
 }
 
 var (
@@ -1061,8 +1422,26 @@ func (c *Client) GetWaitStats(ctx context.Context, limit int) ([]LiveWaitStat, e
 			'CLR_AUTO_EVENT','DISPATCHER_QUEUE_SEMAPHORE','FT_IFTS_SCHEDULER_IDLE_WAIT',
 			'XE_DISPATCHER_WAIT','XE_DISPATCHER_JOIN','SQLTRACE_INCREMENTAL_FLUSH_SLEEP',
 			'DIRTY_PAGE_POLL','HADR_FILESTREAM_IOMGR_IOCOMPLETION','SP_SERVER_DIAGNOSTICS_SLEEP',
-			'QDS_PERSIST_TASK_MAIN_LOOP_SLEEP','QDS_CLEANUP_STALE_QUERIES_TASK_MAIN_LOOP_SLEEP'
-		) AND wait_time_ms > 100
+			'QDS_PERSIST_TASK_MAIN_LOOP_SLEEP','QDS_CLEANUP_STALE_QUERIES_TASK_MAIN_LOOP_SLEEP',
+			'QDS_SHUTDOWN_QUEUE','VDI_CLIENT_OTHER','SOS_WORK_DISPATCHER',
+			'HADR_WORK_QUEUE','BROKER_TRANSMITTER','HADR_NOTIFICATION_DEQUEUE',
+			'PREEMPTIVE_XE_DISPATCHER','PREEMPTIVE_XE_GETTARGETSTATE','HADR_CLUSAPI_CALL',
+			'HADR_TIMER_TASK','QDS_ASYNC_QUEUE','ONDEMAND_TASK_QUEUE',
+			'PVS_PREALLOCATE','BROKER_EVENTHANDLER','BROKER_RECEIVE_WAITFOR',
+			'SLEEP_BPOOL_FLUSH','SOS_PHYS_PAGE_CACHE','PARALLEL_REDO_WORKER_WAIT_WORK',
+			'PARALLEL_REDO_FLOW_CONTROL','UCS_SESSION_REGISTRATION','SERVER_IDLE_CHECK',
+			'REDO_THREAD_PENDING_WORK','PREEMPTIVE_HADR_LEASE_MECHANISM',
+			'PREEMPTIVE_SP_SERVER_DIAGNOSTICS','PREEMPTIVE_OS_AUTHENTICATIONOPS',
+			'PREEMPTIVE_OS_GENERICOPS','PREEMPTIVE_OS_QUERYREGISTRY','PREEMPTIVE_XE_CALLBACKEXECUTE',
+			'STARTUP_DEPENDENCY_MANAGER','WAIT_FOR_RESULTS'
+		)
+		AND wait_type NOT LIKE 'SLEEP_%%'
+		AND wait_type NOT LIKE 'XE_%%'
+		AND wait_type NOT LIKE 'BROKER_%%'
+		AND wait_type NOT LIKE 'FT_%%'
+		AND wait_type NOT LIKE 'HADR_NOTIFICATION%%'
+		AND wait_type NOT LIKE 'PREEMPTIVE_XE_%%'
+		AND wait_time_ms > 100
 	),
 	TotalWait AS (
 		SELECT CAST(NULLIF(SUM(wait_time_ms), 0) AS FLOAT) AS total_ms FROM FilteredWaits

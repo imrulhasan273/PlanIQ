@@ -186,10 +186,22 @@ func (a *App) GetLiveSessionPlan(planHandleHex string) (string, error) {
 	return client.GetSessionPlan(a.ctx, planHandleHex)
 }
 
-// GetLiveQueryStore pulls top resource-consuming queries from Query Store
+// GetLiveQueryStore pulls top resource-consuming queries from Query Store (default 24h)
 func (a *App) GetLiveQueryStore(orderBy string, topN int) ([]livedb.QueryStoreEntry, error) {
 	client := livedb.GetClient()
 	return client.GetQueryStoreTop(a.ctx, orderBy, topN)
+}
+
+// GetLiveQueryStoreWindow pulls top resource-consuming queries within a specific hours window
+func (a *App) GetLiveQueryStoreWindow(orderBy string, topN int, hours int) ([]livedb.QueryStoreEntry, error) {
+	client := livedb.GetClient()
+	return client.GetQueryStoreTopWindow(a.ctx, orderBy, topN, hours)
+}
+
+// GetLiveDPAPerspective returns real server telemetry for SolarWinds DPA perspective tabs
+func (a *App) GetLiveDPAPerspective(perspective string) ([]livedb.DPAPerspectiveItem, error) {
+	client := livedb.GetClient()
+	return client.GetLiveDPAPerspective(a.ctx, perspective)
 }
 
 // GetLiveDeadlocks fetches deadlocks from system_health ring buffer
@@ -322,6 +334,24 @@ func (a *App) SetDefaultDBConnection(id string) error {
 		return err
 	}
 	return store.SetDefaultDBConnection(id)
+}
+
+// GetAppTheme retrieves the persisted theme ('dark' or 'light') from SQLite
+func (a *App) GetAppTheme() (string, error) {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return "dark", err
+	}
+	return store.GetTheme()
+}
+
+// SetAppTheme persists the chosen theme ('dark' or 'light') into SQLite
+func (a *App) SetAppTheme(theme string) error {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return err
+	}
+	return store.SetTheme(theme)
 }
 
 // TestDBConnection validates connection parameters against SQL Server without mutating current app state

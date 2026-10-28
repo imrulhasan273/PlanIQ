@@ -73,6 +73,7 @@ import {
   GetRadarPagePollingConfig,
   SetRadarPagePolling
 } from '../../wailsjs/go/main/App';
+import { DPAWaitAnalyzer } from './DPAWaitAnalyzer';
 
 interface LiveRadarTabProps {
   status: ConnectionStatus | null;
@@ -549,6 +550,39 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             setWaitHistory(hist || []);
             if (hist && hist.length > 0 && !selectedHistoryPoint) {
               setSelectedHistoryPoint(hist[hist.length - 1]);
+            }
+          }
+          // Preload Real SQL Queries, Wait Stats and Sessions for DPA Response Time Analyzer
+          if (app.GetLiveQueryStore) {
+            try {
+              const qs = await app.GetLiveQueryStore(qsOrderBy, 25);
+              if (qs && qs.length > 0) setQueryStoreEntries(qs);
+            } catch (qsErr) {
+              console.warn('[DPA] Preload query store info:', qsErr);
+            }
+          }
+          if (app.GetLiveWaitStats) {
+            try {
+              const w = await app.GetLiveWaitStats(50);
+              if (w && w.length > 0) setWaitStats(w);
+            } catch (wErr) {
+              console.warn('[DPA] Preload wait stats info:', wErr);
+            }
+          }
+          if (app.GetLiveActiveSessions) {
+            try {
+              const res = await app.GetLiveActiveSessions(activeLimit);
+              if (res && res.length > 0) setSessions(res);
+            } catch (sErr) {
+              console.warn('[DPA] Preload sessions info:', sErr);
+            }
+          }
+          if (app.GetLiveBlockingSessions) {
+            try {
+              const blk = await app.GetLiveBlockingSessions();
+              if (blk) setBlockingSessions(blk);
+            } catch (bErr) {
+              console.warn('[DPA] Preload blocking info:', bErr);
             }
           }
         } else if (activeSubTab === 'blocking') {
@@ -1948,16 +1982,17 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                   </button>
                 )}
 
-                {/* 3. Wait Trend */}
+                {/* 3. DPA Wait & Timeslice Response Time */}
                 {(radarCategory === 'all' || radarCategory === 'waits') && (
                   <button
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'waithistory' ? 'active' : ''}`}
                     onClick={() => setActiveSubTab('waithistory')}
-                    title="SolarWinds DPA Wait Trend & Anomaly Stacked Bar Chart"
+                    title="SolarWinds DPA Response Time Analysis (Timeslice & Top Waits)"
                   >
                     <BarChart3 size={12} className="radar-subnav-icon" color="#10b981" />
-                    <span>Wait Trend</span>
+                    <span>DPA Response Time</span>
+                    <span className="badge badge-info" style={{ fontSize: '9px', padding: '1px 5px', marginLeft: '3px' }}>DPA</span>
                     {pagePollingConfig['waithistory'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
                   </button>
                 )}
@@ -2943,191 +2978,22 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
       )}
 
       {/* ========================================================
-          PAGE: SOLARWINDS WAIT TREND STACKED BAR CHART
+          PAGE: SOLARWINDS DPA RESPONSE TIME ANALYZER
           ======================================================== */}
       {activeSubTab === 'waithistory' && (
         <div className="section-block radar-subtab-section radar-scrollable-block" style={{ overflowY: 'auto' }}>
-          {/* Wait Trend Card Container */}
-          <div className="wait-trend-container">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
-              <div>
-                <h3 style={{ fontSize: '15px', fontWeight: 800, margin: '0 0 2px', color: '#f1f5f9' }}>
-                  Daily & Hourly Wait-Time Trend & Anomaly Baselines
-                </h3>
-                <p style={{ margin: 0, fontSize: '11.5px', color: '#94a3b8' }}>
-                  Historical wait categories aggregated from SQL Server Query Store. Green indicates normal range; Red indicates anomaly spike exceeding baseline.
-                </p>
-              </div>
-
-              {/* View Granularity Switcher, Polling Toggle & Chart Legend */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-                {renderPagePollingToggle('waithistory')}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Granularity:</span>
-                  <div className="radar-limit-presets" style={{ background: 'rgba(0,0,0,0.3)', padding: '2px', borderRadius: '4px' }}>
-                    <button
-                      type="button"
-                      className={`radar-limit-pill ${waitGranularity === 'hourly' ? 'active' : ''}`}
-                      onClick={() => setWaitGranularity('hourly')}
-                      style={{ fontSize: '10.5px', padding: '2px 8px' }}
-                      title="View individual hourly query store runtime intervals"
-                    >
-                      Hourly Intervals
-                    </button>
-                    <button
-                      type="button"
-                      className={`radar-limit-pill ${waitGranularity === 'daily' ? 'active' : ''}`}
-                      onClick={() => setWaitGranularity('daily')}
-                      style={{ fontSize: '10.5px', padding: '2px 8px' }}
-                      title="Aggregate wait categories by calendar day"
-                    >
-                      Day-Wise Summary
-                    </button>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#94a3b8' }}>
-                    <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#10b981' }} />
-                    <span>CPU / Memory</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#94a3b8' }}>
-                    <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#f43f5e' }} />
-                    <span>Locking / Latch</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#94a3b8' }}>
-                    <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#38bdf8' }} />
-                    <span>Disk I/O</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#94a3b8' }}>
-                    <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#fbbf24' }} />
-                    <span>Workspace RAM</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#94a3b8' }}>
-                    <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#a855f7' }} />
-                    <span>Network / Other</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Interactive Stacked Bar Chart */}
-            {(() => {
-              const maxWait = Math.max(1, ...displayWaitPoints.map((p) => p.totalWaitMs || 1));
-              return (
-                <div className="wait-chart-bars-wrap">
-                  {displayWaitPoints.map((pt, i) => {
-                    const isSelected = selectedHistoryPoint?.intervalLabel === pt.intervalLabel;
-                    const heightPct = Math.max(14, (pt.totalWaitMs / maxWait) * 100);
-                    const cpuPct = (pt.cpuWaitMs / (pt.totalWaitMs || 1)) * 100;
-                    const lockPct = (pt.lockWaitMs / (pt.totalWaitMs || 1)) * 100;
-                    const ioPct = (pt.ioWaitMs / (pt.totalWaitMs || 1)) * 100;
-                    const memPct = (pt.memoryWaitMs / (pt.totalWaitMs || 1)) * 100;
-                    const otherPct = Math.max(0, 100 - (cpuPct + lockPct + ioPct + memPct));
-
-                    return (
-                      <div
-                        key={i}
-                        className="wait-chart-col"
-                        onClick={() => setSelectedHistoryPoint(pt)}
-                        title={`${pt.intervalLabel}: ${(pt.totalWaitMs / 1000).toFixed(1)}s total wait (${pt.executionCount.toLocaleString()} queries)`}
-                      >
-                        {/* Anomaly Indicator Pill */}
-                        <div className={`wait-anomaly-indicator ${pt.isAnomaly ? 'anomaly' : 'normal'}`}>
-                          {pt.isAnomaly ? 'Spike' : 'Normal'}
-                        </div>
-
-                        {/* Stacked Vertical Bar */}
-                        <div
-                          className="wait-stacked-bar"
-                          style={{
-                            height: `${heightPct}%`,
-                            border: isSelected ? '2px solid #ffffff' : undefined,
-                            transform: isSelected ? 'scale(1.08)' : undefined
-                          }}
-                        >
-                          <div className="wait-bar-segment" style={{ height: `${cpuPct}%`, background: '#10b981' }} />
-                          <div className="wait-bar-segment" style={{ height: `${lockPct}%`, background: '#f43f5e' }} />
-                          <div className="wait-bar-segment" style={{ height: `${ioPct}%`, background: '#38bdf8' }} />
-                          <div className="wait-bar-segment" style={{ height: `${memPct}%`, background: '#fbbf24' }} />
-                          <div className="wait-bar-segment" style={{ height: `${otherPct}%`, background: '#a855f7' }} />
-                        </div>
-
-                        {/* Date Label */}
-                        <span className="wait-chart-label" style={{ color: isSelected ? '#38bdf8' : undefined }}>
-                          {pt.intervalLabel}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </div>
-
-          {/* Drilldown Panel for Selected Interval */}
-          {selectedHistoryPoint && (
-            <div className="glass-panel" style={{ padding: '16px 20px', borderRadius: '10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>
-                    Interval Analysis: {selectedHistoryPoint.intervalLabel}
-                  </span>
-                  <span
-                    className={`wait-anomaly-indicator ${selectedHistoryPoint.isAnomaly ? 'anomaly' : 'normal'}`}
-                    style={{ position: 'static' }}
-                  >
-                    {selectedHistoryPoint.isAnomaly ? `ANOMALY: ${selectedHistoryPoint.anomalyReason}` : 'Within Normal Baseline'}
-                  </span>
-                </div>
-                <span style={{ fontSize: '11px', color: '#94a3b8' }}>
-                  {selectedHistoryPoint.executionCount.toLocaleString()} Query Executions Monitored
-                </span>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-                <div style={{ background: 'rgba(15, 23, 42, 0.7)', padding: '10px 14px', borderRadius: '6px', borderLeft: '3px solid #10b981' }}>
-                  <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>CPU / Memory Time</div>
-                  <div style={{ fontSize: '16px', fontWeight: 700, color: '#10b981' }}>
-                    {(selectedHistoryPoint.cpuWaitMs / 1000).toFixed(1)}s
-                  </div>
-                  <div style={{ fontSize: '10px', color: '#64748b' }}>
-                    {((selectedHistoryPoint.cpuWaitMs / (selectedHistoryPoint.totalWaitMs || 1)) * 100).toFixed(1)}% of interval
-                  </div>
-                </div>
-
-                <div style={{ background: 'rgba(15, 23, 42, 0.7)', padding: '10px 14px', borderRadius: '6px', borderLeft: '3px solid #f43f5e' }}>
-                  <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Locking & Latching</div>
-                  <div style={{ fontSize: '16px', fontWeight: 700, color: '#f43f5e' }}>
-                    {(selectedHistoryPoint.lockWaitMs / 1000).toFixed(1)}s
-                  </div>
-                  <div style={{ fontSize: '10px', color: '#64748b' }}>
-                    {((selectedHistoryPoint.lockWaitMs / (selectedHistoryPoint.totalWaitMs || 1)) * 100).toFixed(1)}% of interval
-                  </div>
-                </div>
-
-                <div style={{ background: 'rgba(15, 23, 42, 0.7)', padding: '10px 14px', borderRadius: '6px', borderLeft: '3px solid #38bdf8' }}>
-                  <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Buffer & Disk I/O</div>
-                  <div style={{ fontSize: '16px', fontWeight: 700, color: '#38bdf8' }}>
-                    {(selectedHistoryPoint.ioWaitMs / 1000).toFixed(1)}s
-                  </div>
-                  <div style={{ fontSize: '10px', color: '#64748b' }}>
-                    {((selectedHistoryPoint.ioWaitMs / (selectedHistoryPoint.totalWaitMs || 1)) * 100).toFixed(1)}% of interval
-                  </div>
-                </div>
-
-                <div style={{ background: 'rgba(15, 23, 42, 0.7)', padding: '10px 14px', borderRadius: '6px', borderLeft: '3px solid #fbbf24' }}>
-                  <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Workspace RAM Grants</div>
-                  <div style={{ fontSize: '16px', fontWeight: 700, color: '#fbbf24' }}>
-                    {(selectedHistoryPoint.memoryWaitMs / 1000).toFixed(1)}s
-                  </div>
-                  <div style={{ fontSize: '10px', color: '#64748b' }}>
-                    {((selectedHistoryPoint.memoryWaitMs / (selectedHistoryPoint.totalWaitMs || 1)) * 100).toFixed(1)}% of interval
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          <DPAWaitAnalyzer
+            status={status}
+            queryStore={queryStoreEntries}
+            waitStats={waitStats}
+            activeSessions={sessions}
+            waitHistory={waitHistory}
+            blockingSessions={blockingSessions}
+            deadlocks={deadlocks}
+            onLoadPlanXML={onLoadPlanXML}
+            onLoadDeadlockXML={onLoadDeadlockXML}
+            onNavigateTab={(tab) => setActiveSubTab(tab as any)}
+          />
         </div>
       )}
 
@@ -3816,23 +3682,21 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '13px', fontWeight: 700, color: '#38bdf8' }}>
+                        <span className="radar-missing-idx-title" style={{ fontSize: '13px', fontWeight: 700 }}>
                           {idx.tableName}
                         </span>
                         <span
+                          className="radar-missing-idx-impact"
                           style={{
                             fontSize: '11px',
                             fontWeight: 700,
                             padding: '2px 8px',
                             borderRadius: '4px',
-                            background: 'rgba(52, 211, 153, 0.2)',
-                            color: '#34d399',
-                            border: '1px solid rgba(52, 211, 153, 0.4)'
                           }}
                         >
                           Impact: {(idx.impactScore ?? 0).toFixed(1)}% Cost Reduction
                         </span>
-                        <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                        <span className="radar-missing-idx-meta" style={{ fontSize: '11px' }}>
                           Seeks: {(idx.userSeeks ?? 0).toLocaleString()} • Scans: {(idx.userScans ?? 0).toLocaleString()}
                         </span>
                       </div>
@@ -3848,18 +3712,16 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                       </button>
                     </div>
 
-                    <div style={{ fontSize: '11.5px', color: '#cbd5e1', marginBottom: '8px' }}>
+                    <div className="radar-missing-idx-cols" style={{ fontSize: '11.5px', marginBottom: '8px' }}>
                       Equality: <strong>{idx.equalityColumns || 'None'}</strong> • Inequality: <strong>{idx.inequalityColumns || 'None'}</strong> • Include: <strong>{idx.includedColumns || 'None'}</strong>
                     </div>
 
                     <pre
                       className="missing-idx-sql-box"
                       style={{
-                        background: 'rgba(15, 23, 42, 0.8)',
                         padding: '8px 12px',
                         borderRadius: '6px',
                         fontSize: '11px',
-                        color: '#a5b4fc',
                         fontFamily: 'Consolas, monospace',
                         margin: 0,
                         overflowX: 'auto'

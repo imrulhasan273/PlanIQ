@@ -1,6 +1,9 @@
 package livedb
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 func getDemoActiveSessions() []ActiveSession {
 	return []ActiveSession{
@@ -1131,6 +1134,52 @@ func getDemoEngineInternals() *EngineInternalsReport {
 		Schedulers:             schedulers,
 		ActiveTasks:            activeTasks,
 		NUMANodes:              numaNodes,
+	}
+}
+
+func getDemoDPAPerspective(perspective string) []DPAPerspectiveItem {
+	switch strings.ToLower(perspective) {
+	case "programs":
+		return []DPAPerspectiveItem{
+			{Name: "Microsoft SQL Server Management Studio", SessionCount: 8, WaitSec: 1420.5, CPUSec: 680.2, LogicalReads: 420000, Writes: 12000, Percentage: 45.2},
+			{Name: ".Net SqlClient Data Provider", SessionCount: 14, WaitSec: 920.4, CPUSec: 410.5, LogicalReads: 310000, Writes: 45000, Percentage: 29.3},
+			{Name: "SQLAgent - T-SQL Job", SessionCount: 3, WaitSec: 510.2, CPUSec: 280.1, LogicalReads: 180000, Writes: 8400, Percentage: 16.2},
+			{Name: "Go SQL Driver", SessionCount: 2, WaitSec: 290.1, CPUSec: 140.0, LogicalReads: 92000, Writes: 1200, Percentage: 9.3},
+		}
+	case "dbusers":
+		return []DPAPerspectiveItem{
+			{Name: "sa", SessionCount: 12, WaitSec: 1620.5, CPUSec: 780.2, LogicalReads: 540000, Writes: 34000, Percentage: 51.5},
+			{Name: "svc_app_worker", SessionCount: 8, WaitSec: 890.3, CPUSec: 420.1, LogicalReads: 290000, Writes: 18000, Percentage: 28.3},
+			{Name: "reporting_read", SessionCount: 4, WaitSec: 420.2, CPUSec: 190.5, LogicalReads: 140000, Writes: 0, Percentage: 13.4},
+			{Name: "NT AUTHORITY\\SYSTEM", SessionCount: 3, WaitSec: 210.0, CPUSec: 95.0, LogicalReads: 45000, Writes: 8200, Percentage: 6.8},
+		}
+	case "machines":
+		return []DPAPerspectiveItem{
+			{Name: "DC-DBPROD1 (Local)", SessionCount: 15, WaitSec: 1740.0, CPUSec: 820.0, LogicalReads: 610000, Writes: 42000, Percentage: 55.4},
+			{Name: "APP-SRV-01", SessionCount: 8, WaitSec: 840.5, CPUSec: 390.2, LogicalReads: 270000, Writes: 16000, Percentage: 26.8},
+			{Name: "BI-REPORT-02", SessionCount: 4, WaitSec: 560.2, CPUSec: 275.4, LogicalReads: 180000, Writes: 2200, Percentage: 17.8},
+		}
+	case "databases":
+		return []DPAPerspectiveItem{
+			{Name: "AmmsOnlineProd", SessionCount: 18, WaitSec: 2140.5, CPUSec: 980.2, LogicalReads: 780000, Writes: 54000, Percentage: 68.2},
+			{Name: "tempdb", SessionCount: 6, WaitSec: 580.4, CPUSec: 310.0, LogicalReads: 210000, Writes: 98000, Percentage: 18.5},
+			{Name: "master", SessionCount: 3, WaitSec: 280.1, CPUSec: 110.2, LogicalReads: 65000, Writes: 4200, Percentage: 8.9},
+			{Name: "msdb", SessionCount: 2, WaitSec: 140.0, CPUSec: 65.0, LogicalReads: 32000, Writes: 12000, Percentage: 4.4},
+		}
+	case "files":
+		return []DPAPerspectiveItem{
+			{Name: "AmmsOnlineProd.mdf (AmmsOnlineProd)", Secondary: "D:\\SQLData\\AmmsOnlineProd.mdf", SessionCount: 1, WaitSec: 1450.2, CPUSec: 890.1, LogicalReads: 650000, Writes: 12000, Percentage: 58.0},
+			{Name: "AmmsOnlineProd_log.ldf (AmmsOnlineProd)", Secondary: "L:\\SQLLogs\\AmmsOnlineProd_log.ldf", SessionCount: 1, WaitSec: 620.4, CPUSec: 210.0, LogicalReads: 12000, Writes: 84000, Percentage: 24.8},
+			{Name: "tempdb.mdf (tempdb)", Secondary: "T:\\TempDB\\tempdb.mdf", SessionCount: 1, WaitSec: 430.1, CPUSec: 180.5, LogicalReads: 180000, Writes: 76000, Percentage: 17.2},
+		}
+	case "drives":
+		return []DPAPerspectiveItem{
+			{Name: "D: (Data)", Secondary: "Data LUN", SessionCount: 1, WaitSec: 1680.5, CPUSec: 920.0, LogicalReads: 780000, Writes: 24000, Percentage: 61.5},
+			{Name: "L: (Logs)", Secondary: "Log LUN", SessionCount: 1, WaitSec: 640.2, CPUSec: 220.1, LogicalReads: 14000, Writes: 92000, Percentage: 23.4},
+			{Name: "T: (TempDB)", Secondary: "NVMe TempDB", SessionCount: 1, WaitSec: 410.0, CPUSec: 170.0, LogicalReads: 190000, Writes: 82000, Percentage: 15.1},
+		}
+	default:
+		return nil
 	}
 }
 

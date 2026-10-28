@@ -92,6 +92,12 @@ func GetDB() (*Store, error) {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
+
+		CREATE TABLE IF NOT EXISTS app_user_settings (
+			setting_key TEXT PRIMARY KEY,
+			setting_value TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
 		`
 		if _, err := db.Exec(createSQL); err != nil {
 			initErr = fmt.Errorf("failed to init config db tables: %w", err)
@@ -333,5 +339,51 @@ func (s *Store) SetDefaultDBConnection(id string) error {
 	_, _ = s.db.Exec(`UPDATE db_connections SET is_default = 0;`)
 	_, err := s.db.Exec(`UPDATE db_connections SET is_default = 1 WHERE id = ?;`, id)
 	return err
+}
+
+// GetAppSetting retrieves a user setting by key from SQLite, returning defaultValue if not found
+func (s *Store) GetAppSetting(key string, defaultValue string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var val string
+	err := s.db.QueryRow(`SELECT setting_value FROM app_user_settings WHERE setting_key = ?;`, key).Scan(&val)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return defaultValue, nil
+		}
+		return defaultValue, err
+	}
+	return val, nil
+}
+
+// SetAppSetting saves or updates a key-value setting in SQLite
+func (s *Store) SetAppSetting(key string, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	stmt := `
+	INSERT INTO app_user_settings (setting_key, setting_value, updated_at)
+	VALUES (?, ?, ?)
+	ON CONFLICT(setting_key) DO UPDATE SET
+		setting_value = excluded.setting_value,
+		updated_at = excluded.updated_at;
+	`
+	_, err := s.db.Exec(stmt, key, value, now)
+	return err
+}
+
+// GetTheme returns the saved theme from SQLite ('dark' or 'light', default 'dark')
+func (s *Store) GetTheme() (string, error) {
+	return s.GetAppSetting("theme", "dark")
+}
+
+// SetTheme saves the theme to SQLite ('dark' or 'light')
+func (s *Store) SetTheme(theme string) error {
+	if theme != "light" && theme != "dark" {
+		theme = "dark"
+	}
+	return s.SetAppSetting("theme", theme)
 }
 

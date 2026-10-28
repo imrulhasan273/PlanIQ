@@ -371,6 +371,34 @@ export namespace livedb {
 	        this.errorMessage = source["errorMessage"];
 	    }
 	}
+	export class DPAPerspectiveItem {
+	    name: string;
+	    secondary: string;
+	    sessionCount: number;
+	    waitSec: number;
+	    cpuSec: number;
+	    execCount: number;
+	    logicalReads: number;
+	    writes: number;
+	    percentage: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DPAPerspectiveItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.secondary = source["secondary"];
+	        this.sessionCount = source["sessionCount"];
+	        this.waitSec = source["waitSec"];
+	        this.cpuSec = source["cpuSec"];
+	        this.execCount = source["execCount"];
+	        this.logicalReads = source["logicalReads"];
+	        this.writes = source["writes"];
+	        this.percentage = source["percentage"];
+	    }
+	}
 	export class DuplicateIndex {
 	    tableName: string;
 	    indexName: string;
