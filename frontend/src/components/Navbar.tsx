@@ -40,7 +40,7 @@ interface NavbarProps {
   setActiveTab: (tab: string) => void;
   onOpenFile: () => void;
   onOpenPasteModal: () => void;
-  onLoadSample: () => void;
+  onLoadSample?: () => void;
   onOpenSettings: () => void;
   onOpenLiveModal: () => void;
   liveStatus: ConnectionStatus | null;
@@ -220,17 +220,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Code2 size={12} />
               <span>Paste XML</span>
-            </button>
-
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm top-action-btn"
-              onClick={onLoadSample}
-              disabled={isLoading}
-              title="Load demo sample execution plan"
-            >
-              <FileCode2 size={12} />
-              <span>Sample Plan</span>
             </button>
           </div>
 

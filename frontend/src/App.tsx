@@ -423,10 +423,6 @@ export function App() {
             <DeadlockTab
               initialDeadlocks={deadlockGraphs}
               onOpenXdlFile={handleOpenFile}
-              onLoadSample={() => {
-                const parsed = parseDeadlockXML(SAMPLE_DEADLOCK_XDL);
-                setDeadlockGraphs(parsed);
-              }}
             />
           </ErrorBoundary>
         ) : activeTab === 'playbook' ? (

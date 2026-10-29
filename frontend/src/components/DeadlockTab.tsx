@@ -230,20 +230,10 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
             <button
               type="button"
               className="btn btn-primary"
-              onClick={handleLoadSample}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 22px', fontSize: '13px', fontWeight: 600 }}
-            >
-              <FileCode2 size={16} />
-              <span>Sample Plan (.xdl)</span>
-            </button>
-
-            <button
-              type="button"
-              className="btn btn-secondary"
               onClick={handleOpenXdlFile}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 22px', fontSize: '13px', fontWeight: 600 }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 24px', fontSize: '13px', fontWeight: 600 }}
             >
-              <Upload size={16} color="#38bdf8" />
+              <Upload size={16} />
               <span>Open .xdl File</span>
             </button>
           </div>
@@ -439,15 +429,6 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
               <span>Cycle: <strong style={{ color: '#f43f5e' }}>{activeDeadlock.cycle.length}</strong></span>
             </div>
 
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={handleLoadSample}
-              title="Load demo classic 2-process deadlock"
-            >
-              <FileCode2 size={13} color="#38bdf8" />
-              <span>Sample Plan</span>
-            </button>
 
             <button
               type="button"

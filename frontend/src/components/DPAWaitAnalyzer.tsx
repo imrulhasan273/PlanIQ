@@ -1037,8 +1037,10 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
           const signalRatioPct = totalWaitSec > 0 ? ((totalSignalMs / 1000) / totalWaitSec) * 100 : 0;
           const maxWaitSec = Math.max(...topWaitsData.map(w => w.waitSec), 0.1);
           const dominantWait = topWaitsData[0] || { name: 'None', category: 'Idle', waitSec: 0, pct: 0 };
-          const waitDef = (activeSelectedWait && WAIT_DEFINITIONS[activeSelectedWait.name]) || {
-            desc: `Active engine wait state in category ${activeSelectedWait?.category || 'General'}.`,
+          const currentWait = activeSelectedWait || topWaitsData[0];
+          if (!currentWait) return null;
+          const waitDef = (WAIT_DEFINITIONS[currentWait.name]) || {
+            desc: `Active engine wait state in category ${currentWait.category || 'General'}.`,
             cause: 'Query or thread execution contention requiring SQL Server resource acquisition.',
             fix: 'Review top queries consuming this wait state in the Query Store and Plan IQ Advisor tabs.'
           };
@@ -1218,11 +1220,11 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
                       Diagnostic & Tuning Advisor
                     </div>
                     <div style={{ fontSize: '14px', fontWeight: 800, color: '#0284c7', fontFamily: 'var(--font-mono)' }}>
-                      {activeSelectedWait.name}
+                      {currentWait.name}
                     </div>
                   </div>
                   <span style={{ fontSize: '10px', fontWeight: 800, padding: '3px 8px', borderRadius: '4px', background: 'rgba(2, 132, 199, 0.12)', color: '#0284c7' }}>
-                    {activeSelectedWait.pct}% of Delays
+                    {currentWait.pct}% of Delays
                   </span>
                 </div>
 
@@ -1230,15 +1232,15 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
                   <div style={{ background: 'var(--bg-surface)', padding: '6px 8px', borderRadius: '5px', border: '1px solid var(--border-subtle)' }}>
                     <div style={{ fontSize: '9.5px', color: 'var(--text-muted)' }}>Duration</div>
-                    <div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)' }}>{formatWaitDuration(activeSelectedWait.waitSec)}</div>
+                    <div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)' }}>{formatWaitDuration(currentWait.waitSec)}</div>
                   </div>
                   <div style={{ background: 'var(--bg-surface)', padding: '6px 8px', borderRadius: '5px', border: '1px solid var(--border-subtle)' }}>
                     <div style={{ fontSize: '9.5px', color: 'var(--text-muted)' }}>Waiting Tasks</div>
-                    <div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)' }}>{(activeSelectedWait.tasksCount || 1).toLocaleString()}</div>
+                    <div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)' }}>{(currentWait.tasksCount || 1).toLocaleString()}</div>
                   </div>
                   <div style={{ background: 'var(--bg-surface)', padding: '6px 8px', borderRadius: '5px', border: '1px solid var(--border-subtle)' }}>
                     <div style={{ fontSize: '9.5px', color: 'var(--text-muted)' }}>Signal (CPU)</div>
-                    <div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)' }}>{activeSelectedWait.signalWaitMs > 0 ? (activeSelectedWait.signalWaitMs / 1000).toFixed(1) + 's' : '0s'}</div>
+                    <div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)' }}>{currentWait.signalWaitMs > 0 ? (currentWait.signalWaitMs / 1000).toFixed(1) + 's' : '0s'}</div>
                   </div>
                 </div>
 

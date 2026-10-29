@@ -1759,6 +1759,33 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
     </div>
   );
 
+  if (!isConnected || !status) {
+    return (
+      <div className="tab-scroll-container radar-tab-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '65vh', padding: '40px 20px' }}>
+        <div className="glass-panel" style={{ maxWidth: '540px', width: '100%', padding: '40px 32px', textAlign: 'center', borderRadius: '14px', border: '1px solid var(--border-medium)', background: 'var(--bg-canvas)' }}>
+          <div style={{ display: 'inline-flex', padding: '16px', borderRadius: '50%', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.25)', marginBottom: '18px' }}>
+            <Database size={40} color="#38bdf8" />
+          </div>
+          <h2 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-main)', marginBottom: '8px' }}>
+            Connect to SQL Server for Live Telemetry
+          </h2>
+          <p style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.6', marginBottom: '22px' }}>
+            Live Radar streams real-time telemetry directly from SQL Server DMVs, Query Store, and waiting tasks. Connect to a live database instance to monitor active sessions, wait states, and engine health.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary btn-lg"
+            onClick={onOpenConnectModal}
+            style={{ margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+          >
+            <Zap size={16} />
+            <span>Connect to SQL Server</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="tab-scroll-container radar-tab-container">
       {/* ========================================================
@@ -1808,20 +1835,6 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               >
                 {status.databaseName}
               </span>
-              {status.isDemo && (
-                <span
-                  style={{
-                    fontSize: '9.5px',
-                    padding: '1px 5px',
-                    borderRadius: '4px',
-                    background: 'rgba(244, 63, 94, 0.15)',
-                    color: '#f43f5e',
-                    border: '1px solid rgba(244, 63, 94, 0.3)',
-                  }}
-                >
-                  Demo Mode
-                </span>
-              )}
             </div>
 
             {/* Right: Controls */}
