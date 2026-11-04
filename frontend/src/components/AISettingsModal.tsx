@@ -123,8 +123,8 @@ export const AISettingsModal: React.FC<AISettingsModalProps> = ({
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="llama3 / deepseek-coder"
-                  value={config.model || 'deepseek-coder'}
+                  placeholder="e.g. qwen2.5-coder:7b or qwen:7b or llama3"
+                  value={config.model || 'qwen2.5-coder:7b'}
                   onChange={(e) => onChangeConfig({ ...config, model: e.target.value })}
                 />
               )}

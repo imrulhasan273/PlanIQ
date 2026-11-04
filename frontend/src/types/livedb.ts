@@ -50,6 +50,9 @@ export interface ActiveSession {
 export interface QueryStoreEntry {
   queryId: number;
   planId: number;
+  queryHash?: string;
+  planHash?: string;
+  moduleName?: string;
   queryText: string;
   executionCount: number;
   totalCpuMs: number;
@@ -60,8 +63,14 @@ export interface QueryStoreEntry {
   avgLogicalReads: number;
   totalPhysicalReads: number;
   avgPhysicalReads: number;
+  totalWrites?: number;
+  avgWrites?: number;
+  totalMemoryMb?: number;
+  avgMemoryMb?: number;
   totalSpillsMb: number;
   lastExecutionTime: string;
+  executionType?: string;
+  waitProfile?: Record<string, number>;
   planXml?: string;
 }
 
@@ -190,6 +199,16 @@ export interface WaitTimeHistoryPoint {
   executionCount: number;
   isAnomaly: boolean;
   anomalyReason?: string;
+}
+
+export interface SevenDaySyncResult {
+  serverName: string;
+  databaseName: string;
+  isQueryStoreOn: boolean;
+  intervalsSynced: number;
+  deadlocksSynced: number;
+  message: string;
+  syncedAt: string;
 }
 
 export interface BufferPoolConsumer {
@@ -331,6 +350,89 @@ export interface DPAPerspectiveItem {
   logicalReads: number;
   writes: number;
   percentage: number;
+}
+
+export interface NUMAPLENode {
+  nodeId: number;
+  nodeName: string;
+  pleSeconds: number;
+  targetPle: number;
+  status: 'HEALTHY' | 'DEGRADED' | 'CRITICAL';
+  foreignPageRatio: number;
+  memoryAllocatedMb: number;
+}
+
+export interface PLECulpritQuery {
+  queryId: number;
+  planId: number;
+  queryHash: string;
+  queryText: string;
+  executionCount: number;
+  avgPhysicalReadsMb: number;
+  totalPhysicalReadsMb: number;
+  avgLogicalReadsMb: number;
+  avgDurationMs: number;
+  avgCpuMs: number;
+  impactSeverity: 'CRITICAL' | 'HIGH' | 'ELEVATED' | string;
+  bufferPoolFlushRisk: string;
+  lastExecutionTime: string;
+}
+
+export interface TableEvictionImpact {
+  tableName: string;
+  schemaName: string;
+  databaseName: string;
+  indexName: string;
+  currentCachedMb: number;
+  bufferPoolPercent: number;
+  evictionRisk: 'CRITICAL' | 'HIGH' | 'MODERATE' | string;
+  pushedOutByQuery: string;
+  estimatedEvictedMb?: number;
+  displacementReason: string;
+}
+
+export interface PLEDoctorInsight {
+  category: string;
+  severity: 'CRITICAL' | 'WARNING' | 'HEALTHY' | string;
+  title: string;
+  diagnosis: string;
+  actionableRemedy: string;
+  suggestedTsql: string;
+}
+
+export interface PLEReport {
+  overallPle: number;
+  targetPle: number;
+  totalMemoryGb: number;
+  status: 'HEALTHY' | 'WARNING' | 'CRITICAL';
+  summary: string;
+  isNuma: boolean;
+  nodeCount: number;
+  numaNodes: NUMAPLENode[];
+  culpritQueries: PLECulpritQuery[];
+  lastEvaluatedAt: string;
+
+  // Deep Memory Pressure Gauges
+  lazyWritesPerSec: number;
+  freeListStallsPerSec: number;
+  pageReadsPerSec: number;
+  pageWritesPerSec: number;
+  pageReadsMbPerSec: number;
+  bufferCacheHitRatio: number;
+
+  // PLE Burn Velocity & Alerting
+  pleBurnRateSecondsPerMin: number;
+  pleBurnVerdict: string;
+
+  // Server Memory Limits
+  maxServerMemoryMb: number;
+  targetServerMemoryMb: number;
+  totalServerMemoryMb: number;
+  memoryGrantsPendingCount: number;
+
+  // Table Evictions & AI Doctor Insights
+  tableEvictionImpacts: TableEvictionImpact[];
+  doctorInsights: PLEDoctorInsight[];
 }
 
 

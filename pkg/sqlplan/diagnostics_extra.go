@@ -1442,3 +1442,102 @@ func extraHealthPenalty(diag *AdvancedDiagnostics) int {
 
 	return penalty
 }
+
+// evaluatePLERisk computes the Page Life Expectancy (PLE) eviction threat posed by this execution plan
+func evaluatePLERisk(analysis *PlanAnalysis) *PLERiskAssessment {
+	if analysis == nil || len(analysis.Statements) == 0 {
+		return nil
+	}
+
+	var totalLogicalReads int64
+	var totalEstRows float64
+	var scanOperators []string
+	seenOps := make(map[string]bool)
+
+	var walkNodes func(n *PlanNode)
+	walkNodes = func(n *PlanNode) {
+		if n == nil {
+			return
+		}
+		opLower := strings.ToLower(n.PhysicalOp + " " + n.LogicalOp)
+		if strings.Contains(opLower, "scan") {
+			name := n.PhysicalOp
+			if n.Table != "" {
+				name += " on " + n.Table
+			}
+			if !seenOps[name] {
+				seenOps[name] = true
+				scanOperators = append(scanOperators, name)
+			}
+			totalEstRows += n.EstimateRows
+		}
+		for _, child := range n.Children {
+			walkNodes(child)
+		}
+	}
+
+	for _, stmt := range analysis.Statements {
+		totalLogicalReads += stmt.ActualLogicalReads
+		if stmt.RootNode != nil {
+			walkNodes(stmt.RootNode)
+		}
+	}
+
+	// Calculate scan volume in MB:
+	// Prioritize actual logical reads if available (8KB per page); fallback to estimated rows
+	var scanVolumeMB float64
+	if totalLogicalReads > 0 {
+		scanVolumeMB = float64(totalLogicalReads) * 8.0 / 1024.0
+	} else if totalEstRows > 0 {
+		// Heuristic: ~200 bytes per row estimated footprint
+		scanVolumeMB = (totalEstRows * 200.0) / (1024.0 * 1024.0)
+	}
+
+	risk := &PLERiskAssessment{
+		EstimatedScanVolumeMB: scanVolumeMB,
+		CulpritOperators:      scanOperators,
+	}
+
+	if len(scanOperators) == 0 && scanVolumeMB < 10 {
+		risk.RiskLevel = "LOW"
+		risk.Score = 5
+		risk.Headline = "Optimal Buffer Pool Footprint (Minimal PLE Impact)"
+		risk.Summary = "No table/index scans detected. Query touches minimal pages via seeks and does not cause buffer pool eviction pressure."
+		risk.BufferPoolEvictionRisk = "Negligible (<0.1% buffer pool churn)"
+		risk.MitigationAction = "No PLE tuning required. Current index access paths protect buffer pool stability."
+		return risk
+	}
+
+	if scanVolumeMB > 1024 || totalLogicalReads > 100000 || totalEstRows > 1000000 {
+		risk.RiskLevel = "CRITICAL"
+		risk.Score = 95
+		risk.Headline = "Catastrophic Page Life Expectancy (PLE) Flush Risk"
+		risk.Summary = fmt.Sprintf("Query reads ~%.1f MB of data pages across full scan operations (%s). On standard production databases, this forces rapid eviction of active cached tables, cratering Page Life Expectancy (PLE) and triggering buffer pool churn.", scanVolumeMB, strings.Join(scanOperators, ", "))
+		risk.BufferPoolEvictionRisk = "Catastrophic (>35% buffer pool eviction per run)"
+		risk.MitigationAction = "Create covering nonclustered index on scan filter/join keys to convert full scans into single-page seeks, eliminating RAM eviction."
+	} else if scanVolumeMB > 200 || totalLogicalReads > 25000 || totalEstRows > 200000 {
+		risk.RiskLevel = "HIGH"
+		risk.Score = 70
+		risk.Headline = "High Buffer Pool Ingestion (Elevated PLE Threat)"
+		risk.Summary = fmt.Sprintf("Query ingests ~%.1f MB of data pages into memory. If executed repeatedly in high-concurrency environments, this will cause frequent PLE drops and disk I/O stalls.", scanVolumeMB)
+		risk.BufferPoolEvictionRisk = "High (~10-25% buffer pool eviction per run)"
+		risk.MitigationAction = "Review missing indexes or apply SARGable filter predicates to narrow the row scan boundary."
+	} else if scanVolumeMB > 30 || len(scanOperators) > 0 {
+		risk.RiskLevel = "MODERATE"
+		risk.Score = 40
+		risk.Headline = "Moderate Page Life Expectancy Footprint"
+		risk.Summary = fmt.Sprintf("Query performs scan operations ingesting ~%.1f MB into the buffer pool. Acceptable for low-frequency reports, but monitor during peak hours.", scanVolumeMB)
+		risk.BufferPoolEvictionRisk = "Moderate (~2-8% buffer pool eviction)"
+		risk.MitigationAction = "Evaluate if table scans can be satisfied by existing secondary indexes."
+	} else {
+		risk.RiskLevel = "LOW"
+		risk.Score = 15
+		risk.Headline = "Low PLE Impact"
+		risk.Summary = "Low memory ingestion. Query operates within safe buffer pool boundaries."
+		risk.BufferPoolEvictionRisk = "Low (<1% buffer pool eviction)"
+		risk.MitigationAction = "Maintain healthy statistics maintenance to preserve current execution path."
+	}
+
+	return risk
+}
+

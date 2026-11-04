@@ -184,6 +184,42 @@ export namespace configdb {
 	        this.updatedAt = source["updatedAt"];
 	    }
 	}
+	export class StoredWaitPoint {
+	    serverName: string;
+	    databaseName: string;
+	    intervalLabel: string;
+	    totalWaitMs: number;
+	    cpuWaitMs: number;
+	    lockWaitMs: number;
+	    ioWaitMs: number;
+	    memoryWaitMs: number;
+	    otherWaitMs: number;
+	    executionCount: number;
+	    isAnomaly: boolean;
+	    anomalyReason: string;
+	    syncedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StoredWaitPoint(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.serverName = source["serverName"];
+	        this.databaseName = source["databaseName"];
+	        this.intervalLabel = source["intervalLabel"];
+	        this.totalWaitMs = source["totalWaitMs"];
+	        this.cpuWaitMs = source["cpuWaitMs"];
+	        this.lockWaitMs = source["lockWaitMs"];
+	        this.ioWaitMs = source["ioWaitMs"];
+	        this.memoryWaitMs = source["memoryWaitMs"];
+	        this.otherWaitMs = source["otherWaitMs"];
+	        this.executionCount = source["executionCount"];
+	        this.isAnomaly = source["isAnomaly"];
+	        this.anomalyReason = source["anomalyReason"];
+	        this.syncedAt = source["syncedAt"];
+	    }
+	}
 
 }
 
@@ -742,6 +778,194 @@ export namespace livedb {
 	    }
 	}
 	
+	export class NUMAPLENode {
+	    nodeId: number;
+	    nodeName: string;
+	    pleSeconds: number;
+	    targetPle: number;
+	    status: string;
+	    foreignPageRatio: number;
+	    memoryAllocatedMb: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new NUMAPLENode(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.nodeId = source["nodeId"];
+	        this.nodeName = source["nodeName"];
+	        this.pleSeconds = source["pleSeconds"];
+	        this.targetPle = source["targetPle"];
+	        this.status = source["status"];
+	        this.foreignPageRatio = source["foreignPageRatio"];
+	        this.memoryAllocatedMb = source["memoryAllocatedMb"];
+	    }
+	}
+	export class PLECulpritQuery {
+	    queryId: number;
+	    planId: number;
+	    queryHash: string;
+	    queryText: string;
+	    executionCount: number;
+	    avgPhysicalReadsMb: number;
+	    totalPhysicalReadsMb: number;
+	    avgLogicalReadsMb: number;
+	    avgDurationMs: number;
+	    avgCpuMs: number;
+	    impactSeverity: string;
+	    bufferPoolFlushRisk: string;
+	    lastExecutionTime: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PLECulpritQuery(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.queryId = source["queryId"];
+	        this.planId = source["planId"];
+	        this.queryHash = source["queryHash"];
+	        this.queryText = source["queryText"];
+	        this.executionCount = source["executionCount"];
+	        this.avgPhysicalReadsMb = source["avgPhysicalReadsMb"];
+	        this.totalPhysicalReadsMb = source["totalPhysicalReadsMb"];
+	        this.avgLogicalReadsMb = source["avgLogicalReadsMb"];
+	        this.avgDurationMs = source["avgDurationMs"];
+	        this.avgCpuMs = source["avgCpuMs"];
+	        this.impactSeverity = source["impactSeverity"];
+	        this.bufferPoolFlushRisk = source["bufferPoolFlushRisk"];
+	        this.lastExecutionTime = source["lastExecutionTime"];
+	    }
+	}
+	export class PLEDoctorInsight {
+	    category: string;
+	    severity: string;
+	    title: string;
+	    diagnosis: string;
+	    actionableRemedy: string;
+	    suggestedTsql: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PLEDoctorInsight(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.category = source["category"];
+	        this.severity = source["severity"];
+	        this.title = source["title"];
+	        this.diagnosis = source["diagnosis"];
+	        this.actionableRemedy = source["actionableRemedy"];
+	        this.suggestedTsql = source["suggestedTsql"];
+	    }
+	}
+	export class TableEvictionImpact {
+	    tableName: string;
+	    schemaName: string;
+	    databaseName: string;
+	    indexName: string;
+	    currentCachedMb: number;
+	    bufferPoolPercent: number;
+	    evictionRisk: string;
+	    pushedOutByQuery: string;
+	    estimatedEvictedMb: number;
+	    displacementReason: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TableEvictionImpact(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tableName = source["tableName"];
+	        this.schemaName = source["schemaName"];
+	        this.databaseName = source["databaseName"];
+	        this.indexName = source["indexName"];
+	        this.currentCachedMb = source["currentCachedMb"];
+	        this.bufferPoolPercent = source["bufferPoolPercent"];
+	        this.evictionRisk = source["evictionRisk"];
+	        this.pushedOutByQuery = source["pushedOutByQuery"];
+	        this.estimatedEvictedMb = source["estimatedEvictedMb"];
+	        this.displacementReason = source["displacementReason"];
+	    }
+	}
+	export class PLEReport {
+	    overallPle: number;
+	    targetPle: number;
+	    totalMemoryGb: number;
+	    status: string;
+	    summary: string;
+	    isNuma: boolean;
+	    nodeCount: number;
+	    numaNodes: NUMAPLENode[];
+	    culpritQueries: PLECulpritQuery[];
+	    lastEvaluatedAt: string;
+	    lazyWritesPerSec: number;
+	    freeListStallsPerSec: number;
+	    pageReadsPerSec: number;
+	    pageWritesPerSec: number;
+	    pageReadsMbPerSec: number;
+	    bufferCacheHitRatio: number;
+	    pleBurnRateSecondsPerMin: number;
+	    pleBurnVerdict: string;
+	    maxServerMemoryMb: number;
+	    targetServerMemoryMb: number;
+	    totalServerMemoryMb: number;
+	    memoryGrantsPendingCount: number;
+	    tableEvictionImpacts: TableEvictionImpact[];
+	    doctorInsights: PLEDoctorInsight[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PLEReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.overallPle = source["overallPle"];
+	        this.targetPle = source["targetPle"];
+	        this.totalMemoryGb = source["totalMemoryGb"];
+	        this.status = source["status"];
+	        this.summary = source["summary"];
+	        this.isNuma = source["isNuma"];
+	        this.nodeCount = source["nodeCount"];
+	        this.numaNodes = this.convertValues(source["numaNodes"], NUMAPLENode);
+	        this.culpritQueries = this.convertValues(source["culpritQueries"], PLECulpritQuery);
+	        this.lastEvaluatedAt = source["lastEvaluatedAt"];
+	        this.lazyWritesPerSec = source["lazyWritesPerSec"];
+	        this.freeListStallsPerSec = source["freeListStallsPerSec"];
+	        this.pageReadsPerSec = source["pageReadsPerSec"];
+	        this.pageWritesPerSec = source["pageWritesPerSec"];
+	        this.pageReadsMbPerSec = source["pageReadsMbPerSec"];
+	        this.bufferCacheHitRatio = source["bufferCacheHitRatio"];
+	        this.pleBurnRateSecondsPerMin = source["pleBurnRateSecondsPerMin"];
+	        this.pleBurnVerdict = source["pleBurnVerdict"];
+	        this.maxServerMemoryMb = source["maxServerMemoryMb"];
+	        this.targetServerMemoryMb = source["targetServerMemoryMb"];
+	        this.totalServerMemoryMb = source["totalServerMemoryMb"];
+	        this.memoryGrantsPendingCount = source["memoryGrantsPendingCount"];
+	        this.tableEvictionImpacts = this.convertValues(source["tableEvictionImpacts"], TableEvictionImpact);
+	        this.doctorInsights = this.convertValues(source["doctorInsights"], PLEDoctorInsight);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class PerformanceAdvisor {
 	    id: string;
 	    severity: string;
@@ -774,9 +998,44 @@ export namespace livedb {
 	        this.recommendation = source["recommendation"];
 	    }
 	}
+	export class QueryStoreDiagnostic {
+	    currentDb: string;
+	    isQueryStoreOn: boolean;
+	    qsDesiredState: string;
+	    qsActualState: string;
+	    qsRuntimeStatsRows: number;
+	    qsWindowRows: number;
+	    dmvPlanCacheRows: number;
+	    dmvWindowRows: number;
+	    qsError?: string;
+	    dmvError?: string;
+	    sqlServerVersion: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueryStoreDiagnostic(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.currentDb = source["currentDb"];
+	        this.isQueryStoreOn = source["isQueryStoreOn"];
+	        this.qsDesiredState = source["qsDesiredState"];
+	        this.qsActualState = source["qsActualState"];
+	        this.qsRuntimeStatsRows = source["qsRuntimeStatsRows"];
+	        this.qsWindowRows = source["qsWindowRows"];
+	        this.dmvPlanCacheRows = source["dmvPlanCacheRows"];
+	        this.dmvWindowRows = source["dmvWindowRows"];
+	        this.qsError = source["qsError"];
+	        this.dmvError = source["dmvError"];
+	        this.sqlServerVersion = source["sqlServerVersion"];
+	    }
+	}
 	export class QueryStoreEntry {
 	    queryId: number;
 	    planId: number;
+	    queryHash?: string;
+	    planHash?: string;
+	    moduleName?: string;
 	    queryText: string;
 	    executionCount: number;
 	    totalCpuMs: number;
@@ -787,8 +1046,14 @@ export namespace livedb {
 	    avgLogicalReads: number;
 	    totalPhysicalReads: number;
 	    avgPhysicalReads: number;
+	    totalWrites?: number;
+	    avgWrites?: number;
+	    totalMemoryMb?: number;
+	    avgMemoryMb?: number;
 	    totalSpillsMb: number;
 	    lastExecutionTime: string;
+	    executionType?: string;
+	    waitProfile?: Record<string, number>;
 	    planXml?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -799,6 +1064,9 @@ export namespace livedb {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.queryId = source["queryId"];
 	        this.planId = source["planId"];
+	        this.queryHash = source["queryHash"];
+	        this.planHash = source["planHash"];
+	        this.moduleName = source["moduleName"];
 	        this.queryText = source["queryText"];
 	        this.executionCount = source["executionCount"];
 	        this.totalCpuMs = source["totalCpuMs"];
@@ -809,8 +1077,14 @@ export namespace livedb {
 	        this.avgLogicalReads = source["avgLogicalReads"];
 	        this.totalPhysicalReads = source["totalPhysicalReads"];
 	        this.avgPhysicalReads = source["avgPhysicalReads"];
+	        this.totalWrites = source["totalWrites"];
+	        this.avgWrites = source["avgWrites"];
+	        this.totalMemoryMb = source["totalMemoryMb"];
+	        this.avgMemoryMb = source["avgMemoryMb"];
 	        this.totalSpillsMb = source["totalSpillsMb"];
 	        this.lastExecutionTime = source["lastExecutionTime"];
+	        this.executionType = source["executionType"];
+	        this.waitProfile = source["waitProfile"];
 	        this.planXml = source["planXml"];
 	    }
 	}
@@ -839,6 +1113,31 @@ export namespace livedb {
 	        this.batchRequestsPerSec = source["batchRequestsPerSec"];
 	    }
 	}
+	export class SevenDaySyncResult {
+	    serverName: string;
+	    databaseName: string;
+	    isQueryStoreOn: boolean;
+	    intervalsSynced: number;
+	    deadlocksSynced: number;
+	    message: string;
+	    syncedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SevenDaySyncResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.serverName = source["serverName"];
+	        this.databaseName = source["databaseName"];
+	        this.isQueryStoreOn = source["isQueryStoreOn"];
+	        this.intervalsSynced = source["intervalsSynced"];
+	        this.deadlocksSynced = source["deadlocksSynced"];
+	        this.message = source["message"];
+	        this.syncedAt = source["syncedAt"];
+	    }
+	}
+	
 	export class UnusedIndex {
 	    databaseName: string;
 	    schemaName: string;
@@ -1726,9 +2025,129 @@ export namespace sqlplan {
 	    }
 	}
 	
+	export class NodeThreadStat {
+	    threadId: number;
+	    actualRows: number;
+	    actualExecutions: number;
+	    actualCpuMs: number;
+	    actualElapsedMs: number;
+	    actualLogicalReads: number;
+	    actualPhysicalReads: number;
+	    actualReadAheads: number;
+	    actualScans: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new NodeThreadStat(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.threadId = source["threadId"];
+	        this.actualRows = source["actualRows"];
+	        this.actualExecutions = source["actualExecutions"];
+	        this.actualCpuMs = source["actualCpuMs"];
+	        this.actualElapsedMs = source["actualElapsedMs"];
+	        this.actualLogicalReads = source["actualLogicalReads"];
+	        this.actualPhysicalReads = source["actualPhysicalReads"];
+	        this.actualReadAheads = source["actualReadAheads"];
+	        this.actualScans = source["actualScans"];
+	    }
+	}
+	
+	export class OperatorWarning {
+	    kind: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new OperatorWarning(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.description = source["description"];
+	    }
+	}
+	export class PLERiskAssessment {
+	    riskLevel: string;
+	    score: number;
+	    headline: string;
+	    summary: string;
+	    estimatedScanVolumeMb: number;
+	    bufferPoolEvictionRisk: string;
+	    culpritOperators: string[];
+	    mitigationAction: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PLERiskAssessment(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.riskLevel = source["riskLevel"];
+	        this.score = source["score"];
+	        this.headline = source["headline"];
+	        this.summary = source["summary"];
+	        this.estimatedScanVolumeMb = source["estimatedScanVolumeMb"];
+	        this.bufferPoolEvictionRisk = source["bufferPoolEvictionRisk"];
+	        this.culpritOperators = source["culpritOperators"];
+	        this.mitigationAction = source["mitigationAction"];
+	    }
+	}
 	
 	
+	export class StatementParameter {
+	    column: string;
+	    parameterType: string;
+	    compiledValue: string;
+	    runtimeValue: string;
+	    hasRuntime: boolean;
+	    mismatch: boolean;
 	
+	    static createFrom(source: any = {}) {
+	        return new StatementParameter(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.column = source["column"];
+	        this.parameterType = source["parameterType"];
+	        this.compiledValue = source["compiledValue"];
+	        this.runtimeValue = source["runtimeValue"];
+	        this.hasRuntime = source["hasRuntime"];
+	        this.mismatch = source["mismatch"];
+	    }
+	}
+	export class QueryTimeStats {
+	    cpuTimeMs: number;
+	    elapsedTimeMs: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new QueryTimeStats(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.cpuTimeMs = source["cpuTimeMs"];
+	        this.elapsedTimeMs = source["elapsedTimeMs"];
+	    }
+	}
+	export class TraceFlagInfo {
+	    value: number;
+	    scope: string;
+	    status: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TraceFlagInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.value = source["value"];
+	        this.scope = source["scope"];
+	        this.status = source["status"];
+	    }
+	}
 	export class PlanWarning {
 	    statementId: string;
 	    kind: string;
@@ -1786,6 +2205,17 @@ export namespace sqlplan {
 	    isPainPoint: boolean;
 	    painReason: string;
 	    children: PlanNode[];
+	    operatorWarnings: OperatorWarning[];
+	    estimateRebinds: number;
+	    estimateRewinds: number;
+	    executionMode: string;
+	    actualExecutionMode: string;
+	    selfCpuMs: number;
+	    selfElapsedMs: number;
+	    selfCpuPercent: number;
+	    selfElapsedPercent: number;
+	    heatIntensity: number;
+	    perThreadStats: NodeThreadStat[];
 	
 	    static createFrom(source: any = {}) {
 	        return new PlanNode(source);
@@ -1827,6 +2257,17 @@ export namespace sqlplan {
 	        this.isPainPoint = source["isPainPoint"];
 	        this.painReason = source["painReason"];
 	        this.children = this.convertValues(source["children"], PlanNode);
+	        this.operatorWarnings = this.convertValues(source["operatorWarnings"], OperatorWarning);
+	        this.estimateRebinds = source["estimateRebinds"];
+	        this.estimateRewinds = source["estimateRewinds"];
+	        this.executionMode = source["executionMode"];
+	        this.actualExecutionMode = source["actualExecutionMode"];
+	        this.selfCpuMs = source["selfCpuMs"];
+	        this.selfElapsedMs = source["selfElapsedMs"];
+	        this.selfCpuPercent = source["selfCpuPercent"];
+	        this.selfElapsedPercent = source["selfElapsedPercent"];
+	        this.heatIntensity = source["heatIntensity"];
+	        this.perThreadStats = this.convertValues(source["perThreadStats"], NodeThreadStat);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1873,6 +2314,10 @@ export namespace sqlplan {
 	    hasActualMetrics: boolean;
 	    executionClassification: string;
 	    executionClassificationReason: string;
+	    traceFlags: TraceFlagInfo[];
+	    queryTimeStats?: QueryTimeStats;
+	    parameters: StatementParameter[];
+	    nodeWaitStats: WaitStat[];
 	
 	    static createFrom(source: any = {}) {
 	        return new StatementAnalysis(source);
@@ -1905,6 +2350,10 @@ export namespace sqlplan {
 	        this.hasActualMetrics = source["hasActualMetrics"];
 	        this.executionClassification = source["executionClassification"];
 	        this.executionClassificationReason = source["executionClassificationReason"];
+	        this.traceFlags = this.convertValues(source["traceFlags"], TraceFlagInfo);
+	        this.queryTimeStats = this.convertValues(source["queryTimeStats"], QueryTimeStats);
+	        this.parameters = this.convertValues(source["parameters"], StatementParameter);
+	        this.nodeWaitStats = this.convertValues(source["nodeWaitStats"], WaitStat);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1960,6 +2409,7 @@ export namespace sqlplan {
 	    antiPatterns: AntiPattern[];
 	    diagnostics?: AdvancedDiagnostics;
 	    hardwareMetrics?: HardwareMetrics;
+	    pleRiskReport?: PLERiskAssessment;
 	
 	    static createFrom(source: any = {}) {
 	        return new PlanAnalysis(source);
@@ -1981,6 +2431,7 @@ export namespace sqlplan {
 	        this.antiPatterns = this.convertValues(source["antiPatterns"], AntiPattern);
 	        this.diagnostics = this.convertValues(source["diagnostics"], AdvancedDiagnostics);
 	        this.hardwareMetrics = this.convertValues(source["hardwareMetrics"], HardwareMetrics);
+	        this.pleRiskReport = this.convertValues(source["pleRiskReport"], PLERiskAssessment);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2073,6 +2524,9 @@ export namespace sqlplan {
 		    return a;
 		}
 	}
+	
+	
+	
 	
 	
 	

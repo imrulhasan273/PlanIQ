@@ -1,0 +1,476 @@
+<?xml version="1.0" encoding="utf-16"?>
+<ShowPlanXML xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" Version="1.1" Build="10.50.2550.0" xmlns="http://schemas.microsoft.com/sqlserver/2004/07/showplan">
+  <BatchSequence>
+    <Batch>
+      <Statements>
+        <StmtSimple StatementCompId="1" StatementEstRows="1136670" StatementId="1" StatementOptmLevel="FULL" StatementSubTreeCost="14.0696" StatementText="SELECT DISTINCT UserRole.UserLogin, UserRole.RoleName, RoleCommand.PropertyName, RoleCommand.CommandName&#xD;&#xA;FROM UserRole&#xD;&#xA;INNER JOIN RoleCommand ON UserRole.RoleName = RoleCommand.RoleName&#xD;&#xA;UNION&#xD;&#xA;SELECT DISTINCT InheritedUserRole.UserLogin, InheritedUserRole.RoleName, InheritedRoleCommand.PropertyName, InheritedCommand.Name&#xD;&#xA;FROM UserRole AS InheritedUserRole&#xD;&#xA;INNER JOIN RoleCommand AS InheritedRoleCommand ON InheritedUserRole.RoleName = InheritedRoleCommand.RoleName&#xD;&#xA;INNER JOIN Command AS InheritedCommand ON InheritedCommand.PermissionCommand = InheritedRoleCommand.CommandName AND InheritedCommand.PermissionType = 'INHERITED'&#xD;&#xA;UNION&#xD;&#xA;SELECT DISTINCT AutoUserRole.UserLogin, AutoUserRole.RoleName, AutoPropertyCommand.PropertyName, AutoCommand.Name&#xD;&#xA;FROM UserRole AS AutoUserRole&#xD;&#xA;CROSS JOIN Command AS AutoCommand&#xD;&#xA;INNER JOIN PropertyCommand AS AutoPropertyCommand ON AutoPropertyCommand.CommandName = AutoCommand.Name&#xD;&#xA;WHERE AutoCommand.PermissionType = 'AUTO'&#xD;&#xA;;&#xD;&#xA;" StatementType="SELECT" QueryHash="0x2A9AB45C9F56243C" QueryPlanHash="0x88825D34F17D4D5A">
+          <StatementSetOptions ANSI_NULLS="true" ANSI_PADDING="true" ANSI_WARNINGS="true" ARITHABORT="true" CONCAT_NULL_YIELDS_NULL="true" NUMERIC_ROUNDABORT="false" QUOTED_IDENTIFIER="true" />
+          <QueryPlan DegreeOfParallelism="1" MemoryGrant="829296" CachedPlanSize="168" CompileTime="24" CompileCPU="24" CompileMemory="976">
+            <RelOp AvgRowSize="367" EstimateCPU="9.24493" EstimateIO="0" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="1136670" LogicalOp="Union" NodeId="0" Parallel="false" PhysicalOp="Hash Match" EstimatedTotalSubtreeCost="14.0696">
+              <OutputList>
+                <ColumnReference Column="Union1018" />
+                <ColumnReference Column="Union1019" />
+                <ColumnReference Column="Union1020" />
+                <ColumnReference Column="Union1021" />
+              </OutputList>
+              <MemoryFractions Input="0.995585" Output="1" />
+              <RunTimeInformation>
+                <RunTimeCountersPerThread Thread="0" ActualRows="1124885" ActualEndOfScans="1" ActualExecutions="1" />
+              </RunTimeInformation>
+              <Hash>
+                <DefinedValues>
+                  <DefinedValue>
+                    <ColumnReference Column="Union1018" />
+                    <ColumnReference Column="Union1018" />
+                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[AutoUserRole]" Column="UserLogin" />
+                  </DefinedValue>
+                  <DefinedValue>
+                    <ColumnReference Column="Union1019" />
+                    <ColumnReference Column="Union1019" />
+                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[AutoUserRole]" Column="RoleName" />
+                  </DefinedValue>
+                  <DefinedValue>
+                    <ColumnReference Column="Union1020" />
+                    <ColumnReference Column="Union1020" />
+                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[PropertyCommand]" Alias="[AutoPropertyCommand]" Column="PropertyName" />
+                  </DefinedValue>
+                  <DefinedValue>
+                    <ColumnReference Column="Union1021" />
+                    <ColumnReference Column="Union1021" />
+                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[AutoCommand]" Column="Name" />
+                  </DefinedValue>
+                </DefinedValues>
+                <RelOp AvgRowSize="367" EstimateCPU="9.24493" EstimateIO="0" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="1136670" LogicalOp="Union" NodeId="1" Parallel="false" PhysicalOp="Hash Match" EstimatedTotalSubtreeCost="14.0696">
+                  <OutputList>
+                    <ColumnReference Column="Union1018" />
+                    <ColumnReference Column="Union1019" />
+                    <ColumnReference Column="Union1020" />
+                    <ColumnReference Column="Union1021" />
+                  </OutputList>
+                  <MemoryFractions Input="0.841328" Output="0.00441527" />
+                  <RunTimeInformation>
+                    <RunTimeCountersPerThread Thread="0" ActualRows="482339" ActualEndOfScans="1" ActualExecutions="1" />
+                  </RunTimeInformation>
+                  <Hash>
+                    <DefinedValues>
+                      <DefinedValue>
+                        <ColumnReference Column="Union1018" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="UserLogin" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Column="UserLogin" />
+                      </DefinedValue>
+                      <DefinedValue>
+                        <ColumnReference Column="Union1019" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="RoleName" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Column="RoleName" />
+                      </DefinedValue>
+                      <DefinedValue>
+                        <ColumnReference Column="Union1020" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="PropertyName" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Column="PropertyName" />
+                      </DefinedValue>
+                      <DefinedValue>
+                        <ColumnReference Column="Union1021" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[InheritedCommand]" Column="Name" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Column="CommandName" />
+                      </DefinedValue>
+                    </DefinedValues>
+                    <RelOp AvgRowSize="120" EstimateCPU="0.0375363" EstimateIO="0.0112613" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="2157.78" LogicalOp="Distinct Sort" NodeId="2" Parallel="false" PhysicalOp="Sort" EstimatedTotalSubtreeCost="0.194853">
+                      <OutputList>
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="UserLogin" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="RoleName" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="PropertyName" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[InheritedCommand]" Column="Name" />
+                      </OutputList>
+                      <MemoryFractions Input="1" Output="0.158672" />
+                      <RunTimeInformation>
+                        <RunTimeCountersPerThread Thread="0" ActualRebinds="1" ActualRewinds="0" ActualRows="231452" ActualEndOfScans="1" ActualExecutions="1" />
+                      </RunTimeInformation>
+                      <Sort Distinct="true">
+                        <OrderBy>
+                          <OrderByColumn Ascending="true">
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="UserLogin" />
+                          </OrderByColumn>
+                          <OrderByColumn Ascending="true">
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="RoleName" />
+                          </OrderByColumn>
+                          <OrderByColumn Ascending="true">
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="PropertyName" />
+                          </OrderByColumn>
+                          <OrderByColumn Ascending="true">
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[InheritedCommand]" Column="Name" />
+                          </OrderByColumn>
+                        </OrderBy>
+                        <RelOp AvgRowSize="120" EstimateCPU="0.0669982" EstimateIO="0" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="2165.72" LogicalOp="Inner Join" NodeId="3" Parallel="false" PhysicalOp="Hash Match" EstimatedTotalSubtreeCost="0.146055">
+                          <OutputList>
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="UserLogin" />
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="RoleName" />
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="PropertyName" />
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[InheritedCommand]" Column="Name" />
+                          </OutputList>
+                          <MemoryFractions Input="0" Output="0" />
+                          <RunTimeInformation>
+                            <RunTimeCountersPerThread Thread="0" ActualRows="231452" ActualEndOfScans="1" ActualExecutions="1" />
+                          </RunTimeInformation>
+                          <Hash>
+                            <DefinedValues />
+                            <HashKeysBuild>
+                              <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="RoleName" />
+                            </HashKeysBuild>
+                            <HashKeysProbe>
+                              <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="RoleName" />
+                            </HashKeysProbe>
+                            <ProbeResidual>
+                              <ScalarOperator ScalarString="[MMSCBD].[dbo].[UserRole].[RoleName] as [InheritedUserRole].[RoleName]=[MMSCBD].[dbo].[RoleCommand].[RoleName] as [InheritedRoleCommand].[RoleName]">
+                                <Compare CompareOp="EQ">
+                                  <ScalarOperator>
+                                    <Identifier>
+                                      <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="RoleName" />
+                                    </Identifier>
+                                  </ScalarOperator>
+                                  <ScalarOperator>
+                                    <Identifier>
+                                      <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="RoleName" />
+                                    </Identifier>
+                                  </ScalarOperator>
+                                </Compare>
+                              </ScalarOperator>
+                            </ProbeResidual>
+                            <RelOp AvgRowSize="102" EstimateCPU="0.0232967" EstimateIO="0" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="13.8701" LogicalOp="Inner Join" NodeId="4" Parallel="false" PhysicalOp="Hash Match" EstimatedTotalSubtreeCost="0.0374462">
+                              <OutputList>
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="RoleName" />
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="PropertyName" />
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[InheritedCommand]" Column="Name" />
+                              </OutputList>
+                              <MemoryFractions Input="0" Output="0" />
+                              <RunTimeInformation>
+                                <RunTimeCountersPerThread Thread="0" ActualRows="532" ActualEndOfScans="1" ActualExecutions="1" />
+                              </RunTimeInformation>
+                              <Hash>
+                                <DefinedValues />
+                                <HashKeysBuild>
+                                  <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[InheritedCommand]" Column="PermissionCommand" />
+                                </HashKeysBuild>
+                                <HashKeysProbe>
+                                  <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="CommandName" />
+                                </HashKeysProbe>
+                                <ProbeResidual>
+                                  <ScalarOperator ScalarString="[MMSCBD].[dbo].[Command].[PermissionCommand] as [InheritedCommand].[PermissionCommand]=[MMSCBD].[dbo].[RoleCommand].[CommandName] as [InheritedRoleCommand].[CommandName]">
+                                    <Compare CompareOp="EQ">
+                                      <ScalarOperator>
+                                        <Identifier>
+                                          <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[InheritedCommand]" Column="PermissionCommand" />
+                                        </Identifier>
+                                      </ScalarOperator>
+                                      <ScalarOperator>
+                                        <Identifier>
+                                          <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="CommandName" />
+                                        </Identifier>
+                                      </ScalarOperator>
+                                    </Compare>
+                                  </ScalarOperator>
+                                </ProbeResidual>
+                                <RelOp AvgRowSize="38" EstimateCPU="0.0001812" EstimateIO="0.003125" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="2" LogicalOp="Clustered Index Scan" NodeId="5" Parallel="false" PhysicalOp="Clustered Index Scan" EstimatedTotalSubtreeCost="0.0033062" TableCardinality="22">
+                                  <OutputList>
+                                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[InheritedCommand]" Column="Name" />
+                                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[InheritedCommand]" Column="PermissionCommand" />
+                                  </OutputList>
+                                  <RunTimeInformation>
+                                    <RunTimeCountersPerThread Thread="0" ActualRows="2" ActualEndOfScans="1" ActualExecutions="1" />
+                                  </RunTimeInformation>
+                                  <IndexScan Ordered="false" ForcedIndex="false" ForceScan="false" NoExpandHint="false">
+                                    <DefinedValues>
+                                      <DefinedValue>
+                                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[InheritedCommand]" Column="Name" />
+                                      </DefinedValue>
+                                      <DefinedValue>
+                                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[InheritedCommand]" Column="PermissionCommand" />
+                                      </DefinedValue>
+                                    </DefinedValues>
+                                    <Object Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Index="[PK_Command_Id]" Alias="[InheritedCommand]" IndexKind="Clustered" />
+                                    <Predicate>
+                                      <ScalarOperator ScalarString="[MMSCBD].[dbo].[Command].[PermissionType] as [InheritedCommand].[PermissionType]=N'INHERITED'">
+                                        <Compare CompareOp="EQ">
+                                          <ScalarOperator>
+                                            <Identifier>
+                                              <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[InheritedCommand]" Column="PermissionType" />
+                                            </Identifier>
+                                          </ScalarOperator>
+                                          <ScalarOperator>
+                                            <Const ConstValue="N'INHERITED'" />
+                                          </ScalarOperator>
+                                        </Compare>
+                                      </ScalarOperator>
+                                    </Predicate>
+                                  </IndexScan>
+                                </RelOp>
+                                <RelOp AvgRowSize="97" EstimateCPU="0.0010381" EstimateIO="0.00979167" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="801" LogicalOp="Index Scan" NodeId="6" Parallel="false" PhysicalOp="Index Scan" EstimatedTotalSubtreeCost="0.0108298" TableCardinality="801">
+                                  <OutputList>
+                                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="RoleName" />
+                                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="PropertyName" />
+                                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="CommandName" />
+                                  </OutputList>
+                                  <RunTimeInformation>
+                                    <RunTimeCountersPerThread Thread="0" ActualRows="801" ActualEndOfScans="1" ActualExecutions="1" />
+                                  </RunTimeInformation>
+                                  <IndexScan Ordered="false" ForcedIndex="false" ForceSeek="false" ForceScan="false" NoExpandHint="false">
+                                    <DefinedValues>
+                                      <DefinedValue>
+                                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="RoleName" />
+                                      </DefinedValue>
+                                      <DefinedValue>
+                                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="PropertyName" />
+                                      </DefinedValue>
+                                      <DefinedValue>
+                                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Alias="[InheritedRoleCommand]" Column="CommandName" />
+                                      </DefinedValue>
+                                    </DefinedValues>
+                                    <Object Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Index="[UQ_RoleCommand_RoleName_PropertyName_CommandName]" Alias="[InheritedRoleCommand]" IndexKind="NonClustered" />
+                                  </IndexScan>
+                                </RelOp>
+                              </Hash>
+                            </RelOp>
+                            <RelOp AvgRowSize="49" EstimateCPU="0.0073719" EstimateIO="0.0342361" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="6559" LogicalOp="Index Scan" NodeId="8" Parallel="false" PhysicalOp="Index Scan" EstimatedTotalSubtreeCost="0.041608" TableCardinality="6559">
+                              <OutputList>
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="UserLogin" />
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="RoleName" />
+                              </OutputList>
+                              <RunTimeInformation>
+                                <RunTimeCountersPerThread Thread="0" ActualRows="6559" ActualEndOfScans="1" ActualExecutions="1" />
+                              </RunTimeInformation>
+                              <IndexScan Ordered="false" ForcedIndex="false" ForceSeek="false" ForceScan="false" NoExpandHint="false">
+                                <DefinedValues>
+                                  <DefinedValue>
+                                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="UserLogin" />
+                                  </DefinedValue>
+                                  <DefinedValue>
+                                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[InheritedUserRole]" Column="RoleName" />
+                                  </DefinedValue>
+                                </DefinedValues>
+                                <Object Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Index="[UQ_UserRole_UserLogin_RoleName]" Alias="[InheritedUserRole]" IndexKind="NonClustered" />
+                              </IndexScan>
+                            </RelOp>
+                          </Hash>
+                        </RelOp>
+                      </Sort>
+                    </RelOp>
+                    <RelOp AvgRowSize="115" EstimateCPU="0.627781" EstimateIO="0" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="250837" LogicalOp="Inner Join" NodeId="10" Parallel="false" PhysicalOp="Hash Match" EstimatedTotalSubtreeCost="0.680221">
+                      <OutputList>
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Column="UserLogin" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Column="RoleName" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Column="PropertyName" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Column="CommandName" />
+                      </OutputList>
+                      <MemoryFractions Input="0" Output="0" />
+                      <RunTimeInformation>
+                        <RunTimeCountersPerThread Thread="0" ActualRows="250889" ActualEndOfScans="1" ActualExecutions="1" />
+                      </RunTimeInformation>
+                      <Hash>
+                        <DefinedValues />
+                        <HashKeysBuild>
+                          <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Column="RoleName" />
+                        </HashKeysBuild>
+                        <HashKeysProbe>
+                          <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Column="RoleName" />
+                        </HashKeysProbe>
+                        <ProbeResidual>
+                          <ScalarOperator ScalarString="[MMSCBD].[dbo].[RoleCommand].[RoleName]=[MMSCBD].[dbo].[UserRole].[RoleName]">
+                            <Compare CompareOp="EQ">
+                              <ScalarOperator>
+                                <Identifier>
+                                  <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Column="RoleName" />
+                                </Identifier>
+                              </ScalarOperator>
+                              <ScalarOperator>
+                                <Identifier>
+                                  <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Column="RoleName" />
+                                </Identifier>
+                              </ScalarOperator>
+                            </Compare>
+                          </ScalarOperator>
+                        </ProbeResidual>
+                        <RelOp AvgRowSize="97" EstimateCPU="0.0010381" EstimateIO="0.00979167" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="801" LogicalOp="Index Scan" NodeId="11" Parallel="false" PhysicalOp="Index Scan" EstimatedTotalSubtreeCost="0.0108298" TableCardinality="801">
+                          <OutputList>
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Column="RoleName" />
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Column="PropertyName" />
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Column="CommandName" />
+                          </OutputList>
+                          <RunTimeInformation>
+                            <RunTimeCountersPerThread Thread="0" ActualRows="801" ActualEndOfScans="1" ActualExecutions="1" />
+                          </RunTimeInformation>
+                          <IndexScan Ordered="false" ForcedIndex="false" ForceSeek="false" ForceScan="false" NoExpandHint="false">
+                            <DefinedValues>
+                              <DefinedValue>
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Column="RoleName" />
+                              </DefinedValue>
+                              <DefinedValue>
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Column="PropertyName" />
+                              </DefinedValue>
+                              <DefinedValue>
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Column="CommandName" />
+                              </DefinedValue>
+                            </DefinedValues>
+                            <Object Database="[MMSCBD]" Schema="[dbo]" Table="[RoleCommand]" Index="[UQ_RoleCommand_RoleName_PropertyName_CommandName]" IndexKind="NonClustered" />
+                          </IndexScan>
+                        </RelOp>
+                        <RelOp AvgRowSize="49" EstimateCPU="0.0073719" EstimateIO="0.0342361" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="6559" LogicalOp="Index Scan" NodeId="12" Parallel="false" PhysicalOp="Index Scan" EstimatedTotalSubtreeCost="0.041608" TableCardinality="6559">
+                          <OutputList>
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Column="UserLogin" />
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Column="RoleName" />
+                          </OutputList>
+                          <RunTimeInformation>
+                            <RunTimeCountersPerThread Thread="0" ActualRows="6559" ActualEndOfScans="1" ActualExecutions="1" />
+                          </RunTimeInformation>
+                          <IndexScan Ordered="false" ForcedIndex="false" ForceSeek="false" ForceScan="false" NoExpandHint="false">
+                            <DefinedValues>
+                              <DefinedValue>
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Column="UserLogin" />
+                              </DefinedValue>
+                              <DefinedValue>
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Column="RoleName" />
+                              </DefinedValue>
+                            </DefinedValues>
+                            <Object Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Index="[UQ_UserRole_UserLogin_RoleName]" IndexKind="NonClustered" />
+                          </IndexScan>
+                        </RelOp>
+                      </Hash>
+                    </RelOp>
+                  </Hash>
+                </RelOp>
+                <RelOp AvgRowSize="113" EstimateCPU="3.69377" EstimateIO="0" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="883676" LogicalOp="Inner Join" NodeId="15" Parallel="false" PhysicalOp="Nested Loops" EstimatedTotalSubtreeCost="3.94961">
+                  <OutputList>
+                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[AutoUserRole]" Column="UserLogin" />
+                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[AutoUserRole]" Column="RoleName" />
+                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[AutoCommand]" Column="Name" />
+                    <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[PropertyCommand]" Alias="[AutoPropertyCommand]" Column="PropertyName" />
+                  </OutputList>
+                  <Warnings NoJoinPredicate="true" />
+                  <RunTimeInformation>
+                    <RunTimeCountersPerThread Thread="0" ActualRows="642782" ActualEndOfScans="1" ActualExecutions="1" />
+                  </RunTimeInformation>
+                  <NestedLoops Optimized="false">
+                    <RelOp AvgRowSize="73" EstimateCPU="0.0215964" EstimateIO="0" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="134.727" LogicalOp="Inner Join" NodeId="16" Parallel="false" PhysicalOp="Hash Match" EstimatedTotalSubtreeCost="0.0317045">
+                      <OutputList>
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[AutoCommand]" Column="Name" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[PropertyCommand]" Alias="[AutoPropertyCommand]" Column="PropertyName" />
+                      </OutputList>
+                      <MemoryFractions Input="0" Output="0" />
+                      <RunTimeInformation>
+                        <RunTimeCountersPerThread Thread="0" ActualRows="98" ActualEndOfScans="1" ActualExecutions="1" />
+                      </RunTimeInformation>
+                      <Hash>
+                        <DefinedValues />
+                        <HashKeysBuild>
+                          <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[AutoCommand]" Column="Name" />
+                        </HashKeysBuild>
+                        <HashKeysProbe>
+                          <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[PropertyCommand]" Alias="[AutoPropertyCommand]" Column="CommandName" />
+                        </HashKeysProbe>
+                        <ProbeResidual>
+                          <ScalarOperator ScalarString="[MMSCBD].[dbo].[PropertyCommand].[CommandName] as [AutoPropertyCommand].[CommandName]=[MMSCBD].[dbo].[Command].[Name] as [AutoCommand].[Name]">
+                            <Compare CompareOp="EQ">
+                              <ScalarOperator>
+                                <Identifier>
+                                  <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[PropertyCommand]" Alias="[AutoPropertyCommand]" Column="CommandName" />
+                                </Identifier>
+                              </ScalarOperator>
+                              <ScalarOperator>
+                                <Identifier>
+                                  <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[AutoCommand]" Column="Name" />
+                                </Identifier>
+                              </ScalarOperator>
+                            </Compare>
+                          </ScalarOperator>
+                        </ProbeResidual>
+                        <RelOp AvgRowSize="35" EstimateCPU="0.0001812" EstimateIO="0.003125" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="6" LogicalOp="Clustered Index Scan" NodeId="17" Parallel="false" PhysicalOp="Clustered Index Scan" EstimatedTotalSubtreeCost="0.0033062" TableCardinality="22">
+                          <OutputList>
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[AutoCommand]" Column="Name" />
+                          </OutputList>
+                          <RunTimeInformation>
+                            <RunTimeCountersPerThread Thread="0" ActualRows="6" ActualEndOfScans="1" ActualExecutions="1" />
+                          </RunTimeInformation>
+                          <IndexScan Ordered="false" ForcedIndex="false" ForceScan="false" NoExpandHint="false">
+                            <DefinedValues>
+                              <DefinedValue>
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[AutoCommand]" Column="Name" />
+                              </DefinedValue>
+                            </DefinedValues>
+                            <Object Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Index="[PK_Command_Id]" Alias="[AutoCommand]" IndexKind="Clustered" />
+                            <Predicate>
+                              <ScalarOperator ScalarString="[MMSCBD].[dbo].[Command].[PermissionType] as [AutoCommand].[PermissionType]=N'AUTO'">
+                                <Compare CompareOp="EQ">
+                                  <ScalarOperator>
+                                    <Identifier>
+                                      <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[Command]" Alias="[AutoCommand]" Column="PermissionType" />
+                                    </Identifier>
+                                  </ScalarOperator>
+                                  <ScalarOperator>
+                                    <Const ConstValue="N'AUTO'" />
+                                  </ScalarOperator>
+                                </Compare>
+                              </ScalarOperator>
+                            </Predicate>
+                          </IndexScan>
+                        </RelOp>
+                        <RelOp AvgRowSize="72" EstimateCPU="0.0007004" EstimateIO="0.00608796" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="494" LogicalOp="Index Scan" NodeId="18" Parallel="false" PhysicalOp="Index Scan" EstimatedTotalSubtreeCost="0.00678836" TableCardinality="494">
+                          <OutputList>
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[PropertyCommand]" Alias="[AutoPropertyCommand]" Column="PropertyName" />
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[PropertyCommand]" Alias="[AutoPropertyCommand]" Column="CommandName" />
+                          </OutputList>
+                          <RunTimeInformation>
+                            <RunTimeCountersPerThread Thread="0" ActualRows="494" ActualEndOfScans="1" ActualExecutions="1" />
+                          </RunTimeInformation>
+                          <IndexScan Ordered="false" ForcedIndex="false" ForceSeek="false" ForceScan="false" NoExpandHint="false">
+                            <DefinedValues>
+                              <DefinedValue>
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[PropertyCommand]" Alias="[AutoPropertyCommand]" Column="PropertyName" />
+                              </DefinedValue>
+                              <DefinedValue>
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[PropertyCommand]" Alias="[AutoPropertyCommand]" Column="CommandName" />
+                              </DefinedValue>
+                            </DefinedValues>
+                            <Object Database="[MMSCBD]" Schema="[dbo]" Table="[PropertyCommand]" Index="[UQ_PropertyCommand_PropertyName_CommandName]" Alias="[AutoPropertyCommand]" IndexKind="NonClustered" />
+                          </IndexScan>
+                        </RelOp>
+                      </Hash>
+                    </RelOp>
+                    <RelOp AvgRowSize="49" EstimateCPU="0.00128082" EstimateIO="0.01" EstimateRebinds="0" EstimateRewinds="133.727" EstimateRows="6559" LogicalOp="Lazy Spool" NodeId="20" Parallel="false" PhysicalOp="Table Spool" EstimatedTotalSubtreeCost="0.224143">
+                      <OutputList>
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[AutoUserRole]" Column="UserLogin" />
+                        <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[AutoUserRole]" Column="RoleName" />
+                      </OutputList>
+                      <RunTimeInformation>
+                        <RunTimeCountersPerThread Thread="0" ActualRebinds="1" ActualRewinds="97" ActualRows="642782" ActualEndOfScans="98" ActualExecutions="98" />
+                      </RunTimeInformation>
+                      <Spool>
+                        <RelOp AvgRowSize="49" EstimateCPU="0.0073719" EstimateIO="0.0342361" EstimateRebinds="0" EstimateRewinds="0" EstimateRows="6559" LogicalOp="Index Scan" NodeId="21" Parallel="false" PhysicalOp="Index Scan" EstimatedTotalSubtreeCost="0.041608" TableCardinality="6559">
+                          <OutputList>
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[AutoUserRole]" Column="UserLogin" />
+                            <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[AutoUserRole]" Column="RoleName" />
+                          </OutputList>
+                          <RunTimeInformation>
+                            <RunTimeCountersPerThread Thread="0" ActualRows="6559" ActualEndOfScans="1" ActualExecutions="1" />
+                          </RunTimeInformation>
+                          <IndexScan Ordered="false" ForcedIndex="false" ForceSeek="false" ForceScan="false" NoExpandHint="false">
+                            <DefinedValues>
+                              <DefinedValue>
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[AutoUserRole]" Column="UserLogin" />
+                              </DefinedValue>
+                              <DefinedValue>
+                                <ColumnReference Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Alias="[AutoUserRole]" Column="RoleName" />
+                              </DefinedValue>
+                            </DefinedValues>
+                            <Object Database="[MMSCBD]" Schema="[dbo]" Table="[UserRole]" Index="[UQ_UserRole_UserLogin_RoleName]" Alias="[AutoUserRole]" IndexKind="NonClustered" />
+                          </IndexScan>
+                        </RelOp>
+                      </Spool>
+                    </RelOp>
+                  </NestedLoops>
+                </RelOp>
+              </Hash>
+            </RelOp>
+          </QueryPlan>
+        </StmtSimple>
+      </Statements>
+    </Batch>
+  </BatchSequence>
+</ShowPlanXML>

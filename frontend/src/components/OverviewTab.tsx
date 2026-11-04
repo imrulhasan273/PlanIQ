@@ -28,7 +28,9 @@ import {
   Code2,
   Target,
   GitFork,
-  Filter
+  Filter,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { PlanAnalysis, StatementAnalysis, SniffedParameter, IQPFeature } from '../types/plan';
 import { DiagnosticTooltip } from './DiagnosticTooltip';
@@ -58,6 +60,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const [isParamSniffingOpen, setIsParamSniffingOpen] = React.useState<boolean>(false);
   const [isAdaptiveOpen, setIsAdaptiveOpen] = React.useState<boolean>(false);
+  const [isPleExpanded, setIsPleExpanded] = React.useState<boolean>(true);
 
   const handleCopy = (text: string, id: string) => {
     if (navigator?.clipboard?.writeText) {
@@ -139,6 +142,105 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           )}
         </div>
       )}
+
+      {/* Feature B: Execution Plan PLE Risk Rating */}
+      {plan.pleRiskReport && (() => {
+        const ple = plan.pleRiskReport;
+        const riskLevel = ple.riskLevel || 'LOW';
+        const score = typeof ple.score === 'number' ? ple.score : 0;
+        const scanVolume = typeof ple.estimatedScanVolumeMb === 'number' ? ple.estimatedScanVolumeMb : 0;
+        const headline = ple.headline || `${riskLevel} Buffer Pool Ingestion & PLE Threat`;
+        const summary = ple.summary || 'Execution plan operations ingest estimated data pages into memory, creating buffer pool eviction pressure and Page Life Expectancy (PLE) volatility.';
+        const evictionRisk = ple.bufferPoolEvictionRisk || (riskLevel === 'CRITICAL' ? 'Catastrophic (>35% eviction per run)' : riskLevel === 'HIGH' ? 'High (~10-25% eviction per run)' : 'Moderate (~2-8% eviction)');
+        const action = ple.mitigationAction || 'Review table scans and missing indexes to convert high-volume scans into targeted index seeks.';
+        const culpritOps = Array.isArray(ple.culpritOperators) ? ple.culpritOperators : [];
+
+        return (
+          <div className={`ple-risk-card glass-panel ple-risk-${riskLevel.toLowerCase()} ${isPleExpanded ? 'is-expanded' : 'is-compact'}`}>
+            <div
+              className="ple-risk-top-row"
+              onClick={() => setIsPleExpanded(!isPleExpanded)}
+              role="button"
+              tabIndex={0}
+              title={isPleExpanded ? "Click to collapse PLE threat breakdown" : "Click to view detailed PLE threat breakdown"}
+            >
+              <div className="ple-risk-title-tag">
+                <HardDrive size={15} color="#38bdf8" />
+                <span className="ple-risk-title-main">Execution Plan PLE Risk Rating</span>
+                <span className="ple-risk-title-sub">(Buffer Pool Eviction Threat)</span>
+              </div>
+
+              <div className="ple-risk-top-actions">
+                <div className="ple-risk-top-metrics">
+                  <span className="ple-pill-vol" title="Estimated Buffer Scan Volume">~{scanVolume.toFixed(1)} MB Read</span>
+                  <span className="ple-pill-risk" title="Buffer Pool Eviction Threat Level">{evictionRisk}</span>
+                </div>
+                <span className={`badge ple-badge ple-badge-${riskLevel.toLowerCase()}`}>
+                  {riskLevel} THREAT • Score {score}/100
+                </span>
+                <button
+                  type="button"
+                  className="ple-expand-toggle-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsPleExpanded(!isPleExpanded);
+                  }}
+                  title={isPleExpanded ? "Collapse Details" : "Expand Details"}
+                  aria-label={isPleExpanded ? "Collapse Details" : "Expand Details"}
+                >
+                  {isPleExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+              </div>
+            </div>
+
+            {isPleExpanded && (
+              <div className="ple-risk-expanded-body">
+                <div className="ple-risk-content-grid">
+                  <div className="ple-risk-main">
+                    <h3 className="ple-risk-headline">{headline}</h3>
+                    <p className="ple-risk-summary">{summary}</p>
+
+                    {culpritOps.length > 0 && (
+                      <div className="ple-culprit-ops">
+                        <span className="ple-ops-label">Culprit Operators Forcing Eviction:</span>
+                        <div className="ple-ops-tags">
+                          {culpritOps.map((op, i) => (
+                            <span key={i} className="ple-op-tag">
+                              <AlertTriangle size={11} />
+                              {op}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="ple-risk-side-metrics">
+                    <div className="ple-side-metric-item">
+                      <span className="ple-side-label">Buffer Ingestion Volume</span>
+                      <span className="ple-side-val">~{scanVolume.toFixed(1)} MB</span>
+                      <span className="ple-side-sub">Estimated data pages read</span>
+                    </div>
+                    <div className="ple-side-metric-item">
+                      <span className="ple-side-label">Buffer Eviction Risk</span>
+                      <span className="ple-side-val">{evictionRisk}</span>
+                      <span className="ple-side-sub">Impact on cached tables</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="ple-remedy-box">
+                  <div className="ple-remedy-label">
+                    <CheckCircle2 size={15} color="#34d399" />
+                    <strong>Buffer Pool Protection Action:</strong>
+                  </div>
+                  <div className="ple-remedy-text">{action}</div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Plan Health Score & Deep XML Diagnostics Dashboard */}
       {diag && (

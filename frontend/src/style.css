@@ -505,6 +505,23 @@ html, body {
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.03) !important;
 }
 
+/* ── SolarWinds DPA Query Detail Light Theme Rules ── */
+.light-theme .dpa-query-wait-detail {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08) !important;
+}
+.light-theme .dpa-breadcrumb-bar {
+  background: #f8fafc !important;
+  color: #1e293b !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+.light-theme .dpa-bottom-tabs-bar {
+  background: #f1f5f9 !important;
+  border-top: 1px solid #e2e8f0 !important;
+}
+
 /* ── Buttons ── */
 .light-theme .btn-secondary {
   background: #ffffff !important;
@@ -953,6 +970,47 @@ html, body {
   background: #ffffff !important;
   border-bottom: 1px solid #e2e8f0 !important;
 }
+/* Light theme PLE Pill overrides */
+.light-theme .ple-topbar-pill.ple-risk-critical {
+  background: #fef2f2 !important;
+  border: 1px solid #ef4444 !important;
+  color: #991b1b !important;
+}
+.light-theme .ple-topbar-pill.ple-risk-critical .ple-pill-vol {
+  background: #fee2e2 !important;
+  color: #7f1d1d !important;
+  border: 1px solid #fca5a5 !important;
+}
+.light-theme .ple-topbar-pill.ple-risk-high {
+  background: #fff7ed !important;
+  border: 1px solid #ea580c !important;
+  color: #9a3412 !important;
+}
+.light-theme .ple-topbar-pill.ple-risk-high .ple-pill-vol {
+  background: #fed7aa !important;
+  color: #7c2d12 !important;
+  border: 1px solid #fdba74 !important;
+}
+.light-theme .ple-topbar-pill.ple-risk-moderate {
+  background: #fefce8 !important;
+  border: 1px solid #ca8a04 !important;
+  color: #854d0e !important;
+}
+.light-theme .ple-topbar-pill.ple-risk-moderate .ple-pill-vol {
+  background: #fef08a !important;
+  color: #713f12 !important;
+  border: 1px solid #fde047 !important;
+}
+.light-theme .ple-topbar-pill.ple-risk-low {
+  background: #f0fdf4 !important;
+  border: 1px solid #16a34a !important;
+  color: #166534 !important;
+}
+.light-theme .ple-topbar-pill.ple-risk-low .ple-pill-vol {
+  background: #bbf7d0 !important;
+  color: #14532d !important;
+  border: 1px solid #86efac !important;
+}
 .light-theme .stmt-dropdown {
   background: #ffffff !important;
   border: 1px solid #cbd5e1 !important;
@@ -1047,6 +1105,9 @@ html, body {
 .light-theme .inspector-tab-switcher {
   background: #f1f5f9 !important;
   border: 1px solid #e2e8f0 !important;
+}
+.light-theme .inspector-tab-switcher::-webkit-scrollbar-thumb {
+  background: rgba(2, 132, 199, 0.35) !important;
 }
 .light-theme .inspector-tab-btn {
   color: #64748b !important;
@@ -1698,7 +1759,117 @@ html, body {
 }
 .light-theme .tuning-strategies-label {
   color: #0284c7 !important;
+  font-weight: 800 !important;
 }
+.light-theme .badge-strategy {
+  background: #ecfdf5 !important;
+  border: 1px solid #a7f3d0 !important;
+  color: #065f46 !important;
+  font-weight: 700 !important;
+}
+.light-theme .badge-strategy svg {
+  color: #059669 !important;
+}
+
+/* ── AI Advisor: Multi-Strategy Selector Tabs ── */
+.light-theme .rewrite-strategy-tabs {
+  background: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+.light-theme .strategy-tab-btn {
+  color: #475569 !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  font-weight: 600 !important;
+}
+.light-theme .strategy-tab-btn:hover {
+  color: #0f172a !important;
+  background: #e2e8f0 !important;
+}
+.light-theme .strategy-tab-btn.active {
+  background: #ffffff !important;
+  border-color: #0284c7 !important;
+  color: #0284c7 !important;
+  box-shadow: 0 1px 4px rgba(2, 132, 199, 0.15) !important;
+  font-weight: 700 !important;
+}
+
+/* ── AI Advisor: Strategy Meta Banner & Gain Badge ── */
+.light-theme .strategy-meta-banner {
+  background: #f0f9ff !important;
+  border: 1px solid #bae6fd !important;
+  color: #0369a1 !important;
+  font-weight: 600 !important;
+}
+.light-theme .strategy-gain-badge {
+  background: #ecfdf5 !important;
+  border: 1px solid #86efac !important;
+  color: #065f46 !important;
+  font-weight: 700 !important;
+}
+.light-theme .strategy-gain-badge svg {
+  color: #059669 !important;
+}
+
+/* ── AI Advisor: Diff View Mode Toggle ── */
+.light-theme .diff-view-mode-toggle {
+  background: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+.light-theme .btn-toggle-sm {
+  color: #64748b !important;
+  background: transparent !important;
+}
+.light-theme .btn-toggle-sm:hover {
+  color: #0f172a !important;
+  background: #e2e8f0 !important;
+}
+.light-theme .btn-toggle-sm.active {
+  background: #ffffff !important;
+  color: #0284c7 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+  font-weight: 700 !important;
+}
+
+/* ── AI Advisor: Why This Rewrite Is Faster ── */
+.light-theme .rewrite-explanation {
+  background: #fffbeb !important;
+  border: 1px solid #fde68a !important;
+}
+.light-theme .explanation-title {
+  color: #b45309 !important;
+  font-weight: 700 !important;
+}
+.light-theme .rewrite-explanation .text-muted,
+.light-theme .rewrite-explanation p {
+  color: #334155 !important;
+}
+
+/* ── AI Advisor: Checklist Items ── */
+.light-theme .checklist-item {
+  background: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
+}
+.light-theme .checklist-item:hover {
+  background: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+}
+.light-theme .checklist-item.checked {
+  background: #f8fafc !important;
+  color: #94a3b8 !important;
+}
+
+/* ── AI Advisor: Offline Mode Banner ── */
+.light-theme .offline-banner {
+  background: #f5f3ff !important;
+  border: 1px solid #ddd6fe !important;
+}
+.light-theme .offline-banner-text {
+  color: #4c1d95 !important;
+}
+
 
 /* ── Wait Stats Tab ── */
 .light-theme .wait-stat-card {
@@ -1893,6 +2064,11 @@ html, body {
   color: #475569 !important;
 }
 
+.light-theme [style*="color: #64748b"],
+.light-theme [style*="color: rgb(100, 116, 139)"] {
+  color: #334155 !important;
+}
+
 .light-theme [style*="color: #cbd5e1"],
 .light-theme [style*="color: rgb(203, 213, 225)"] {
   color: #334155 !important;
@@ -2016,10 +2192,24 @@ html, body {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06) !important;
 }
 
-.light-theme [style*="linear-gradient(135deg, rgba(244, 63, 94, 0.12) 0%, rgba(15, 23, 42, 0.85) 100%)"],
-.light-theme [style*="linear-gradient(90deg, rgba(244, 63, 94, 0.08) 0%, rgba(30, 41, 59, 0.4) 100%)"] {
-  background: #fef2f2 !important;
-  border-color: #f87171 !important;
+.light-theme [style*="linear-gradient(135deg, rgba(244, 63, 94,"],
+.light-theme [style*="linear-gradient(90deg, rgba(244, 63, 94,"],
+.light-theme [style*="linear-gradient(135deg, rgba(239, 68, 68,"],
+.light-theme [style*="linear-gradient(90deg, rgba(239, 68, 68,"] {
+  background: linear-gradient(135deg, #fff1f2 0%, #fee2e2 100%) !important;
+  border-color: #fca5a5 !important;
+}
+
+.light-theme [style*="linear-gradient(135deg, rgba(245, 158, 11,"],
+.light-theme [style*="linear-gradient(90deg, rgba(245, 158, 11,"] {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%) !important;
+  border-color: #fcd34d !important;
+}
+
+.light-theme [style*="linear-gradient(135deg, rgba(16, 185, 129,"],
+.light-theme [style*="linear-gradient(90deg, rgba(16, 185, 129,"] {
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%) !important;
+  border-color: #86efac !important;
 }
 
 /* =============================================================================
@@ -6246,5 +6436,227 @@ html, body {
   background: #ffffff !important;
   border: 1px solid #cbd5e1 !important;
 }
+
+/* ============================================================
+   Categorized Property Group Cards (PerformanceStudio / SSMS)
+   ============================================================ */
+.category-group-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  transition: border-color 0.15s ease;
+}
+
+.category-group-card:hover {
+  border-color: rgba(56, 189, 248, 0.25);
+}
+
+.category-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(2, 6, 23, 0.75);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.category-group-header:hover {
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.category-group-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #e2e8f0;
+}
+
+.category-group-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+}
+
+.category-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-category-action {
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-category-action:hover {
+  background: rgba(56, 189, 248, 0.22);
+  color: #ffffff;
+}
+
+.btn-category-collapse {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  padding: 2px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+}
+
+.btn-category-collapse:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ssms-prop-val.highlight-good {
+  color: #34d399 !important;
+  font-weight: 700;
+}
+
+/* Light Theme overrides for Categorized Property Cards */
+.light-theme .category-group-card {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
+}
+
+.light-theme .category-group-header {
+  background: #f8fafc !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+.light-theme .category-group-header:hover {
+  background: #f1f5f9 !important;
+}
+
+.light-theme .category-group-title {
+  color: #0f172a !important;
+}
+
+.light-theme .category-group-badge {
+  background: #e2e8f0 !important;
+  color: #475569 !important;
+}
+
+.light-theme .btn-category-action {
+  background: #f0f9ff !important;
+  border: 1px solid #bae6fd !important;
+  color: #0284c7 !important;
+}
+
+.light-theme .btn-category-action:hover {
+  background: #e0f2fe !important;
+  color: #0369a1 !important;
+}
+
+.light-theme .btn-category-collapse {
+  color: #64748b !important;
+}
+
+.light-theme .btn-category-collapse:hover {
+  color: #0f172a !important;
+  background: #e2e8f0 !important;
+}
+
+.light-theme .ssms-prop-val.highlight-good {
+  color: #059669 !important;
+}
+
+/* ========================================================
+   QUERY STORE PERFORMANCE STUDIO STYLES
+   ======================================================== */
+.query-store-studio-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+.qs-performance-table th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #0f172a;
+}
+
+.qs-performance-table tr:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+.qs-performance-table tr.selected {
+  background: rgba(2, 132, 199, 0.32) !important;
+}
+
+/* Light Theme Adaptations for Query Store Studio */
+.light-theme .qs-time-header {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.light-theme .qs-metric-chart-panel,
+.light-theme .qs-wait-stats-panel {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+.light-theme .qs-toolbar {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.light-theme .qs-grid-panel {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.light-theme .qs-performance-table th {
+  background: #f1f5f9 !important;
+  color: #475569 !important;
+  border-bottom: 2px solid #cbd5e1 !important;
+}
+
+.light-theme .qs-performance-table td {
+  color: #1e293b !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+.light-theme .qs-performance-table tr:hover {
+  background: #f8fafc !important;
+}
+
+.light-theme .qs-performance-table tr.selected {
+  background: #e0f2fe !important;
+}
+
 
 

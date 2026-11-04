@@ -98,6 +98,36 @@ func GetDB() (*Store, error) {
 			setting_value TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
+
+		CREATE TABLE IF NOT EXISTS query_store_wait_history (
+			server_name TEXT NOT NULL,
+			database_name TEXT NOT NULL,
+			interval_label TEXT NOT NULL,
+			total_wait_ms REAL NOT NULL,
+			cpu_wait_ms REAL NOT NULL,
+			lock_wait_ms REAL NOT NULL,
+			io_wait_ms REAL NOT NULL,
+			memory_wait_ms REAL NOT NULL,
+			other_wait_ms REAL NOT NULL,
+			exec_count INTEGER NOT NULL,
+			is_anomaly INTEGER NOT NULL DEFAULT 0,
+			anomaly_reason TEXT DEFAULT '',
+			synced_at TEXT NOT NULL,
+			PRIMARY KEY (server_name, database_name, interval_label)
+		);
+
+		CREATE TABLE IF NOT EXISTS live_deadlock_history (
+			server_name TEXT NOT NULL,
+			timestamp TEXT NOT NULL,
+			victim_spid INTEGER NOT NULL,
+			deadlock_graph_xml TEXT NOT NULL,
+			process_count INTEGER NOT NULL,
+			locked_resource_count INTEGER NOT NULL,
+			deadlock_type TEXT DEFAULT '',
+			summary TEXT DEFAULT '',
+			synced_at TEXT NOT NULL,
+			PRIMARY KEY (server_name, timestamp, victim_spid)
+		);
 		`
 		if _, err := db.Exec(createSQL); err != nil {
 			initErr = fmt.Errorf("failed to init config db tables: %w", err)
@@ -385,4 +415,237 @@ func (s *Store) SetTheme(theme string) error {
 	}
 	return s.SetAppSetting("theme", theme)
 }
+
+// StoredWaitPoint represents a rolling hourly wait snapshot saved in local SQLite
+type StoredWaitPoint struct {
+	ServerName     string  `json:"serverName"`
+	DatabaseName   string  `json:"databaseName"`
+	IntervalLabel  string  `json:"intervalLabel"`
+	TotalWaitMs    float64 `json:"totalWaitMs"`
+	CPUWaitMs      float64 `json:"cpuWaitMs"`
+	LockWaitMs     float64 `json:"lockWaitMs"`
+	IOWaitMs       float64 `json:"ioWaitMs"`
+	MemoryWaitMs   float64 `json:"memoryWaitMs"`
+	OtherWaitMs    float64 `json:"otherWaitMs"`
+	ExecutionCount int64   `json:"executionCount"`
+	IsAnomaly      bool    `json:"isAnomaly"`
+	AnomalyReason  string  `json:"anomalyReason"`
+	SyncedAt       string  `json:"syncedAt"`
+}
+
+// StoredDeadlock represents a deadlock event pulled from system_health and saved in local SQLite
+type StoredDeadlock struct {
+	ServerName          string `json:"serverName"`
+	Timestamp           string `json:"timestamp"`
+	VictimSPID          int    `json:"victimSpid"`
+	DeadlockGraphXML    string `json:"deadlockGraphXml"`
+	ProcessCount        int    `json:"processCount"`
+	LockedResourceCount int    `json:"lockedResourceCount"`
+	DeadlockType        string `json:"deadlockType"`
+	Summary             string `json:"summary"`
+	SyncedAt            string `json:"syncedAt"`
+}
+
+// SaveWaitHistorySnapshots writes hourly Query Store wait intervals into local SQLite
+func (s *Store) SaveWaitHistorySnapshots(serverName, dbName string, points []StoredWaitPoint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO query_store_wait_history (
+			server_name, database_name, interval_label,
+			total_wait_ms, cpu_wait_ms, lock_wait_ms, io_wait_ms, memory_wait_ms, other_wait_ms,
+			exec_count, is_anomaly, anomaly_reason, synced_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(server_name, database_name, interval_label) DO UPDATE SET
+			total_wait_ms = excluded.total_wait_ms,
+			cpu_wait_ms = excluded.cpu_wait_ms,
+			lock_wait_ms = excluded.lock_wait_ms,
+			io_wait_ms = excluded.io_wait_ms,
+			memory_wait_ms = excluded.memory_wait_ms,
+			other_wait_ms = excluded.other_wait_ms,
+			exec_count = excluded.exec_count,
+			is_anomaly = excluded.is_anomaly,
+			anomaly_reason = excluded.anomaly_reason,
+			synced_at = excluded.synced_at;
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, p := range points {
+		if p.IntervalLabel == "" || p.IntervalLabel == "NoQueryStore" {
+			continue
+		}
+		anomalyInt := 0
+		if p.IsAnomaly {
+			anomalyInt = 1
+		}
+		srv := p.ServerName
+		if srv == "" {
+			srv = serverName
+		}
+		dbn := p.DatabaseName
+		if dbn == "" {
+			dbn = dbName
+		}
+		synced := p.SyncedAt
+		if synced == "" {
+			synced = now
+		}
+
+		if _, err := stmt.Exec(
+			srv, dbn, p.IntervalLabel,
+			p.TotalWaitMs, p.CPUWaitMs, p.LockWaitMs, p.IOWaitMs, p.MemoryWaitMs, p.OtherWaitMs,
+			p.ExecutionCount, anomalyInt, p.AnomalyReason, synced,
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetStoredWaitHistory retrieves up to N days of wait points from local SQLite
+func (s *Store) GetStoredWaitHistory(serverName, dbName string, days int) ([]StoredWaitPoint, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `
+		SELECT server_name, database_name, interval_label,
+		       total_wait_ms, cpu_wait_ms, lock_wait_ms, io_wait_ms, memory_wait_ms, other_wait_ms,
+		       exec_count, is_anomaly, anomaly_reason, synced_at
+		FROM query_store_wait_history
+		WHERE (? = '' OR server_name = ?)
+		  AND (? = '' OR database_name = ?)
+		ORDER BY interval_label ASC;
+	`
+	rows, err := s.db.Query(query, serverName, serverName, dbName, dbName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []StoredWaitPoint
+	for rows.Next() {
+		var p StoredWaitPoint
+		var anomalyInt int
+		if err := rows.Scan(
+			&p.ServerName, &p.DatabaseName, &p.IntervalLabel,
+			&p.TotalWaitMs, &p.CPUWaitMs, &p.LockWaitMs, &p.IOWaitMs, &p.MemoryWaitMs, &p.OtherWaitMs,
+			&p.ExecutionCount, &anomalyInt, &p.AnomalyReason, &p.SyncedAt,
+		); err != nil {
+			continue
+		}
+		p.IsAnomaly = (anomalyInt == 1)
+		points = append(points, p)
+	}
+
+	return points, nil
+}
+
+// PurgeOldWaitHistory retains only the last N days of data in SQLite
+func (s *Store) PurgeOldWaitHistory(retentionDays int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if retentionDays <= 0 {
+		retentionDays = 7
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays).Format("2006-01-02 15:04")
+
+	_, err := s.db.Exec(`DELETE FROM query_store_wait_history WHERE interval_label < ?;`, cutoff)
+	return err
+}
+
+// SaveDeadlockSnapshots writes deadlocks pulled from system_health into local SQLite
+func (s *Store) SaveDeadlockSnapshots(serverName string, deadlocks []StoredDeadlock) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO live_deadlock_history (
+			server_name, timestamp, victim_spid, deadlock_graph_xml,
+			process_count, locked_resource_count, deadlock_type, summary, synced_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(server_name, timestamp, victim_spid) DO UPDATE SET
+			deadlock_graph_xml = excluded.deadlock_graph_xml,
+			process_count = excluded.process_count,
+			locked_resource_count = excluded.locked_resource_count,
+			summary = excluded.summary,
+			synced_at = excluded.synced_at;
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, d := range deadlocks {
+		srv := d.ServerName
+		if srv == "" {
+			srv = serverName
+		}
+		synced := d.SyncedAt
+		if synced == "" {
+			synced = now
+		}
+		if _, err := stmt.Exec(
+			srv, d.Timestamp, d.VictimSPID, d.DeadlockGraphXML,
+			d.ProcessCount, d.LockedResourceCount, d.DeadlockType, d.Summary, synced,
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetStoredDeadlocks returns deadlocks cached in local SQLite
+func (s *Store) GetStoredDeadlocks(serverName string, days int) ([]StoredDeadlock, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `
+		SELECT server_name, timestamp, victim_spid, deadlock_graph_xml,
+		       process_count, locked_resource_count, deadlock_type, summary, synced_at
+		FROM live_deadlock_history
+		WHERE (? = '' OR server_name = ?)
+		ORDER BY timestamp DESC;
+	`
+	rows, err := s.db.Query(query, serverName, serverName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var deadlocks []StoredDeadlock
+	for rows.Next() {
+		var d StoredDeadlock
+		if err := rows.Scan(
+			&d.ServerName, &d.Timestamp, &d.VictimSPID, &d.DeadlockGraphXML,
+			&d.ProcessCount, &d.LockedResourceCount, &d.DeadlockType, &d.Summary, &d.SyncedAt,
+		); err != nil {
+			continue
+		}
+		deadlocks = append(deadlocks, d)
+	}
+
+	return deadlocks, nil
+}
+
 

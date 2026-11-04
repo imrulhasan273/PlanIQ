@@ -20,6 +20,8 @@ export function GetAppTheme():Promise<string>;
 
 export function GetCurrentWindowsUser():Promise<main.WindowsUserInfo>;
 
+export function GetHistoricalWaitHistory(arg1:string,arg2:string,arg3:number):Promise<Array<configdb.StoredWaitPoint>>;
+
 export function GetLiveActiveSessions(arg1:number):Promise<Array<livedb.ActiveSession>>;
 
 export function GetLiveAdvisors():Promise<Array<livedb.PerformanceAdvisor>>;
@@ -42,6 +44,8 @@ export function GetLiveIdleSessions(arg1:number):Promise<Array<livedb.IdleSessio
 
 export function GetLiveMissingIndexes(arg1:number):Promise<Array<livedb.LiveMissingIndex>>;
 
+export function GetLivePLEReport():Promise<livedb.PLEReport>;
+
 export function GetLiveQueryStore(arg1:string,arg2:number):Promise<Array<livedb.QueryStoreEntry>>;
 
 export function GetLiveQueryStoreWindow(arg1:string,arg2:number,arg3:number):Promise<Array<livedb.QueryStoreEntry>>;
@@ -57,6 +61,8 @@ export function GetLiveUnusedIndexes(arg1:number):Promise<Array<livedb.UnusedInd
 export function GetLiveWaitHistory():Promise<Array<livedb.WaitTimeHistoryPoint>>;
 
 export function GetLiveWaitStats(arg1:number):Promise<Array<livedb.LiveWaitStat>>;
+
+export function GetQueryStoreDiagnostic(arg1:number):Promise<livedb.QueryStoreDiagnostic>;
 
 export function GetRadarPagePollingConfig():Promise<Record<string, boolean>>;
 
@@ -77,5 +83,7 @@ export function SetAppTheme(arg1:string):Promise<void>;
 export function SetDefaultDBConnection(arg1:string):Promise<void>;
 
 export function SetRadarPagePolling(arg1:string,arg2:boolean):Promise<void>;
+
+export function SyncSevenDayHistory():Promise<livedb.SevenDaySyncResult>;
 
 export function TestDBConnection(arg1:livedb.ConnectionConfig):Promise<livedb.ConnectionStatus>;

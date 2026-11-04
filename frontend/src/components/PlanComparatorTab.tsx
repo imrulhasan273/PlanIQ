@@ -37,6 +37,18 @@ import { OpenFilePicker, ParsePlan } from '../../wailsjs/go/main/App';
 import { parseShowPlanXMLClient, comparePlansClient } from '../utils/clientPlanParser';
 import { readFileAsDecodedText } from '../utils/deadlockParser';
 import { DiagnosticTooltip } from './DiagnosticTooltip';
+import { PlanEdges } from './PlanEdges';
+import { TreeNode, getOperatorIcon } from './TreeNode';
+import {
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Sliders,
+  Table,
+  Filter,
+  ArrowDownUp,
+  SlidersHorizontal,
+} from 'lucide-react';
 
 interface PlanComparatorTabProps {
   currentPlan?: PlanAnalysis | null;
@@ -46,6 +58,10 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
   const [planA, setPlanA] = useState<PlanAnalysis | null>(currentPlan || null);
   const [planB, setPlanB] = useState<PlanAnalysis | null>(null);
   const [viewMode, setViewMode] = useState<'metrics' | 'waits' | 'memory' | 'io_tables' | 'visual' | 'statements' | 'warnings'>('metrics');
+  const [visualSubView, setVisualSubView] = useState<'canvas' | 'table'>('canvas');
+  const [compareZoom, setCompareZoom] = useState<number>(0.85);
+  const [compareOrientation, setCompareOrientation] = useState<'vertical' | 'horizontal'>('vertical');
+  const [compareHeatmapMetric, setCompareHeatmapMetric] = useState<'cost' | 'self_elapsed' | 'self_cpu'>('cost');
   const [selectedStmtIdx, setSelectedStmtIdx] = useState<number>(0);
   const [selectedNodeA, setSelectedNodeA] = useState<PlanNode | null>(null);
   const [selectedNodeB, setSelectedNodeB] = useState<PlanNode | null>(null);
@@ -339,6 +355,58 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
 
     waitDiffs.sort((a, b) => Math.abs(b.timeDelta) - Math.abs(a.timeDelta));
 
+    // PLE Threat & Buffer Scan Delta (PerformanceStudio & PlanIQ Sync)
+    const pleA = planA.pleRiskReport;
+    const pleB = planB.pleRiskReport;
+    const pleScanA = pleA?.estimatedScanVolumeMb || 0;
+    const pleScanB = pleB?.estimatedScanVolumeMb || 0;
+    const pleScanDelta = pleScanA - pleScanB;
+    const pleScanReductionPct = pleScanA > 0 ? ((pleScanA - pleScanB) / pleScanA) * 100 : 0;
+    const pleRiskA = pleA?.riskLevel || 'LOW';
+    const pleRiskB = pleB?.riskLevel || 'LOW';
+
+    // Total Operator Self Elapsed & Self CPU sums (PerformanceStudio NodeTimeAttribution)
+    const totalSelfElapsedA = planA.statements.reduce((acc, s) => {
+      let sum = 0;
+      const walk = (n?: PlanNode | null) => {
+        if (!n) return;
+        sum += (n.selfElapsedMs || 0);
+        (n.children || []).forEach(walk);
+      };
+      walk(s.rootNode);
+      return acc + sum;
+    }, 0);
+    const totalSelfElapsedB = planB.statements.reduce((acc, s) => {
+      let sum = 0;
+      const walk = (n?: PlanNode | null) => {
+        if (!n) return;
+        sum += (n.selfElapsedMs || 0);
+        (n.children || []).forEach(walk);
+      };
+      walk(s.rootNode);
+      return acc + sum;
+    }, 0);
+    const totalSelfCpuA = planA.statements.reduce((acc, s) => {
+      let sum = 0;
+      const walk = (n?: PlanNode | null) => {
+        if (!n) return;
+        sum += (n.selfCpuMs || 0);
+        (n.children || []).forEach(walk);
+      };
+      walk(s.rootNode);
+      return acc + sum;
+    }, 0);
+    const totalSelfCpuB = planB.statements.reduce((acc, s) => {
+      let sum = 0;
+      const walk = (n?: PlanNode | null) => {
+        if (!n) return;
+        sum += (n.selfCpuMs || 0);
+        (n.children || []).forEach(walk);
+      };
+      walk(s.rootNode);
+      return acc + sum;
+    }, 0);
+
     // Table I/O Leaderboard Diff
     const mapTableB = new Map<string, TableIOLeader>();
     (planB.hardwareMetrics?.topIoLeaders || []).forEach((t) => {
@@ -423,6 +491,18 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
     return {
       costA,
       costB,
+      pleA,
+      pleB,
+      pleScanA,
+      pleScanB,
+      pleScanDelta,
+      pleScanReductionPct,
+      pleRiskA,
+      pleRiskB,
+      totalSelfElapsedA,
+      totalSelfElapsedB,
+      totalSelfCpuA,
+      totalSelfCpuB,
       costReductionPct,
       readsPagesA,
       readsPagesB,
@@ -844,6 +924,21 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
                   {deltaMetrics.scoreB >= deltaMetrics.scoreA ? `+${deltaMetrics.scoreB - deltaMetrics.scoreA} pts Improvement [Grade ${deltaMetrics.gradeB}]` : `Regression`}
                 </div>
               </div>
+
+              {/* Metric 7: Buffer Pool Churn (PLE Risk Report) */}
+              <div className="comparator-metric-pill" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '12px' }}>
+                <div style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <HardDrive size={12} color="#fb923c" /> Buffer Churn (PLE)
+                </div>
+                <div style={{ fontSize: '15px', fontWeight: 800, color: deltaMetrics.pleScanReductionPct > 0 ? '#34d399' : '#e2e8f0', marginTop: '4px' }}>
+                  {deltaMetrics.pleScanA > 0 ? `${deltaMetrics.pleScanA.toFixed(0)} MB ➔ ${deltaMetrics.pleScanB.toFixed(0)} MB` : 'Low Churn'}
+                </div>
+                <div style={{ fontSize: '11px', color: deltaMetrics.pleScanReductionPct > 0 ? '#34d399' : '#94a3b8', marginTop: '2px' }}>
+                  {deltaMetrics.pleScanReductionPct > 0
+                    ? `-${deltaMetrics.pleScanReductionPct.toFixed(1)}% scan churn (${deltaMetrics.pleRiskA} ➔ ${deltaMetrics.pleRiskB})`
+                    : `Risk: ${deltaMetrics.pleRiskB}`}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1146,6 +1241,47 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
                     </td>
                     <td style={{ padding: '10px 14px', textAlign: 'right' }}>
                       <span className="badge badge-success">✓ RAM Cached</span>
+                    </td>
+                  </tr>
+
+                  {/* Row: PLE Scan Volume */}
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                    <td style={{ padding: '10px 14px', fontWeight: 700, color: '#e2e8f0' }}>Estimated Buffer Pool Scan Volume (PLE)</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', color: '#f43f5e' }}>{deltaMetrics.pleScanA.toFixed(1)} MB</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', color: '#34d399' }}>{deltaMetrics.pleScanB.toFixed(1)} MB</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', color: deltaMetrics.pleScanReductionPct > 0 ? '#34d399' : '#94a3b8' }}>
+                      {deltaMetrics.pleScanReductionPct > 0 ? `-${deltaMetrics.pleScanReductionPct.toFixed(1)}%` : '0%'}
+                    </td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                      <span className="badge badge-info">
+                        Risk: {deltaMetrics.pleRiskA} ➔ {deltaMetrics.pleRiskB}
+                      </span>
+                    </td>
+                  </tr>
+
+                  {/* Row: Operator Self-Elapsed Wall Clock Time */}
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                    <td style={{ padding: '10px 14px', fontWeight: 700, color: '#e2e8f0' }}>Operator Self-Elapsed Wall Clock (PerformanceStudio)</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right' }}>{(deltaMetrics.totalSelfElapsedA / 1000).toFixed(3)}s</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', color: '#34d399' }}>{(deltaMetrics.totalSelfElapsedB / 1000).toFixed(3)}s</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', color: deltaMetrics.totalSelfElapsedA > deltaMetrics.totalSelfElapsedB ? '#34d399' : '#94a3b8' }}>
+                      {deltaMetrics.totalSelfElapsedA > 0 ? `-${(((deltaMetrics.totalSelfElapsedA - deltaMetrics.totalSelfElapsedB) / deltaMetrics.totalSelfElapsedA) * 100).toFixed(1)}%` : '0%'}
+                    </td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                      <span className="badge badge-success">✓ Wall Clock</span>
+                    </td>
+                  </tr>
+
+                  {/* Row: Operator Self-CPU Time */}
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                    <td style={{ padding: '10px 14px', fontWeight: 700, color: '#e2e8f0' }}>Operator Self-CPU Processing (PerformanceStudio)</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right' }}>{(deltaMetrics.totalSelfCpuA / 1000).toFixed(3)}s</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', color: '#34d399' }}>{(deltaMetrics.totalSelfCpuB / 1000).toFixed(3)}s</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', color: deltaMetrics.totalSelfCpuA > deltaMetrics.totalSelfCpuB ? '#34d399' : '#94a3b8' }}>
+                      {deltaMetrics.totalSelfCpuA > 0 ? `-${(((deltaMetrics.totalSelfCpuA - deltaMetrics.totalSelfCpuB) / deltaMetrics.totalSelfCpuA) * 100).toFixed(1)}%` : '0%'}
+                    </td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                      <span className="badge badge-success">✓ CPU Burn</span>
                     </td>
                   </tr>
 
@@ -1609,156 +1745,476 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
         </div>
       )}
 
-      {/* 9. View Mode 5: Side-by-Side Visual Operator Tree */}
+      {/* 9. View Mode 5: Side-by-Side Visual Operator Tree & Time Attribution */}
       {viewMode === 'visual' && planA && planB && (
         <div className="section-block">
-          {/* Statement Picker */}
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8' }}>Compare Statement:</span>
-            {planA.statements.map((s, idx) => (
+          {/* Top Control Bar for Comparison Trees */}
+          <div
+            className="glass-panel"
+            style={{
+              padding: '8px 14px',
+              borderRadius: '10px',
+              marginBottom: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px',
+              flexWrap: 'wrap',
+              background: '#090d16',
+              border: '1px solid #1e293b',
+            }}
+          >
+            {/* Left: Statement Switcher */}
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#94a3b8' }}>Query Statement:</span>
+              {planA.statements.map((s, idx) => (
+                <button
+                  key={s.statementId}
+                  type="button"
+                  className={`btn btn-sm ${selectedStmtIdx === idx ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '11px', padding: '2px 8px', height: '26px', minHeight: '26px' }}
+                  onClick={() => {
+                    setSelectedStmtIdx(idx);
+                    setSelectedNodeA(null);
+                    setSelectedNodeB(null);
+                  }}
+                >
+                  #{s.statementId} (Cost: {s.statementSubTreeCost.toFixed(1)})
+                </button>
+              ))}
+            </div>
+
+            {/* Middle: Sub-view Switcher (Canvas vs Detailed Matrix) */}
+            <div className="segmented-control" style={{ padding: '2px', borderRadius: '6px' }}>
               <button
-                key={s.statementId}
                 type="button"
-                className={`btn btn-sm ${selectedStmtIdx === idx ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ fontSize: '11px', padding: '0 10px', height: '28px', minHeight: '28px', display: 'inline-flex', alignItems: 'center' }}
-                onClick={() => {
-                  setSelectedStmtIdx(idx);
-                  setSelectedNodeA(null);
-                  setSelectedNodeB(null);
-                }}
+                className={`segmented-btn ${visualSubView === 'canvas' ? 'active' : ''}`}
+                onClick={() => setVisualSubView('canvas')}
+                style={{ padding: '3px 8px', fontSize: '11px' }}
+                title="Interactive SVG Graphical Trees Side-by-Side"
               >
-                Statement #{s.statementId} (Cost: {s.statementSubTreeCost.toFixed(1)})
+                <Eye size={12} />
+                <span>Dual Tree Canvas</span>
               </button>
-            ))}
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-            {/* Left: Statement Tree in Plan A */}
-            <div className="glass-panel comparator-tree-panel" style={{ borderRadius: '12px', padding: '16px', background: '#070b14' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: '#f43f5e' }}>
-                  PLAN A OPERATORS ({nodesA.length} nodes)
-                </span>
-                <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>
-                  Stmt Cost: <strong style={{ color: '#f43f5e' }}>{((activeStatementA?.statementSubTreeCost ?? 0)).toFixed(2)}</strong>
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '420px', overflowY: 'auto' }}>
-                {nodesA.map((node) => {
-                  const isScan = node.physicalOp?.toLowerCase().includes('scan');
-                  const isSpill = node.warnings?.some((w) => typeof w === 'string' && w.toLowerCase().includes('spill')) || (node.isPainPoint && node.painReason?.toLowerCase().includes('spill'));
-                  const isSelected = selectedNodeA?.nodeId === node.nodeId;
-
-                  return (
-                    <div
-                      key={node.nodeId}
-                      className={`comparator-operator-row ${isSelected ? 'selected' : ''}`}
-                      onClick={() => setSelectedNodeA(node)}
-                      style={{
-                        background: isScan ? 'rgba(244, 63, 94, 0.08)' : isSelected ? '#1e293b' : '#090d16',
-                        border: isScan ? '1px solid rgba(244, 63, 94, 0.4)' : isSelected ? '1px solid #38bdf8' : '1px solid #1e293b',
-                        borderRadius: '6px',
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        fontSize: '11.5px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <div>
-                        <div className="comparator-node-title" style={{ fontWeight: 700, color: isScan ? '#f43f5e' : '#e2e8f0' }}>
-                          {node.physicalOp}
-                          {isSpill && (
-                            <span style={{ marginLeft: '6px', background: 'rgba(234, 179, 8, 0.2)', color: '#fbbf24', padding: '1px 5px', borderRadius: '3px', fontSize: '10px' }}>
-                              ⚠️ TempDB Spill
-                            </span>
-                          )}
-                          {isScan && (
-                            <span style={{ marginLeft: '6px', background: 'rgba(244, 63, 94, 0.2)', color: '#f43f5e', padding: '1px 5px', borderRadius: '3px', fontSize: '10px' }}>
-                              Table/Clustered Scan
-                            </span>
-                          )}
-                        </div>
-                        <div className="comparator-node-meta" style={{ color: '#94a3b8', fontSize: '10.5px', marginTop: '2px' }}>
-                          {node.table ? `${node.table}${node.index ? ` (${node.index})` : ''}` : node.logicalOp}
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div className="comparator-node-cost" style={{ color: '#cbd5e1', fontWeight: 600 }}>
-                          {(((node.estimateIo || 0) + (node.estimateCpu || 0)) || 0).toFixed(2)} cost
-                        </div>
-                        <div className="comparator-node-rows" style={{ color: '#64748b', fontSize: '10px' }}>
-                          {node.estimateRows} est rows
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <button
+                type="button"
+                className={`segmented-btn ${visualSubView === 'table' ? 'active' : ''}`}
+                onClick={() => setVisualSubView('table')}
+                style={{ padding: '3px 8px', fontSize: '11px' }}
+                title="Detailed Operator Matching & Time Attribution Table"
+              >
+                <ListOrdered size={12} />
+                <span>Operator Time & Cost Matrix</span>
+              </button>
             </div>
 
-            {/* Right: Statement Tree in Plan B */}
-            <div className="glass-panel comparator-tree-panel" style={{ borderRadius: '12px', padding: '16px', background: '#070b14' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: '#34d399' }}>
-                  PLAN B OPERATORS ({nodesB.length} nodes)
-                </span>
-                <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>
-                  Stmt Cost: <strong style={{ color: '#34d399' }}>{((activeStatementB?.statementSubTreeCost ?? 0)).toFixed(2)}</strong>
-                </span>
+            {/* Right: Canvas Controls (Only in Canvas subview) */}
+            {visualSubView === 'canvas' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                {/* Heatmap Metric Selector (PerformanceStudio) */}
+                <div className="segmented-control" style={{ padding: '2px', borderRadius: '6px' }} title="Heatmap Metric Attribution">
+                  <button
+                    type="button"
+                    className={`segmented-btn ${compareHeatmapMetric === 'cost' ? 'active' : ''}`}
+                    onClick={() => setCompareHeatmapMetric('cost')}
+                    style={{ padding: '3px 7px', fontSize: '11px' }}
+                    title="Estimated Subtree Cost %"
+                  >
+                    <Activity size={11} color="#f43f5e" />
+                    <span>Cost</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`segmented-btn ${compareHeatmapMetric === 'self_elapsed' ? 'active' : ''}`}
+                    onClick={() => setCompareHeatmapMetric('self_elapsed')}
+                    style={{ padding: '3px 7px', fontSize: '11px' }}
+                    title="Actual Self-Elapsed Time (PerformanceStudio)"
+                  >
+                    <Clock size={11} color="#38bdf8" />
+                    <span>Elapsed</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`segmented-btn ${compareHeatmapMetric === 'self_cpu' ? 'active' : ''}`}
+                    onClick={() => setCompareHeatmapMetric('self_cpu')}
+                    style={{ padding: '3px 7px', fontSize: '11px' }}
+                    title="Actual Self-CPU Time (PerformanceStudio)"
+                  >
+                    <Cpu size={11} color="#fbbf24" />
+                    <span>CPU</span>
+                  </button>
+                </div>
+
+                {/* Orientation Switcher */}
+                <div className="segmented-control" style={{ padding: '2px', borderRadius: '6px' }}>
+                  <button
+                    type="button"
+                    className={`segmented-btn ${compareOrientation === 'vertical' ? 'active' : ''}`}
+                    onClick={() => setCompareOrientation('vertical')}
+                    style={{ padding: '3px 7px', fontSize: '11px' }}
+                    title="Vertical Layout"
+                  >
+                    <ArrowDownUp size={11} />
+                    <span>Vertical</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`segmented-btn ${compareOrientation === 'horizontal' ? 'active' : ''}`}
+                    onClick={() => setCompareOrientation('horizontal')}
+                    style={{ padding: '3px 7px', fontSize: '11px' }}
+                    title="Horizontal Layout"
+                  >
+                    <ArrowLeftRight size={11} />
+                    <span>Horizontal</span>
+                  </button>
+                </div>
+
+                {/* Zoom Controls */}
+                <div className="zoom-controls" style={{ padding: '2px 4px', gap: '3px' }}>
+                  <button
+                    className="btn-icon"
+                    onClick={() => setCompareZoom((z) => Math.max(0.4, z - 0.1))}
+                    title="Zoom Out"
+                    style={{ padding: '2px 4px' }}
+                  >
+                    <ZoomOut size={12} />
+                  </button>
+                  <span className="zoom-label" style={{ minWidth: '28px', fontSize: '10.5px' }}>
+                    {(compareZoom * 100).toFixed(0)}%
+                  </span>
+                  <button
+                    className="btn-icon"
+                    onClick={() => setCompareZoom((z) => Math.min(1.4, z + 0.1))}
+                    title="Zoom In"
+                    style={{ padding: '2px 4px' }}
+                  >
+                    <ZoomIn size={12} />
+                  </button>
+                  <button
+                    className="btn-icon"
+                    onClick={() => setCompareZoom(0.85)}
+                    title="Reset Zoom"
+                    style={{ padding: '2px 4px' }}
+                  >
+                    <Maximize2 size={12} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Subview 1: DUAL INTERACTIVE GRAPHICAL CANVASES SIDE-BY-SIDE */}
+          {visualSubView === 'canvas' ? (
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', minHeight: '520px', height: '520px' }}>
+                {/* Plan A Canvas Half */}
+                <div
+                  className="glass-panel"
+                  style={{
+                    borderRadius: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    background: '#070b14',
+                    border: '1px solid rgba(244, 63, 94, 0.4)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {/* Half Header */}
+                  <div style={{ padding: '8px 14px', background: 'rgba(244, 63, 94, 0.08)', borderBottom: '1px solid rgba(244, 63, 94, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#f43f5e', background: 'rgba(244, 63, 94, 0.2)', padding: '2px 6px', borderRadius: '4px' }}>
+                        PLAN A (BASELINE)
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600 }}>
+                        Stmt Cost: {((activeStatementA?.statementSubTreeCost ?? 0)).toFixed(2)}
+                      </span>
+                    </div>
+                    {planA.pleRiskReport && (
+                      <span className={`ple-topbar-pill ple-risk-${planA.pleRiskReport.riskLevel.toLowerCase()}`} style={{ padding: '1px 6px', fontSize: '10px' }}>
+                        PLE: {planA.pleRiskReport.riskLevel} (~{planA.pleRiskReport.estimatedScanVolumeMb.toFixed(0)}MB)
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Interactive Tree Viewport */}
+                  <div className="vis-canvas-scroll" style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
+                    {activeStatementA?.rootNode ? (
+                      <PlanEdges
+                        root={activeStatementA.rootNode}
+                        orientation={compareOrientation}
+                        zoom={compareZoom}
+                        selectedNodeId={selectedNodeA?.nodeId}
+                      >
+                        <TreeNode
+                          node={activeStatementA.rootNode}
+                          selectedNode={selectedNodeA}
+                          onSelectNode={setSelectedNodeA}
+                          orientation={compareOrientation}
+                          heatmapMetric={compareHeatmapMetric}
+                        />
+                      </PlanEdges>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: '40px 0', color: '#64748b' }}>
+                        No execution tree available for Statement #{selectedStmtIdx + 1} in Plan A
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Plan B Canvas Half */}
+                <div
+                  className="glass-panel"
+                  style={{
+                    borderRadius: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    background: '#070b14',
+                    border: '1px solid rgba(52, 211, 153, 0.4)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {/* Half Header */}
+                  <div style={{ padding: '8px 14px', background: 'rgba(52, 211, 153, 0.08)', borderBottom: '1px solid rgba(52, 211, 153, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#34d399', background: 'rgba(52, 211, 153, 0.2)', padding: '2px 6px', borderRadius: '4px' }}>
+                        PLAN B (OPTIMIZED)
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600 }}>
+                        Stmt Cost: {((activeStatementB?.statementSubTreeCost ?? 0)).toFixed(2)}
+                      </span>
+                    </div>
+                    {planB.pleRiskReport && (
+                      <span className={`ple-topbar-pill ple-risk-${planB.pleRiskReport.riskLevel.toLowerCase()}`} style={{ padding: '1px 6px', fontSize: '10px' }}>
+                        PLE: {planB.pleRiskReport.riskLevel} (~{planB.pleRiskReport.estimatedScanVolumeMb.toFixed(0)}MB)
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Interactive Tree Viewport */}
+                  <div className="vis-canvas-scroll" style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
+                    {activeStatementB?.rootNode ? (
+                      <PlanEdges
+                        root={activeStatementB.rootNode}
+                        orientation={compareOrientation}
+                        zoom={compareZoom}
+                        selectedNodeId={selectedNodeB?.nodeId}
+                      >
+                        <TreeNode
+                          node={activeStatementB.rootNode}
+                          selectedNode={selectedNodeB}
+                          onSelectNode={setSelectedNodeB}
+                          orientation={compareOrientation}
+                          heatmapMetric={compareHeatmapMetric}
+                        />
+                      </PlanEdges>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: '40px 0', color: '#64748b' }}>
+                        No execution tree available for Statement #{selectedStmtIdx + 1} in Plan B
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '420px', overflowY: 'auto' }}>
-                {nodesB.map((node) => {
-                  const isSeek = node.physicalOp?.toLowerCase().includes('seek');
-                  const isSelected = selectedNodeB?.nodeId === node.nodeId;
-
-                  return (
-                    <div
-                      key={node.nodeId}
-                      className={`comparator-operator-row ${isSelected ? 'selected' : ''}`}
-                      onClick={() => setSelectedNodeB(node)}
-                      style={{
-                        background: isSeek ? 'rgba(52, 211, 153, 0.08)' : isSelected ? '#1e293b' : '#090d16',
-                        border: isSeek ? '1px solid rgba(52, 211, 153, 0.4)' : isSelected ? '1px solid #34d399' : '1px solid #1e293b',
-                        borderRadius: '6px',
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        fontSize: '11.5px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
+              {/* Operator Inspection & Diff Drawer (When a node is clicked in Plan A or Plan B) */}
+              {(selectedNodeA || selectedNodeB) && (
+                <div
+                  className="glass-panel"
+                  style={{
+                    marginTop: '16px',
+                    borderRadius: '12px',
+                    padding: '16px',
+                    background: '#090d16',
+                    border: '1px solid #1e293b',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Activity size={15} color="#38bdf8" />
+                      <strong style={{ fontSize: '13px', color: '#fff' }}>
+                        Operator Comparison Inspector
+                      </strong>
+                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                        {selectedNodeA ? `Plan A: Node #${selectedNodeA.nodeId} (${selectedNodeA.physicalOp})` : 'No Plan A node selected'}
+                        {'  |  '}
+                        {selectedNodeB ? `Plan B: Node #${selectedNodeB.nodeId} (${selectedNodeB.physicalOp})` : 'No Plan B node selected'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '10.5px', padding: '2px 8px' }}
+                      onClick={() => {
+                        setSelectedNodeA(null);
+                        setSelectedNodeB(null);
                       }}
                     >
-                      <div>
-                        <div className="comparator-node-title" style={{ fontWeight: 700, color: isSeek ? '#34d399' : '#e2e8f0' }}>
-                          {node.physicalOp}
-                          {isSeek && (
-                            <span style={{ marginLeft: '6px', background: 'rgba(52, 211, 153, 0.2)', color: '#34d399', padding: '1px 5px', borderRadius: '3px', fontSize: '10px' }}>
-                              ✓ Optimized Seek
+                      Clear Selection
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                    {/* Node A Info */}
+                    <div style={{ background: '#050811', border: '1px solid rgba(244, 63, 94, 0.3)', borderRadius: '8px', padding: '12px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#f43f5e' }}>PLAN A OPERATOR DETAILS</span>
+                      {selectedNodeA ? (
+                        <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11.5px' }}>
+                          <div><strong>Operation:</strong> {selectedNodeA.physicalOp} ({selectedNodeA.logicalOp})</div>
+                          <div><strong>Target:</strong> {selectedNodeA.table ? `${selectedNodeA.schema ? `${selectedNodeA.schema}.` : ''}${selectedNodeA.table}${selectedNodeA.index ? ` (${selectedNodeA.index})` : ''}` : 'None'}</div>
+                          <div><strong>Subtree Cost:</strong> {selectedNodeA.estimatedTotalSubtreeCost.toFixed(4)} ({selectedNodeA.costPercentage.toFixed(1)}%)</div>
+                          <div>
+                            <strong>PerformanceStudio Self-Elapsed:</strong>{' '}
+                            <span style={{ color: '#38bdf8', fontWeight: 600 }}>
+                              {((selectedNodeA.selfElapsedMs ?? 0) / 1000).toFixed(3)}s ({(selectedNodeA.selfElapsedPercent ?? 0).toFixed(1)}%)
                             </span>
+                          </div>
+                          <div>
+                            <strong>PerformanceStudio Self-CPU:</strong>{' '}
+                            <span style={{ color: '#fbbf24', fontWeight: 600 }}>
+                              {((selectedNodeA.selfCpuMs ?? 0) / 1000).toFixed(3)}s ({(selectedNodeA.selfCpuPercent ?? 0).toFixed(1)}%)
+                            </span>
+                          </div>
+                          <div><strong>Rows (Est / Act):</strong> {selectedNodeA.estimateRows.toLocaleString()} / {selectedNodeA.hasActualRows ? selectedNodeA.actualRows.toLocaleString() : 'N/A'}</div>
+                          {selectedNodeA.predicate && (
+                            <div style={{ color: '#f59e0b' }}><strong>Residual Predicate:</strong> <code>{selectedNodeA.predicate}</code></div>
+                          )}
+                          {selectedNodeA.seekPredicates && (
+                            <div style={{ color: '#38bdf8' }}><strong>Seek Predicates:</strong> <code>{selectedNodeA.seekPredicates}</code></div>
                           )}
                         </div>
-                        <div className="comparator-node-meta" style={{ color: '#94a3b8', fontSize: '10.5px', marginTop: '2px' }}>
-                          {node.table ? `${node.table}${node.index ? ` (${node.index})` : ''}` : node.logicalOp}
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ color: '#cbd5e1', fontWeight: 600 }}>
-                          {(((node.estimateIo || 0) + (node.estimateCpu || 0)) || 0).toFixed(2)} cost
-                        </div>
-                        <div style={{ color: '#64748b', fontSize: '10px' }}>
-                          {node.estimateRows} est rows
-                        </div>
-                      </div>
+                      ) : (
+                        <div style={{ color: '#64748b', fontSize: '11px', marginTop: '8px' }}>Click any operator in Plan A canvas above to inspect</div>
+                      )}
                     </div>
-                  );
-                })}
+
+                    {/* Node B Info */}
+                    <div style={{ background: '#050811', border: '1px solid rgba(52, 211, 153, 0.3)', borderRadius: '8px', padding: '12px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#34d399' }}>PLAN B OPERATOR DETAILS</span>
+                      {selectedNodeB ? (
+                        <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11.5px' }}>
+                          <div><strong>Operation:</strong> {selectedNodeB.physicalOp} ({selectedNodeB.logicalOp})</div>
+                          <div><strong>Target:</strong> {selectedNodeB.table ? `${selectedNodeB.schema ? `${selectedNodeB.schema}.` : ''}${selectedNodeB.table}${selectedNodeB.index ? ` (${selectedNodeB.index})` : ''}` : 'None'}</div>
+                          <div><strong>Subtree Cost:</strong> {selectedNodeB.estimatedTotalSubtreeCost.toFixed(4)} ({selectedNodeB.costPercentage.toFixed(1)}%)</div>
+                          <div>
+                            <strong>PerformanceStudio Self-Elapsed:</strong>{' '}
+                            <span style={{ color: '#38bdf8', fontWeight: 600 }}>
+                              {((selectedNodeB.selfElapsedMs ?? 0) / 1000).toFixed(3)}s ({(selectedNodeB.selfElapsedPercent ?? 0).toFixed(1)}%)
+                            </span>
+                          </div>
+                          <div>
+                            <strong>PerformanceStudio Self-CPU:</strong>{' '}
+                            <span style={{ color: '#fbbf24', fontWeight: 600 }}>
+                              {((selectedNodeB.selfCpuMs ?? 0) / 1000).toFixed(3)}s ({(selectedNodeB.selfCpuPercent ?? 0).toFixed(1)}%)
+                            </span>
+                          </div>
+                          <div><strong>Rows (Est / Act):</strong> {selectedNodeB.estimateRows.toLocaleString()} / {selectedNodeB.hasActualRows ? selectedNodeB.actualRows.toLocaleString() : 'N/A'}</div>
+                          {selectedNodeB.predicate && (
+                            <div style={{ color: '#f59e0b' }}><strong>Residual Predicate:</strong> <code>{selectedNodeB.predicate}</code></div>
+                          )}
+                          {selectedNodeB.seekPredicates && (
+                            <div style={{ color: '#38bdf8' }}><strong>Seek Predicates:</strong> <code>{selectedNodeB.seekPredicates}</code></div>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ color: '#64748b', fontSize: '11px', marginTop: '8px' }}>Click any operator in Plan B canvas above to inspect</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Subview 2: DETAILED OPERATOR TIME ATTRIBUTION & COST MATRIX TABLE */
+            <div className="glass-panel" style={{ borderRadius: '12px', padding: '16px', background: '#090d16', border: '1px solid #1e293b' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#fff', margin: 0 }}>
+                  Operator-by-Operator Time Attribution &amp; Algorithm Diff
+                </h4>
+                <span className="badge badge-info" style={{ fontSize: '11px' }}>
+                  {nodesA.length} nodes (Plan A) ➔ {nodesB.length} nodes (Plan B)
+                </span>
+              </div>
+
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: '#050811', color: '#94a3b8', borderBottom: '1px solid #1e293b' }}>
+                      <th style={{ padding: '8px 10px', textAlign: 'left' }}>Node #</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left' }}>Operator (Plan A ➔ Plan B)</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left' }}>Target Storage Object</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right', color: '#38bdf8' }}>Self-Elapsed (A ➔ B)</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right', color: '#fbbf24' }}>Self-CPU (A ➔ B)</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f43f5e' }}>Cost %</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right' }}>Actual Rows</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right' }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {nodesA.map((nodeA, idx) => {
+                      const nodeB = nodesB[idx] || nodesB.find((nb) => nb.table && nb.table === nodeA.table);
+                      const ownElapsedSecA = (nodeA.selfElapsedMs ?? 0) / 1000.0;
+                      const ownElapsedSecB = nodeB ? (nodeB.selfElapsedMs ?? 0) / 1000.0 : 0;
+                      const ownCpuSecA = (nodeA.selfCpuMs ?? 0) / 1000.0;
+                      const ownCpuSecB = nodeB ? (nodeB.selfCpuMs ?? 0) / 1000.0 : 0;
+                      const isScan = nodeA.physicalOp?.toLowerCase().includes('scan');
+                      const isSeek = nodeB?.physicalOp?.toLowerCase().includes('seek');
+                      const elapsedDeltaPct = ownElapsedSecA > 0 && nodeB ? ((ownElapsedSecA - ownElapsedSecB) / ownElapsedSecA) * 100 : 0;
+
+                      return (
+                        <tr key={nodeA.nodeId} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <td style={{ padding: '8px 10px', color: '#94a3b8' }}>#{nodeA.nodeId}</td>
+                          <td style={{ padding: '8px 10px' }}>
+                            <span style={{ color: isScan ? '#f43f5e' : '#cbd5e1', fontWeight: 600 }}>{nodeA.physicalOp}</span>
+                            {nodeB && (
+                              <>
+                                <span style={{ color: '#94a3b8', margin: '0 5px' }}>➔</span>
+                                <span style={{ color: isSeek ? '#34d399' : '#cbd5e1', fontWeight: 600 }}>{nodeB.physicalOp}</span>
+                              </>
+                            )}
+                          </td>
+                          <td style={{ padding: '8px 10px', color: '#94a3b8' }}>
+                            {nodeA.table ? `${nodeA.table}${nodeA.index ? ` (${nodeA.index})` : ''}` : nodeA.logicalOp}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', color: elapsedDeltaPct > 0 ? '#34d399' : '#cbd5e1' }}>
+                            {ownElapsedSecA.toFixed(3)}s ➔ {ownElapsedSecB.toFixed(3)}s
+                            {elapsedDeltaPct > 0 && (
+                              <span style={{ fontSize: '10px', display: 'block', color: '#34d399' }}>
+                                -{elapsedDeltaPct.toFixed(1)}% faster
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', color: '#cbd5e1' }}>
+                            {ownCpuSecA.toFixed(3)}s ➔ {ownCpuSecB.toFixed(3)}s
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                            <span style={{ color: '#f43f5e' }}>{nodeA.costPercentage.toFixed(1)}%</span>
+                            {nodeB && (
+                              <>
+                                <span style={{ color: '#94a3b8', margin: '0 4px' }}>➔</span>
+                                <span style={{ color: '#34d399' }}>{nodeB.costPercentage.toFixed(1)}%</span>
+                              </>
+                            )}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', color: '#94a3b8' }}>
+                            {nodeA.hasActualRows ? nodeA.actualRows.toLocaleString() : nodeA.estimateRows.toLocaleString()}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                            {isScan && isSeek ? (
+                              <span className="badge badge-success">✓ Seek Converted</span>
+                            ) : elapsedDeltaPct > 20 ? (
+                              <span className="badge badge-success">✓ Faster</span>
+                            ) : (
+                              <span className="badge badge-info">Maintained</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 

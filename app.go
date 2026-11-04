@@ -198,6 +198,12 @@ func (a *App) GetLiveQueryStoreWindow(orderBy string, topN int, hours int) ([]li
 	return client.GetQueryStoreTopWindow(a.ctx, orderBy, topN, hours)
 }
 
+// GetQueryStoreDiagnostic runs lightweight probes to diagnose why Query Store might return no data
+func (a *App) GetQueryStoreDiagnostic(hours int) (*livedb.QueryStoreDiagnostic, error) {
+	client := livedb.GetClient()
+	return client.GetQueryStoreDiagnostic(a.ctx, hours)
+}
+
 // GetLiveDPAPerspective returns real server telemetry for SolarWinds DPA perspective tabs
 func (a *App) GetLiveDPAPerspective(perspective string) ([]livedb.DPAPerspectiveItem, error) {
 	client := livedb.GetClient()
@@ -258,6 +264,21 @@ func (a *App) GetLiveWaitHistory() ([]livedb.WaitTimeHistoryPoint, error) {
 	return client.GetWaitHistory(a.ctx)
 }
 
+// SyncSevenDayHistory triggers extraction of 7-day rolling telemetry into local SQLite
+func (a *App) SyncSevenDayHistory() (*livedb.SevenDaySyncResult, error) {
+	client := livedb.GetClient()
+	return client.SyncSevenDayHistory(a.ctx)
+}
+
+// GetHistoricalWaitHistory returns stored wait history from local SQLite without requiring live server connection
+func (a *App) GetHistoricalWaitHistory(server, database string, days int) ([]configdb.StoredWaitPoint, error) {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	return store.GetStoredWaitHistory(server, database, days)
+}
+
 // GetLiveBufferPool returns tables and indexes consuming RAM in buffer pool
 func (a *App) GetLiveBufferPool(limit int) ([]livedb.BufferPoolConsumer, error) {
 	client := livedb.GetClient()
@@ -280,6 +301,13 @@ func (a *App) GetLiveDuplicateIndexes() ([]livedb.DuplicateIndex, error) {
 func (a *App) GetLiveEngineInternals() (*livedb.EngineInternalsReport, error) {
 	client := livedb.GetClient()
 	return client.GetEngineInternals(a.ctx)
+}
+
+// GetLivePLEReport provides complete server and per-NUMA Page Life Expectancy diagnostics
+// (Feature A: Culprit Attribution & Feature C: NUMA-Aware PLE Heatmap)
+func (a *App) GetLivePLEReport() (*livedb.PLEReport, error) {
+	client := livedb.GetClient()
+	return client.GetPLEReport(a.ctx)
 }
 
 // GetRadarPagePollingConfig retrieves per-subtab polling settings from SQLite

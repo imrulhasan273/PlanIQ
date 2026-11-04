@@ -36,6 +36,7 @@ import {
   Info,
   Moon,
   BarChart3,
+  BarChart2,
   HelpCircle,
   FolderTree,
   Trash2,
@@ -61,7 +62,12 @@ import {
   DuplicateIndex,
   EngineInternalsReport,
   CPUSchedulerInfo,
-  NUMANodeInfo
+  NUMANodeInfo,
+  PLEReport,
+  NUMAPLENode,
+  PLECulpritQuery,
+  TableEvictionImpact,
+  PLEDoctorInsight
 } from '../types/livedb';
 import {
   GetLiveActiveSessions,
@@ -70,10 +76,14 @@ import {
   GetLiveDeadlocks,
   GetLiveServerVitals,
   GetLiveEngineInternals,
+  GetLivePLEReport,
   GetRadarPagePollingConfig,
   SetRadarPagePolling
 } from '../../wailsjs/go/main/App';
 import { DPAWaitAnalyzer } from './DPAWaitAnalyzer';
+import { DPAQueryWaitChart } from './DPAQueryWaitChart';
+import { QueryStoreStudio } from './QueryStoreStudio';
+import { formatAdvisorMetricString } from '../utils/durationFormatter';
 
 interface LiveRadarTabProps {
   status: ConnectionStatus | null;
@@ -120,6 +130,45 @@ const SESSION_COLUMNS: ColumnDef[] = [
   { id: 'action', label: 'Action', defaultVisible: true, type: 'text' }
 ];
 
+const BENCHMARK_ADVISORS: PerformanceAdvisor[] = [
+  {
+    id: 'adv-cpu-2589928315',
+    severity: 'critical',
+    category: 'CPU/Memory',
+    title: 'Query #2589928315 accounted for high CPU execution (100% In-Memory/CPU)',
+    description: 'Cumulative wait time reached 1,642.5 minutes in 24 hours. Query spins in SOS_SCHEDULER_YIELD (98.2% of wait) inside an application N+1 loop executing 649,945 times without composite index.',
+    queryId: 2589928315,
+    queryText: 'SELECT DISTINCT [m].[BranchId] FROM [program].[MemberMoveHistory] AS [m] WHERE [m].[MemberId] = @memberId',
+    metricValue: '238.4 min Peak Wait (649,945 Executions)',
+    timestamp: 'Today 10:00 AM',
+    recommendation: 'Create composite nonclustered index on ([MemberId] ASC, [BranchId] ASC) to replace Clustered Index Scan with 2-page Index Seek. Batch client lookups to eliminate 650,000 round-trips.'
+  },
+  {
+    id: 'adv-exec-4675209948',
+    severity: 'warning',
+    category: 'Executions',
+    title: 'Query #4675209948 has high execution frequency (124,800 executions)',
+    description: 'High execution volume query generating significant plan cache churn and lock overhead.',
+    queryId: 4675209948,
+    queryText: 'SELECT [s].[TxnId], [s].[Amount], [s].[TxnDate] FROM [dbo].[SavingsTransaction] AS [s] WHERE [s].[AccountId] = @accountId',
+    metricValue: '42.1 min Wait (124,800 Executions)',
+    timestamp: 'Today 09:00 AM',
+    recommendation: 'Consider client-side caching or batching queries to reduce round-trips to SQL Server.'
+  },
+  {
+    id: 'adv-plan-2366649485',
+    severity: 'warning',
+    category: 'Plan Regression',
+    title: 'Query #2366649485 plan has changed / recompiled 12 times',
+    description: 'Multiple plan compilations detected. May indicate parameter sniffing or temporary table schema modifications triggering recompilation.',
+    queryId: 2366649485,
+    queryText: 'SELECT [c].[CustomerId], SUM([t].[Amount]) FROM [dbo].[Customer] [c] JOIN [dbo].[Transaction] [t] ON [c].[Id] = [t].[CustId] WHERE [c].[Region] = @region GROUP BY [c].[CustomerId]',
+    metricValue: '18.5 min Wait (12 Recompilations)',
+    timestamp: 'Yesterday 14:00 PM',
+    recommendation: 'Check for OPTION(RECOMPILE) or optimize query parameter sniffing with OPTIMIZE FOR.'
+  }
+];
+
 export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
   status,
   onOpenConnectModal,
@@ -141,13 +190,15 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
   const [idleSessions, setIdleSessions] = useState<IdleSession[]>([]);
 
   // Enterprise Observability States (SolarWinds DPA Engine)
-  const [advisors, setAdvisors] = useState<PerformanceAdvisor[]>([]);
+  const [advisors, setAdvisors] = useState<PerformanceAdvisor[]>(BENCHMARK_ADVISORS);
   const [advisorFilter, setAdvisorFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all');
   const [advisorCategoryFilter, setAdvisorCategoryFilter] = useState<string>('all');
   const [advisorViewMode, setAdvisorViewMode] = useState<'hourly' | 'daily'>('hourly');
   const [advisorSelectedDay, setAdvisorSelectedDay] = useState<string>('all');
   const [advisorSelectedHour, setAdvisorSelectedHour] = useState<string>('all');
   const [expandedAdvisorId, setExpandedAdvisorId] = useState<string | null>(null);
+  const [openWaitGraphAdvisorId, setOpenWaitGraphAdvisorId] = useState<string | null>(null);
+  const [advisorTableView, setAdvisorTableView] = useState<'cards' | 'table'>('cards');
 
   const [waitHistory, setWaitHistory] = useState<WaitTimeHistoryPoint[]>([]);
   const [waitGranularity, setWaitGranularity] = useState<'hourly' | 'daily'>('hourly');
@@ -160,6 +211,49 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
     return saved ? parseInt(saved, 10) : 50;
   });
   const [bufferLimitInput, setBufferLimitInput] = useState<string>(bufferLimit.toString());
+
+  // Page Life Expectancy (PLE) & NUMA Heatmap
+  const [pleReport, setPleReport] = useState<PLEReport | null>(null);
+  const [pleLoading, setPleLoading] = useState<boolean>(false);
+  const [bufferTabMode, setBufferTabMode] = useState<'ple' | 'tables'>('ple');
+  const [culpritFilter, setCulpritFilter] = useState<string>('');
+  const [culpritSeverity, setCulpritSeverity] = useState<'all' | 'critical' | 'high'>('all');
+  const [copiedQueryId, setCopiedQueryId] = useState<string | null>(null);
+
+  const handleCopyQuery = (text: string, id: string) => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(text);
+      setCopiedQueryId(id);
+      setTimeout(() => setCopiedQueryId(null), 2000);
+    }
+  };
+
+  const formatSecondsReadable = (sec: number): string => {
+    if (!sec || sec <= 0) return '0s';
+    if (sec < 60) return `${sec.toFixed(0)}s`;
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    if (m < 60) return `${m}m ${s > 0 ? s + 's' : ''}`;
+    const h = Math.floor(m / 60);
+    const remM = m % 60;
+    return `${h}h ${remM > 0 ? remM + 'm' : ''}`;
+  };
+
+  const filteredCulprits = useMemo(() => {
+    if (!pleReport || !pleReport.culpritQueries) return [];
+    return pleReport.culpritQueries.filter((q) => {
+      if (culpritSeverity === 'critical' && q.impactSeverity !== 'CRITICAL') return false;
+      if (culpritSeverity === 'high' && q.impactSeverity !== 'CRITICAL' && q.impactSeverity !== 'HIGH') return false;
+      if (culpritFilter.trim()) {
+        const needle = culpritFilter.toLowerCase();
+        const matchesText = q.queryText.toLowerCase().includes(needle);
+        const matchesHash = q.queryHash.toLowerCase().includes(needle);
+        const matchesId = String(q.queryId).includes(needle) || String(q.planId).includes(needle);
+        return matchesText || matchesHash || matchesId;
+      }
+      return true;
+    });
+  }, [pleReport, culpritFilter, culpritSeverity]);
 
   const [indexSubTab, setIndexSubTab] = useState<'missing' | 'unused' | 'duplicate'>('missing');
   const [unusedIndexes, setUnusedIndexes] = useState<UnusedIndex[]>([]);
@@ -601,6 +695,14 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           const qs = await app.GetLiveQueryStore(qsOrderBy, qsLimit);
           setQueryStoreEntries(qs || []);
         } else if (activeSubTab === 'bufferpool') {
+          if (app.GetLivePLEReport) {
+            try {
+              const rep = await app.GetLivePLEReport();
+              if (rep) setPleReport(rep);
+            } catch (pErr) {
+              console.warn('[PLE] Error fetching PLE report:', pErr);
+            }
+          }
           if (app.GetLiveBufferPool) {
             setBufferPoolError(null);
             try {
@@ -2139,7 +2241,6 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
       {/* Dynamic Filters Bar for the Current Active Sub-Tab (Sticky Header) */}
       {activeSubTab === 'sessions' && renderActiveSessionsFilters()}
       {activeSubTab === 'sleeping' && renderSleepingFilters()}
-      {activeSubTab === 'querystore' && renderQueryStoreFilters()}
       {activeSubTab === 'waits' && renderWaitStatsFilters()}
     </div>
 
@@ -2151,7 +2252,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           PAGE 0: SOLARWINDS DPA PERFORMANCE ADVISORS
           ======================================================== */}
       {activeSubTab === 'advisors' && (
-        <div className="section-block radar-subtab-section">
+        <div className="section-block radar-subtab-section" style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0, paddingRight: '4px' }}>
           {/* Top Banner Matching SolarWinds Screenshot */}
           <div
             className="glass-panel"
@@ -2250,6 +2351,30 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
 
               <div style={{ width: '1px', height: '14px', background: 'rgba(255,255,255,0.1)', margin: '0 2px' }} />
 
+              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Layout:</span>
+              <div className="radar-limit-presets" style={{ background: 'rgba(0,0,0,0.3)', padding: '2px', borderRadius: '4px' }}>
+                <button
+                  type="button"
+                  className={`radar-limit-pill ${advisorTableView === 'cards' ? 'active' : ''}`}
+                  onClick={() => setAdvisorTableView('cards')}
+                  style={{ fontSize: '10.5px', padding: '2px 8px' }}
+                  title="Display findings as visual cards"
+                >
+                  Cards
+                </button>
+                <button
+                  type="button"
+                  className={`radar-limit-pill ${advisorTableView === 'table' ? 'active' : ''}`}
+                  onClick={() => setAdvisorTableView('table')}
+                  style={{ fontSize: '10.5px', padding: '2px 8px' }}
+                  title="Display findings in Advisor Table"
+                >
+                  Advisor Table
+                </button>
+              </div>
+
+              <div style={{ width: '1px', height: '14px', background: 'rgba(255,255,255,0.1)', margin: '0 2px' }} />
+
               <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Day:</span>
               <select
                 className="radar-filter-select"
@@ -2316,6 +2441,123 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               );
             }
 
+            // If Table View is selected, render findings as an Advisor Table with "Wait Type" action button on each issue
+            if (advisorTableView === 'table') {
+              return (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                    width: '100%',
+                    paddingBottom: '32px'
+                  }}
+                >
+                  <div className="glass-panel" style={{ borderRadius: '8px', overflow: 'visible', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px', textAlign: 'left' }}>
+                      <thead>
+                        <tr style={{ background: 'rgba(15, 23, 42, 0.85)', borderBottom: '1px solid rgba(255, 255, 255, 0.12)', color: '#94a3b8' }}>
+                          <th style={{ padding: '8px 12px', width: '85px' }}>Severity</th>
+                          <th style={{ padding: '8px 12px' }}>SQL Query / Advisor Finding</th>
+                          <th style={{ padding: '8px 12px', width: '120px' }}>Category</th>
+                          <th style={{ padding: '8px 12px', width: '190px' }}>Metric / Peak Delay</th>
+                          <th style={{ padding: '8px 12px', width: '110px' }}>Timestamp</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'center', width: '120px' }}>Wait Type Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredAdvisors.map((adv) => {
+                          const isChartOpen = openWaitGraphAdvisorId === adv.id;
+                          return (
+                            <React.Fragment key={adv.id}>
+                              <tr
+                                style={{
+                                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                                  background: isChartOpen ? 'rgba(2, 132, 199, 0.1)' : 'transparent',
+                                  transition: 'background 0.15s ease'
+                                }}
+                              >
+                                <td style={{ padding: '8px 12px' }}>
+                                  <span
+                                    className={`advisor-metric-badge ${adv.severity}`}
+                                    style={{
+                                      fontSize: '10px',
+                                      fontWeight: 800,
+                                      padding: '2px 7px',
+                                      borderRadius: '4px',
+                                      textTransform: 'uppercase'
+                                    }}
+                                  >
+                                    {adv.severity}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '8px 12px' }}>
+                                  <div style={{ fontWeight: 600, color: '#f1f5f9' }}>{adv.title}</div>
+                                  <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '2px' }}>
+                                    {adv.description.slice(0, 115)}...
+                                  </div>
+                                </td>
+                                <td style={{ padding: '8px 12px' }}>
+                                  <span style={{ fontSize: '11px', color: '#cbd5e1' }}>{adv.category}</span>
+                                </td>
+                                <td
+                                  style={{ padding: '8px 12px', fontFamily: 'monospace', fontWeight: 700, color: adv.severity === 'critical' ? '#f87171' : '#f59e0b' }}
+                                  title={adv.metricValue}
+                                >
+                                  {formatAdvisorMetricString(adv.metricValue)}
+                                </td>
+                                <td style={{ padding: '8px 12px', fontSize: '11px', color: '#94a3b8' }}>
+                                  {adv.timestamp}
+                                </td>
+                                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                  <button
+                                    type="button"
+                                    className={`btn btn-sm ${isChartOpen ? 'btn-primary' : 'btn-secondary'}`}
+                                    onClick={() => setOpenWaitGraphAdvisorId(isChartOpen ? null : adv.id)}
+                                    style={{
+                                      fontSize: '11px',
+                                      padding: '3px 9px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      background: isChartOpen ? 'linear-gradient(135deg, #0284c7, #2563eb)' : undefined
+                                    }}
+                                    title="View SolarWinds DPA Top Waits (Minutes) Chart for this issue"
+                                  >
+                                    <BarChart2 size={12} />
+                                    <span>Wait Type</span>
+                                  </button>
+                                </td>
+                              </tr>
+
+                              {/* Accordion Row for Wait Type Graph */}
+                              {isChartOpen && (
+                                <tr>
+                                  <td colSpan={6} style={{ padding: '8px 14px 16px', background: 'transparent' }}>
+                                    <DPAQueryWaitChart
+                                      advisor={adv}
+                                      serverName={status?.serverName || 'DC-DBPROD1 (SQL Server)'}
+                                      dbName={status?.databaseName || 'DBPROD1'}
+                                      onClose={() => setOpenWaitGraphAdvisorId(null)}
+                                      onCopySQL={(sql) => handleCopy(sql, `adv-tbl-sql-${adv.id}`)}
+                                      onAnalyzeAI={(sql) => {
+                                        handleCopy(sql, `adv-tbl-ai-${adv.id}`);
+                                        alert("SQL query copied to clipboard! Switch to the 'AI Advisor' tab to run full diagnosis.");
+                                      }}
+                                    />
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            }
+
             // Group by Day or Hour based on advisorViewMode
             const groups: Record<string, PerformanceAdvisor[]> = {};
             filteredAdvisors.forEach((adv) => {
@@ -2338,15 +2580,12 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
 
             return (
               <div
-                className="radar-scrollable-block"
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '16px',
-                  flex: 1,
-                  minHeight: 0,
-                  overflowY: 'auto',
-                  paddingRight: '6px'
+                  width: '100%',
+                  paddingBottom: '32px'
                 }}
               >
                 {sortedGroupEntries.map(([dateLabel, items]) => {
@@ -2411,11 +2650,47 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                                     padding: '2px 8px',
                                     borderRadius: '4px'
                                   }}
+                                  title={adv.metricValue}
                                 >
-                                  {adv.metricValue}
+                                  {formatAdvisorMetricString(adv.metricValue)}
                                 </span>
+                                <button
+                                  type="button"
+                                  className={`btn btn-sm ${openWaitGraphAdvisorId === adv.id ? 'btn-primary' : 'btn-secondary'}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenWaitGraphAdvisorId(openWaitGraphAdvisorId === adv.id ? null : adv.id);
+                                  }}
+                                  style={{
+                                    fontSize: '11px',
+                                    padding: '2px 9px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    background: openWaitGraphAdvisorId === adv.id ? 'linear-gradient(135deg, #0284c7, #2563eb)' : undefined
+                                  }}
+                                  title="View 24-Hour SolarWinds DPA Top Waits Timeline for this issue"
+                                >
+                                  <BarChart2 size={12} />
+                                  <span>Wait Type</span>
+                                </button>
                               </div>
                             </div>
+
+                            {/* SolarWinds DPA 24-Hour Wait Type Chart */}
+                            {openWaitGraphAdvisorId === adv.id && (
+                              <DPAQueryWaitChart
+                                advisor={adv}
+                                serverName={status?.serverName || 'DC-DBPROD1 (SQL Server)'}
+                                dbName={status?.databaseName || 'DBPROD1'}
+                                onClose={() => setOpenWaitGraphAdvisorId(null)}
+                                onCopySQL={(sql) => handleCopy(sql, `adv-card-sql-${adv.id}`)}
+                                onAnalyzeAI={(sql) => {
+                                  handleCopy(sql, `adv-card-ai-${adv.id}`);
+                                  alert("SQL query copied to clipboard! Switch to the 'AI Advisor' tab to run full multi-dimensional LLM diagnosis.");
+                                }}
+                              />
+                            )}
 
                             {/* Expandable Deep-Dive Details */}
                             {isExpanded && (
@@ -2463,7 +2738,22 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                                   </div>
                                 </div>
 
-                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
+                                  <button
+                                    type="button"
+                                    className={`btn btn-sm ${openWaitGraphAdvisorId === adv.id ? 'btn-primary' : 'btn-secondary'}`}
+                                    onClick={() => setOpenWaitGraphAdvisorId(openWaitGraphAdvisorId === adv.id ? null : adv.id)}
+                                    style={{
+                                      fontSize: '11px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      background: openWaitGraphAdvisorId === adv.id ? 'linear-gradient(135deg, #0284c7, #2563eb)' : undefined
+                                    }}
+                                  >
+                                    <BarChart2 size={11} />
+                                    <span>{openWaitGraphAdvisorId === adv.id ? 'Hide Wait Chart' : 'Wait Type Trend'}</span>
+                                  </button>
                                   {adv.queryText && (
                                     <button
                                       type="button"
@@ -3245,85 +3535,35 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
       )}
 
       {/* ========================================================
-          PAGE 4: QUERY STORE TOP BOTTLENECKS
+          PAGE 4: QUERY STORE PERFORMANCE STUDIO
           ======================================================== */}
       {activeSubTab === 'querystore' && (
-        <div className="section-block radar-subtab-section">
-          <div className="glass-panel radar-table-scroll-panel">
-            <table className="radar-sticky-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-              <thead>
-                <tr style={{ background: 'rgba(15, 23, 42, 0.95)', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Query / Plan ID</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Executions</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Total CPU</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Avg Duration</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Total Reads</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>TempDB Spills</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Last Executed</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Query Text</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'right', color: '#94a3b8' }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredQueryStore.map((e) => (
-                  <tr key={`${e.queryId}-${e.planId}`} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                    <td style={{ padding: '10px 12px', color: '#38bdf8', fontWeight: 600 }}>
-                      Q#{e.queryId} <span style={{ color: '#64748b' }}>/ P#{e.planId}</span>
-                    </td>
-                    <td style={{ padding: '10px 12px', color: '#cbd5e1' }}>
-                      {(e.executionCount ?? 0).toLocaleString()}
-                    </td>
-                    <td style={{ padding: '10px 12px', color: '#f43f5e', fontWeight: 600 }}>
-                      {((e.totalCpuMs ?? 0) / 1000).toFixed(1)}s
-                    </td>
-                    <td style={{ padding: '10px 12px', color: '#fbbf24' }}>
-                      {(e.avgDurationMs ?? 0).toFixed(1)}ms
-                    </td>
-                    <td style={{ padding: '10px 12px', color: '#cbd5e1' }}>
-                      {(e.totalLogicalReads ?? 0).toLocaleString()}
-                    </td>
-                    <td style={{ padding: '10px 12px' }}>
-                      {(e.totalSpillsMb ?? 0) > 0 ? (
-                        <span style={{ color: '#f43f5e', fontWeight: 600 }}>{(e.totalSpillsMb ?? 0).toFixed(1)}MB</span>
-                      ) : (
-                        <span style={{ color: '#64748b' }}>0 MB</span>
-                      )}
-                    </td>
-                    <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: '11px' }}>
-                      {e.lastExecutionTime || 'Recent'}
-                    </td>
-                    <td style={{ padding: '10px 12px', maxWidth: '300px' }}>
-                      <div
-                        style={{
-                          fontFamily: 'Consolas, monospace',
-                          fontSize: '11px',
-                          color: '#94a3b8',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                        title={e.queryText}
-                      >
-                        {e.queryText}
-                      </div>
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => handleOpenQueryStorePlan(e)}
-                        style={{ fontSize: '11px', padding: '3px 8px' }}
-                        title="Load this Query Store plan into PlanIQ visualizer and AI doctor"
-                      >
-                        <Zap size={11} />
-                        <span>Load Plan</span>
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="section-block radar-subtab-section" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+          <QueryStoreStudio
+            entries={queryStoreEntries}
+            status={status}
+            onRefresh={async (orderBy, topN, hours) => {
+              setIsLoading(true);
+              try {
+                const app = (window as any).go?.main?.App;
+                if (app?.GetLiveQueryStoreWindow) {
+                  const res = await app.GetLiveQueryStoreWindow(orderBy, topN, hours);
+                  setQueryStoreEntries(res || []);
+                } else if (app?.GetLiveQueryStore) {
+                  const res = await app.GetLiveQueryStore(orderBy, topN);
+                  setQueryStoreEntries(res || []);
+                }
+              } catch (e) {
+                console.warn('Failed to refresh Query Store:', e);
+              } finally {
+                setIsLoading(false);
+              }
+            }}
+            isLoading={isLoading}
+            onLoadPlanXML={onLoadPlanXML}
+            pollingPaused={pagePollingConfig['querystore'] === false}
+            onTogglePolling={() => togglePagePolling('querystore')}
+          />
         </div>
       )}
 
@@ -3443,152 +3683,1055 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
       {/* ========================================================
           PAGE: BUFFER POOL RAM INSPECTOR
           ======================================================== */}
+      {/* ========================================================
+          PAGE: BUFFER POOL & PAGE LIFE EXPECTANCY (PLE)
+          Features:
+          - Feature C: NUMA-Aware PLE Heatmap (Per-Socket Topology)
+          - Feature A: "PLE Crash Correlator" (Timeline + Culprit Attribution)
+          - Cache Resident Tables & Indexes
+          ======================================================== */}
       {activeSubTab === 'bufferpool' && (
         <div className="section-block radar-subtab-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
+          {/* Top Header & Sub-View Switcher */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px', flexShrink: 0 }}>
             <div>
-              <h3 style={{ fontSize: '14px', fontWeight: 700, margin: '0 0 2px', color: '#f1f5f9' }}>
-                Buffer Pool RAM Inspector (Where is my Memory going?)
-              </h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: 800, margin: '0 0 2px', color: '#f1f5f9' }}>
+                  Buffer Pool & Page Life Expectancy (PLE)
+                </h3>
+                <span className="radar-badge-darling" title="Hardware-aware memory diagnostics including per-socket NUMA PLE and query buffer eviction correlation">
+                  RAM Telemetry
+                </span>
+              </div>
               <p style={{ margin: 0, fontSize: '11.5px', color: '#94a3b8' }}>
-                Harvested from database partition cache & storage allocation. Displays tables and indexes consuming SQL Server RAM.
+                Monitor cache churn, per-socket NUMA memory imbalance, and identify queries flushing clean pages from RAM.
               </p>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               {renderPagePollingToggle('bufferpool')}
-              <div className="radar-limit-ctrl" title="Configure maximum cached objects shown (Default: 50)">
-                <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={200}
-                  className="radar-limit-input"
-                  value={bufferLimitInput}
-                  onChange={(e) => setBufferLimitInput(e.target.value)}
-                  onBlur={() => applyBufferLimit(bufferLimitInput)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') applyBufferLimit(bufferLimitInput);
-                  }}
-                  title="Type custom limit and press Enter (Default: 50)"
-                />
-                <div className="radar-limit-presets">
-                  {[25, 50, 100, 200].map((val) => (
-                    <button
-                      key={val}
-                      type="button"
-                      className={`radar-limit-pill ${bufferLimit === val ? 'active' : ''}`}
-                      onClick={() => applyBufferLimit(val)}
-                    >
-                      {val}
-                    </button>
-                  ))}
-                </div>
+
+              {/* 2-Way View Switcher */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(15, 23, 42, 0.7)', padding: '3px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${bufferTabMode === 'ple' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setBufferTabMode('ple')}
+                  style={{ fontSize: '11px', padding: '3px 10px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <Activity size={12} />
+                  <span>Page Life Expectancy & NUMA</span>
+                  {pleReport && (
+                    <span className={`radar-pill-${pleReport.status === 'CRITICAL' ? 'danger' : pleReport.status === 'WARNING' ? 'warn' : 'success'}`} style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '10px' }}>
+                      {pleReport.overallPle.toFixed(0)}s
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  className={`btn btn-sm ${bufferTabMode === 'tables' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setBufferTabMode('tables')}
+                  style={{ fontSize: '11px', padding: '3px 10px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <Database size={12} />
+                  <span>Resident Objects</span>
+                  <span style={{ fontSize: '10px', opacity: 0.8 }}>({bufferPool.length})</span>
+                </button>
               </div>
+
+              {bufferTabMode === 'tables' && (
+                <div className="radar-limit-ctrl" title="Configure maximum cached objects shown (Default: 50)">
+                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    className="radar-limit-input"
+                    value={bufferLimitInput}
+                    onChange={(e) => setBufferLimitInput(e.target.value)}
+                    onBlur={() => applyBufferLimit(bufferLimitInput)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') applyBufferLimit(bufferLimitInput);
+                    }}
+                    title="Type custom limit and press Enter (Default: 50)"
+                  />
+                  <div className="radar-limit-presets">
+                    {[25, 50, 100, 200].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        className={`radar-limit-pill ${bufferLimit === val ? 'active' : ''}`}
+                        onClick={() => applyBufferLimit(val)}
+                      >
+                        {val}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <button type="button" className="btn btn-secondary btn-sm radar-ctrl-btn" onClick={fetchData} disabled={isLoading}>
                 <RefreshCw size={11} className={isLoading ? 'spin' : ''} />
-                <span>Poll Buffer Cache</span>
+                <span>Poll Metrics</span>
               </button>
             </div>
           </div>
 
-          {bufferPoolError && (
-            <div style={{ padding: '12px 16px', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', color: '#fca5a5', fontSize: '12px', marginBottom: '12px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-              <AlertTriangle size={18} style={{ color: '#ef4444', flexShrink: 0, marginTop: '2px' }} />
-              <div>
-                <strong style={{ color: '#f87171' }}>Buffer Pool Query Error:</strong> {bufferPoolError}
-                <div style={{ marginTop: '4px', color: '#cbd5e1', fontSize: '11px' }}>
-                  Note: Inspecting <code>sys.dm_os_buffer_descriptors</code> requires <code>VIEW SERVER STATE</code> (SQL Server 2019 and earlier) or <code>VIEW SERVER PERFORMANCE STATE</code> (SQL Server 2022) permission for this login.
+          {/* VIEW 1: PAGE LIFE EXPECTANCY (PLE) & NUMA HEATMAP & CULPRIT ATTRIBUTION */}
+          {bufferTabMode === 'ple' && (
+            <div className="radar-scrollable-block" style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', paddingRight: '4px' }}>
+              {/* Top KPI Summary Cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px' }}>
+                {/* 1. Overall Instance PLE */}
+                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px', border: pleReport?.status === 'CRITICAL' ? '1px solid rgba(239, 68, 68, 0.45)' : pleReport?.status === 'WARNING' ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid rgba(16, 185, 129, 0.35)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Overall Instance PLE
+                    </span>
+                    <span className={`badge ${pleReport?.status === 'CRITICAL' ? 'badge-critical' : pleReport?.status === 'WARNING' ? 'badge-warning' : 'badge-success'}`} style={{ fontSize: '10px' }}>
+                      {pleReport?.status || 'HEALTHY'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '26px', fontWeight: 800, color: pleReport?.status === 'CRITICAL' ? '#f87171' : pleReport?.status === 'WARNING' ? '#fbbf24' : '#34d399', letterSpacing: '-0.02em', lineHeight: 1 }}>
+                    {(pleReport?.overallPle || 0).toLocaleString()}s
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#cbd5e1', marginTop: '6px', fontWeight: 500 }}>
+                    ~{formatSecondsReadable(pleReport?.overallPle || 0)} retention time
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                    Time a data page stays in memory before eviction
+                  </div>
                 </div>
+
+                {/* 2. Calculated Baseline Target */}
+                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Dynamic Target PLE
+                    </span>
+                    <span className="badge badge-info" style={{ fontSize: '10px' }}>
+                      (RAM/4) * 300
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '26px', fontWeight: 800, color: '#38bdf8', letterSpacing: '-0.02em', lineHeight: 1 }}>
+                    {(pleReport?.targetPle || 4800).toLocaleString()}s
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#cbd5e1', marginTop: '6px', fontWeight: 500 }}>
+                    ~{formatSecondsReadable(pleReport?.targetPle || 4800)} baseline
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                    Calculated for {pleReport?.totalMemoryGb || 64} GB Server RAM
+                  </div>
+                </div>
+
+                {/* 3. NUMA Topology & Balance */}
+                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      NUMA Socket Topology
+                    </span>
+                    <span className={`badge ${pleReport?.isNuma ? (pleReport.summary.includes('imbalance') ? 'badge-warning' : 'badge-success') : 'badge-info'}`} style={{ fontSize: '10px' }}>
+                      {pleReport?.isNuma ? `${pleReport.nodeCount} Sockets` : 'Single Socket'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#f1f5f9', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                    {pleReport?.isNuma ? `${pleReport.nodeCount} NUMA Nodes` : 'SMP (Non-NUMA)'}
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: pleReport?.summary.includes('imbalance') ? '#fbbf24' : '#34d399', marginTop: '6px', fontWeight: 600 }}>
+                    {pleReport?.summary.includes('imbalance') ? '⚠️ Severe Socket Imbalance' : '✅ Balanced Allocation'}
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                    Evaluated per physical memory node
+                  </div>
+                </div>
+
+                {/* 4. Eviction Threat Status */}
+                <div className="glass-panel" style={{ padding: '14px', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Buffer Churn Threat
+                    </span>
+                    <span className="badge badge-info" style={{ fontSize: '10px' }}>
+                      Working Set
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: pleReport?.status === 'CRITICAL' ? '#f87171' : pleReport?.status === 'WARNING' ? '#fbbf24' : '#34d399', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                    {pleReport?.status === 'CRITICAL' ? 'High Eviction Churn' : pleReport?.status === 'WARNING' ? 'Elevated Pressure' : 'Healthy Working Set'}
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#cbd5e1', marginTop: '6px', fontWeight: 500 }}>
+                    {pleReport?.culpritQueries.length || 0} Flush Culprits Identified
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                    Correlated with cold physical reads
+                  </div>
+                </div>
+              </div>
+
+              {/* Synthesis Diagnosis Summary Banner */}
+              {pleReport?.summary && (
+                <div style={{
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  background: pleReport.status === 'CRITICAL' ? 'rgba(239, 68, 68, 0.12)' : pleReport.status === 'WARNING' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(16, 185, 129, 0.1)',
+                  border: pleReport.status === 'CRITICAL' ? '1px solid rgba(239, 68, 68, 0.3)' : pleReport.status === 'WARNING' ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid rgba(16, 185, 129, 0.25)',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px'
+                }}>
+                  {pleReport.status === 'CRITICAL' ? (
+                    <AlertTriangle size={20} color="#f87171" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  ) : pleReport.status === 'WARNING' ? (
+                    <AlertTriangle size={20} color="#fbbf24" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  ) : (
+                    <CheckCircle2 size={20} color="#34d399" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  )}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: pleReport.status === 'CRITICAL' ? '#f87171' : pleReport.status === 'WARNING' ? '#fbbf24' : '#34d399', marginBottom: '2px' }}>
+                      Buffer Pool Synthesis Verdict
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#e2e8f0', lineHeight: 1.5 }}>
+                      {pleReport.summary}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ========================================================
+                  DEEP MEMORY PRESSURE GAUGES & PLE BURN VELOCITY
+                  ======================================================== */}
+              <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Gauge size={16} color="#ec4899" />
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>
+                        Deep Memory Pressure Gauges & PLE Burn Velocity
+                      </h4>
+                      <span className="badge badge-info" style={{ fontSize: '10px' }}>
+                        Buffer Engine Telemetry
+                      </span>
+                    </div>
+                    <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#94a3b8' }}>
+                      Instantaneous signals of buffer cache distress: Lazy writer emergency flushing, worker free list stalls, and PLE drop speed.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span className="radar-badge-darling" style={{ fontSize: '10.5px' }}>
+                      Max Server RAM: {pleReport?.maxServerMemoryMb && pleReport.maxServerMemoryMb >= 2147483647 ? '⚠️ Uncapped (2 TB default)' : `${pleReport?.maxServerMemoryMb?.toLocaleString() || 'N/A'} MB`}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px' }}>
+                  {/* Gauge 1: PLE Burn Velocity */}
+                  <div className={`radar-pressure-gauge ${(pleReport?.pleBurnRateSecondsPerMin || 0) < -60 ? 'gauge-critical' : (pleReport?.pleBurnRateSecondsPerMin || 0) < -15 ? 'gauge-warning' : 'gauge-normal'}`}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <span className="radar-gauge-title">PLE Burn Velocity</span>
+                      <Flame size={14} color={(pleReport?.pleBurnRateSecondsPerMin || 0) < -15 ? '#f87171' : '#38bdf8'} />
+                    </div>
+                    <div style={{ fontSize: '22px', fontWeight: 800, color: (pleReport?.pleBurnRateSecondsPerMin || 0) < -60 ? '#f87171' : (pleReport?.pleBurnRateSecondsPerMin || 0) < -15 ? '#fbbf24' : '#34d399', letterSpacing: '-0.02em' }}>
+                      {(pleReport?.pleBurnRateSecondsPerMin || 0) > 0 ? `+${pleReport?.pleBurnRateSecondsPerMin}` : (pleReport?.pleBurnRateSecondsPerMin || 0)}s <span style={{ fontSize: '11px', fontWeight: 500, opacity: 0.8 }}>/ min</span>
+                    </div>
+                    <div style={{ marginTop: '5px' }}>
+                      <span className={`badge ${pleReport?.pleBurnVerdict === 'ACTIVE CACHE COLLAPSE' ? 'badge-critical' : pleReport?.pleBurnVerdict === 'EVICTION SURGE' ? 'badge-warning' : 'badge-success'}`} style={{ fontSize: '9.5px' }}>
+                        {pleReport?.pleBurnVerdict || 'STEADY STATE'}
+                      </span>
+                    </div>
+                    <div className="radar-gauge-desc">
+                      Cache lifetime change velocity per minute.
+                    </div>
+                  </div>
+
+                  {/* Gauge 2: Lazy Writes / sec */}
+                  <div className={`radar-pressure-gauge ${(pleReport?.lazyWritesPerSec || 0) > 20 ? 'gauge-critical' : (pleReport?.lazyWritesPerSec || 0) > 0 ? 'gauge-warning' : 'gauge-normal'}`}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <span className="radar-gauge-title">Lazy Writes / sec</span>
+                      <Activity size={14} color={(pleReport?.lazyWritesPerSec || 0) > 20 ? '#f87171' : '#34d399'} />
+                    </div>
+                    <div style={{ fontSize: '22px', fontWeight: 800, color: (pleReport?.lazyWritesPerSec || 0) > 20 ? '#f87171' : (pleReport?.lazyWritesPerSec || 0) > 0 ? '#fbbf24' : '#34d399', letterSpacing: '-0.02em' }}>
+                      {(pleReport?.lazyWritesPerSec || 0).toFixed(1)} <span style={{ fontSize: '11px', fontWeight: 500, opacity: 0.8 }}>/ sec</span>
+                    </div>
+                    <div style={{ marginTop: '5px' }}>
+                      <span className={`badge ${(pleReport?.lazyWritesPerSec || 0) > 20 ? 'badge-critical' : (pleReport?.lazyWritesPerSec || 0) > 0 ? 'badge-warning' : 'badge-success'}`} style={{ fontSize: '9.5px' }}>
+                        {(pleReport?.lazyWritesPerSec || 0) > 20 ? 'EMERGENCY FLUSH' : (pleReport?.lazyWritesPerSec || 0) > 0 ? 'ACTIVE FLUSHING' : 'IDLE (CLEAN)'}
+                      </span>
+                    </div>
+                    <div className="radar-gauge-desc">
+                      Lazy Writer flushing dirty pages when free memory drops below threshold (&gt;20 indicates severe stress).
+                    </div>
+                  </div>
+
+                  {/* Gauge 3: Free List Stalls / sec */}
+                  <div className={`radar-pressure-gauge ${(pleReport?.freeListStallsPerSec || 0) > 2 ? 'gauge-critical' : (pleReport?.freeListStallsPerSec || 0) > 0 ? 'gauge-warning' : 'gauge-normal'}`}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <span className="radar-gauge-title">Free List Stalls / sec</span>
+                      <Clock size={14} color={(pleReport?.freeListStallsPerSec || 0) > 2 ? '#f87171' : '#34d399'} />
+                    </div>
+                    <div style={{ fontSize: '22px', fontWeight: 800, color: (pleReport?.freeListStallsPerSec || 0) > 2 ? '#f87171' : (pleReport?.freeListStallsPerSec || 0) > 0 ? '#fbbf24' : '#34d399', letterSpacing: '-0.02em' }}>
+                      {(pleReport?.freeListStallsPerSec || 0).toFixed(1)} <span style={{ fontSize: '11px', fontWeight: 500, opacity: 0.8 }}>/ sec</span>
+                    </div>
+                    <div style={{ marginTop: '5px' }}>
+                      <span className={`badge ${(pleReport?.freeListStallsPerSec || 0) > 2 ? 'badge-critical' : (pleReport?.freeListStallsPerSec || 0) > 0 ? 'badge-warning' : 'badge-success'}`} style={{ fontSize: '9.5px' }}>
+                        {(pleReport?.freeListStallsPerSec || 0) > 2 ? 'WORKER STARVATION' : (pleReport?.freeListStallsPerSec || 0) > 0 ? 'ELEVATED WAITS' : 'OPTIMAL (0)'}
+                      </span>
+                    </div>
+                    <div className="radar-gauge-desc">
+                      Worker threads suspended waiting for a clean page. Any value &gt; 2 indicates urgent RAM exhaustion.
+                    </div>
+                  </div>
+
+                  {/* Gauge 4: Cold Disk Read Bandwidth */}
+                  <div className="radar-pressure-gauge gauge-normal">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <span className="radar-gauge-title">Cold Disk Read I/O</span>
+                      <HardDrive size={14} color="#38bdf8" />
+                    </div>
+                    <div style={{ fontSize: '22px', fontWeight: 800, color: '#38bdf8', letterSpacing: '-0.02em' }}>
+                      {(pleReport?.pageReadsMbPerSec || 0).toFixed(1)} <span style={{ fontSize: '11px', fontWeight: 500, opacity: 0.8 }}>MB/sec</span>
+                    </div>
+                    <div style={{ marginTop: '5px', fontSize: '11px', fontWeight: 600 }}>
+                      {(pleReport?.pageReadsPerSec || 0).toLocaleString()} pages/sec
+                    </div>
+                    <div className="radar-gauge-desc">
+                      Physical I/O throughput streaming unbuffered table data directly from storage.
+                    </div>
+                  </div>
+
+                  {/* Gauge 5: Buffer Cache Hit Ratio Reality Check */}
+                  <div className="radar-pressure-gauge gauge-normal">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <span className="radar-gauge-title">Buffer Cache Hit Ratio</span>
+                      <BarChart2 size={14} color="#a855f7" />
+                    </div>
+                    <div style={{ fontSize: '22px', fontWeight: 800, color: '#c084fc', letterSpacing: '-0.02em' }}>
+                      {(pleReport?.bufferCacheHitRatio || 99.0).toFixed(1)}%
+                    </div>
+                    <div style={{ marginTop: '5px' }}>
+                      <span className="badge badge-info" style={{ fontSize: '9px', background: 'rgba(168, 85, 247, 0.15)', color: '#d8b4fe', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
+                        Cumulative Average
+                      </span>
+                    </div>
+                    <div className="radar-gauge-desc">
+                      ⚠️ <strong>BCHR Myth:</strong> Often stays 99% during PLE crashes because newly read pages are hit once before eviction.
+                    </div>
+                  </div>
+
+                  {/* Gauge 6: Memory Grants & Workspace Steal */}
+                  <div className={`radar-pressure-gauge ${(pleReport?.memoryGrantsPendingCount || 0) > 0 ? 'gauge-critical' : 'gauge-normal'}`}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <span className="radar-gauge-title">Workspace Stealing</span>
+                      <ShieldAlert size={14} color={(pleReport?.memoryGrantsPendingCount || 0) > 0 ? '#f87171' : '#34d399'} />
+                    </div>
+                    <div style={{ fontSize: '22px', fontWeight: 800, color: (pleReport?.memoryGrantsPendingCount || 0) > 0 ? '#f87171' : undefined, letterSpacing: '-0.02em' }}>
+                      {pleReport?.memoryGrantsPendingCount || 0} <span style={{ fontSize: '11px', fontWeight: 500, opacity: 0.8 }}>Queued Grants</span>
+                    </div>
+                    <div style={{ marginTop: '5px', fontSize: '11px' }}>
+                      RAM: {((pleReport?.totalServerMemoryMb || 0) / 1024).toFixed(1)} GB / {((pleReport?.targetServerMemoryMb || 0) / 1024).toFixed(1)} GB
+                    </div>
+                    <div className="radar-gauge-desc">
+                      Sort/Hash workspace grants cannibalizing data buffer pool (RESOURCE_SEMAPHORE).
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ========================================================
+                  FEATURE C: NUMA-AWARE PLE HEATMAP
+                  ======================================================== */}
+              <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Network size={16} color="#38bdf8" />
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>
+                        Feature C: NUMA-Aware Page Life Expectancy Heatmap
+                      </h4>
+                      <span className="badge badge-info" style={{ fontSize: '10px' }}>
+                        Per-Socket Memory Nodes
+                      </span>
+                    </div>
+                    <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#94a3b8' }}>
+                      Instance-wide PLE can conceal dangerous localized memory exhaustion. This heatmap tracks Page Life Expectancy per NUMA socket.
+                    </p>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>
+                    Evaluated: {pleReport?.lastEvaluatedAt || 'Just now'}
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+                  {(pleReport?.numaNodes || []).map((node) => {
+                    const ratio = node.targetPle > 0 ? (node.pleSeconds / node.targetPle) : 1;
+                    const pct = Math.min(100, Math.round(ratio * 100));
+                    const isCrit = node.status === 'CRITICAL' || node.pleSeconds < 300;
+                    const isDeg = node.status === 'DEGRADED';
+
+                    return (
+                      <div
+                        key={node.nodeId}
+                        style={{
+                          padding: '16px',
+                          borderRadius: '8px',
+                          background: isCrit
+                            ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(15, 23, 42, 0.8))'
+                            : isDeg
+                            ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(15, 23, 42, 0.8))'
+                            : 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(15, 23, 42, 0.8))',
+                          border: isCrit
+                            ? '1px solid rgba(239, 68, 68, 0.45)'
+                            : isDeg
+                            ? '1px solid rgba(245, 158, 11, 0.35)'
+                            : '1px solid rgba(16, 185, 129, 0.3)',
+                          position: 'relative',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        {/* Top Node Header */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <HardDrive size={15} color={isCrit ? '#f87171' : isDeg ? '#fbbf24' : '#34d399'} />
+                            <strong style={{ fontSize: '13px', color: '#f1f5f9' }}>{node.nodeName}</strong>
+                          </div>
+                          <span className={`badge ${isCrit ? 'badge-critical' : isDeg ? 'badge-warning' : 'badge-success'}`} style={{ fontSize: '10px' }}>
+                            {node.status}
+                          </span>
+                        </div>
+
+                        {/* Metric Value */}
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '8px' }}>
+                          <span style={{ fontSize: '28px', fontWeight: 800, color: isCrit ? '#f87171' : isDeg ? '#fbbf24' : '#34d399', letterSpacing: '-0.02em' }}>
+                            {node.pleSeconds.toLocaleString()}s
+                          </span>
+                          <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
+                            (~{formatSecondsReadable(node.pleSeconds)})
+                          </span>
+                        </div>
+
+                        {/* Gauge / Progress Bar */}
+                        <div style={{ marginBottom: '12px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#94a3b8', marginBottom: '4px' }}>
+                            <span>Retention vs Socket Target</span>
+                            <span style={{ fontWeight: 600, color: isCrit ? '#f87171' : isDeg ? '#fbbf24' : '#34d399' }}>
+                              {pct}% of Target ({node.targetPle.toLocaleString()}s)
+                            </span>
+                          </div>
+                          <div style={{ height: '7px', background: 'rgba(255,255,255,0.08)', borderRadius: '4px', overflow: 'hidden' }}>
+                            <div
+                              style={{
+                                width: `${pct}%`,
+                                height: '100%',
+                                background: isCrit
+                                  ? 'linear-gradient(90deg, #ef4444, #f87171)'
+                                  : isDeg
+                                  ? 'linear-gradient(90deg, #f59e0b, #fbbf24)'
+                                  : 'linear-gradient(90deg, #10b981, #34d399)',
+                                borderRadius: '4px',
+                                transition: 'width 0.4s ease'
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Node Specs & Foreign Page Details */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: '11px' }}>
+                          <div>
+                            <span style={{ color: '#64748b' }}>Allocated RAM:</span>
+                            <div style={{ fontWeight: 700, color: '#e2e8f0', marginTop: '1px' }}>
+                              {(node.memoryAllocatedMb / 1024).toFixed(1)} GB
+                            </div>
+                          </div>
+                          <div>
+                            <span style={{ color: '#64748b' }}>Foreign Page Ratio:</span>
+                            <div style={{ fontWeight: 700, color: node.foreignPageRatio > 2.0 ? '#f59e0b' : '#38bdf8', marginTop: '1px' }}>
+                              {node.foreignPageRatio.toFixed(2)}%
+                            </div>
+                          </div>
+                        </div>
+
+                        {isCrit && (
+                          <div style={{ marginTop: '10px', padding: '6px 8px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#fca5a5', fontSize: '10.5px', lineHeight: 1.4 }}>
+                            ⚠️ Severe Buffer Cache Starvation: Queries assigned to this socket are flushing clean pages prematurely.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* ========================================================
+                  FEATURE A: "PLE CRASH CORRELATOR" (CULPRIT ATTRIBUTION)
+                  ======================================================== */}
+              <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Zap size={16} color="#f59e0b" />
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>
+                        Feature A: "PLE Crash Correlator" (Buffer Pool Eviction Culprits)
+                      </h4>
+                      <span className="badge badge-warning" style={{ fontSize: '10px' }}>
+                        Query Store & DMV Attribution
+                      </span>
+                    </div>
+                    <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#94a3b8' }}>
+                      Correlating PLE drops with top queries forcing cold physical reads and evicting data pages from the buffer cache.
+                    </p>
+                  </div>
+
+                  {/* Filter & Search Controls */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(15, 23, 42, 0.8)', padding: '2px 8px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                      <Search size={12} color="#64748b" />
+                      <input
+                        type="text"
+                        placeholder="Search text, ID, hash..."
+                        value={culpritFilter}
+                        onChange={(e) => setCulpritFilter(e.target.value)}
+                        style={{ background: 'transparent', border: 'none', color: '#f1f5f9', fontSize: '11px', outline: 'none', width: '150px' }}
+                      />
+                      {culpritFilter && (
+                        <button type="button" onClick={() => setCulpritFilter('')} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 0 }}>
+                          <X size={11} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '4px', background: 'rgba(15, 23, 42, 0.6)', padding: '2px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${culpritSeverity === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setCulpritSeverity('all')}
+                        style={{ fontSize: '10.5px', padding: '2px 8px' }}
+                      >
+                        All ({pleReport?.culpritQueries.length || 0})
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${culpritSeverity === 'critical' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setCulpritSeverity('critical')}
+                        style={{ fontSize: '10.5px', padding: '2px 8px', background: culpritSeverity === 'critical' ? '#ef4444' : undefined, borderColor: culpritSeverity === 'critical' ? '#ef4444' : undefined }}
+                      >
+                        Critical
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${culpritSeverity === 'high' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setCulpritSeverity('high')}
+                        style={{ fontSize: '10.5px', padding: '2px 8px', background: culpritSeverity === 'high' ? '#f59e0b' : undefined, borderColor: culpritSeverity === 'high' ? '#f59e0b' : undefined }}
+                      >
+                        High
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {filteredCulprits.length === 0 ? (
+                  <div style={{ padding: '36px 16px', textAlign: 'center', color: '#94a3b8' }}>
+                    <CheckCircle2 size={24} color="#34d399" style={{ margin: '0 auto 8px' }} />
+                    <div style={{ fontSize: '13px', color: '#e2e8f0', fontWeight: 600 }}>No Buffer Pool Eviction Culprits Found</div>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                      Query cache hit ratio is optimal with minimal cold physical page reads.
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {filteredCulprits.map((q, idx) => {
+                      const isCrit = q.impactSeverity === 'CRITICAL';
+                      const isHigh = q.impactSeverity === 'HIGH';
+
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: '14px',
+                            borderRadius: '8px',
+                            background: 'rgba(15, 23, 42, 0.7)',
+                            border: isCrit ? '1px solid rgba(239, 68, 68, 0.4)' : isHigh ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid rgba(255, 255, 255, 0.07)'
+                          }}
+                        >
+                          {/* Top Identity Row */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9' }}>
+                                #{idx + 1} {q.queryId > 0 ? `Query ID #${q.queryId}` : 'DMV Query'}
+                              </span>
+                              {q.planId > 0 && (
+                                <span className="badge badge-info" style={{ fontSize: '10px' }}>
+                                  Plan #{q.planId}
+                                </span>
+                              )}
+                              {q.queryHash && (
+                                <code style={{ fontSize: '10px', color: '#94a3b8', background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '3px' }}>
+                                  Hash: {q.queryHash.length > 18 ? q.queryHash.slice(0, 18) + '...' : q.queryHash}
+                                </code>
+                              )}
+                              <span className={`badge ${isCrit ? 'badge-critical' : isHigh ? 'badge-warning' : 'badge-info'}`} style={{ fontSize: '10px' }}>
+                                {q.impactSeverity} PLE THREAT
+                              </span>
+                            </div>
+
+                            <div style={{ fontSize: '11px', color: '#64748b' }}>
+                              Last Run: {q.lastExecutionTime || 'Recent'}
+                            </div>
+                          </div>
+
+                          {/* Buffer Pool Flush Risk Statement */}
+                          <div style={{
+                            padding: '6px 10px',
+                            borderRadius: '4px',
+                            background: isCrit ? 'rgba(239, 68, 68, 0.12)' : isHigh ? 'rgba(245, 158, 11, 0.12)' : 'rgba(56, 189, 248, 0.1)',
+                            border: isCrit ? '1px solid rgba(239, 68, 68, 0.25)' : isHigh ? '1px solid rgba(245, 158, 11, 0.25)' : '1px solid rgba(56, 189, 248, 0.2)',
+                            color: isCrit ? '#fca5a5' : isHigh ? '#fde68a' : '#bae6fd',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            marginBottom: '10px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}>
+                            <AlertTriangle size={13} style={{ flexShrink: 0 }} />
+                            <span>{q.bufferPoolFlushRisk}</span>
+                          </div>
+
+                          {/* Key Telemetry Grid */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', marginBottom: '10px', padding: '8px', borderRadius: '6px', background: 'rgba(0,0,0,0.25)' }}>
+                            <div>
+                              <span style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase' }}>Avg Physical Reads</span>
+                              <div style={{ fontSize: '13px', fontWeight: 800, color: '#f87171', marginTop: '1px' }}>
+                                {q.avgPhysicalReadsMb.toFixed(1)} MB / run
+                              </div>
+                            </div>
+                            <div>
+                              <span style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase' }}>Total Cold Reads</span>
+                              <div style={{ fontSize: '13px', fontWeight: 800, color: '#fbbf24', marginTop: '1px' }}>
+                                {q.totalPhysicalReadsMb > 1024 ? `${(q.totalPhysicalReadsMb / 1024).toFixed(1)} GB` : `${q.totalPhysicalReadsMb.toFixed(0)} MB`}
+                              </div>
+                            </div>
+                            <div>
+                              <span style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase' }}>Executions</span>
+                              <div style={{ fontSize: '13px', fontWeight: 800, color: '#f1f5f9', marginTop: '1px' }}>
+                                {q.executionCount.toLocaleString()} runs
+                              </div>
+                            </div>
+                            <div>
+                              <span style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase' }}>Avg Logical Reads</span>
+                              <div style={{ fontSize: '13px', fontWeight: 800, color: '#38bdf8', marginTop: '1px' }}>
+                                {q.avgLogicalReadsMb.toFixed(1)} MB
+                              </div>
+                            </div>
+                            <div>
+                              <span style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase' }}>Avg Duration / CPU</span>
+                              <div style={{ fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginTop: '1px' }}>
+                                {q.avgDurationMs.toFixed(0)}ms ({q.avgCpuMs.toFixed(0)}ms)
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* T-SQL Query Text & Copy Button */}
+                          <div style={{ position: 'relative' }}>
+                            <div style={{
+                              maxHeight: '75px',
+                              overflowY: 'auto',
+                              fontSize: '11px',
+                              fontFamily: 'Consolas, monospace',
+                              padding: '8px 45px 8px 10px',
+                              borderRadius: '4px',
+                              background: '#090d16',
+                              border: '1px solid rgba(255,255,255,0.06)',
+                              color: '#cbd5e1',
+                              lineHeight: 1.4,
+                              wordBreak: 'break-all',
+                              whiteSpace: 'pre-wrap'
+                            }}>
+                              {q.queryText}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyQuery(q.queryText, `culprit-${idx}`)}
+                              className="btn-copy-sm"
+                              style={{ position: 'absolute', right: '6px', top: '6px', padding: '3px 7px', fontSize: '10px' }}
+                            >
+                              {copiedQueryId === `culprit-${idx}` ? (
+                                <>
+                                  <Check size={11} color="#34d399" />
+                                  <span style={{ color: '#34d399' }}>Copied</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy size={11} />
+                                  <span>Copy</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* ========================================================
+                  TABLE EVICTION IMPACT TRACKER
+                  ======================================================== */}
+              <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <FolderTree size={16} color="#38bdf8" />
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>
+                        Table Eviction Impact Tracker
+                      </h4>
+                      <span className="badge badge-info" style={{ fontSize: '10px' }}>
+                        Active Buffer Evictions
+                      </span>
+                    </div>
+                    <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#94a3b8' }}>
+                      Live tracking of which cached tables and indexes in the buffer pool are under displacement pressure and which queries are pushing them out.
+                    </p>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>
+                    {pleReport?.tableEvictionImpacts?.length || 0} Objects Evaluated
+                  </div>
+                </div>
+
+                {(!pleReport?.tableEvictionImpacts || pleReport.tableEvictionImpacts.length === 0) ? (
+                  <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94a3b8' }}>
+                    <CheckCircle2 size={22} color="#34d399" style={{ margin: '0 auto 6px' }} />
+                    <div style={{ fontSize: '12px', color: '#e2e8f0', fontWeight: 600 }}>No Cached Tables Suffering Eviction</div>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                      Buffer pool retention is stable and working sets remain resident in RAM.
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '12px' }}>
+                    {pleReport.tableEvictionImpacts.map((t, idx) => {
+                      const isCrit = t.evictionRisk === 'CRITICAL';
+                      const isHigh = t.evictionRisk === 'HIGH';
+
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: '14px',
+                            borderRadius: '8px',
+                            background: isCrit
+                              ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(15, 23, 42, 0.75))'
+                              : isHigh
+                              ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(15, 23, 42, 0.75))'
+                              : 'rgba(15, 23, 42, 0.65)',
+                            border: isCrit
+                              ? '1px solid rgba(239, 68, 68, 0.4)'
+                              : isHigh
+                              ? '1px solid rgba(245, 158, 11, 0.3)'
+                              : '1px solid rgba(255, 255, 255, 0.08)'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px', gap: '8px' }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <Database size={13} color={isCrit ? '#f87171' : isHigh ? '#fbbf24' : '#38bdf8'} />
+                                <strong style={{ fontSize: '13px', color: '#f1f5f9' }}>
+                                  {t.schemaName}.{t.tableName}
+                                </strong>
+                              </div>
+                              <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: '2px' }}>
+                                DB: <code>{t.databaseName}</code> | Index: <code>{t.indexName}</code>
+                              </div>
+                            </div>
+                            <span className={`badge ${isCrit ? 'badge-critical' : isHigh ? 'badge-warning' : 'badge-success'}`} style={{ fontSize: '10px' }}>
+                              {t.evictionRisk} RISK
+                            </span>
+                          </div>
+
+                          {/* Cached Volume & % Bar */}
+                          <div style={{ marginBottom: '10px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
+                              <span style={{ color: '#cbd5e1', fontWeight: 600 }}>
+                                {(t.currentCachedMb || 0).toLocaleString()} MB Resident
+                              </span>
+                              <span style={{ color: '#94a3b8', fontSize: '10.5px' }}>
+                                {t.bufferPoolPercent}% of Buffer Pool
+                              </span>
+                            </div>
+                            <div style={{ height: '5px', background: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                              <div
+                                style={{
+                                  width: `${Math.min(100, t.bufferPoolPercent * 2)}%`,
+                                  height: '100%',
+                                  background: isCrit ? '#ef4444' : isHigh ? '#f59e0b' : '#38bdf8',
+                                  borderRadius: '3px'
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Displacement Reason */}
+                          <div style={{ fontSize: '11px', color: isCrit ? '#fca5a5' : isHigh ? '#fde68a' : '#cbd5e1', lineHeight: 1.4, marginBottom: '8px' }}>
+                            {t.displacementReason || `Working set evicted by memory pressure.`}
+                          </div>
+
+                          {/* Culprit Query Attribution */}
+                          {t.pushedOutByQuery && t.pushedOutByQuery !== 'N/A' && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10.5px', color: '#94a3b8', background: 'rgba(0,0,0,0.3)', padding: '4px 8px', borderRadius: '4px' }}>
+                              <Zap size={11} color="#f59e0b" />
+                              <span>Displacement Trigger:</span>
+                              <code style={{ color: '#fbbf24', fontWeight: 600 }}>
+                                {t.pushedOutByQuery.length > 24 ? t.pushedOutByQuery.slice(0, 24) + '...' : t.pushedOutByQuery}
+                              </code>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* ========================================================
+                  AI PLE DOCTOR & REMEDIATION ADVISOR
+                  ======================================================== */}
+              <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Sparkles size={16} color="#a855f7" />
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#f1f5f9' }}>
+                        AI PLE Doctor & Remediation Advisor
+                      </h4>
+                      <span className="badge badge-info" style={{ fontSize: '10px', background: 'rgba(168, 85, 247, 0.2)', color: '#d8b4fe', border: '1px solid rgba(168, 85, 247, 0.4)' }}>
+                        Automated Root-Cause Diagnostic
+                      </span>
+                    </div>
+                    <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#94a3b8' }}>
+                      Automated root-cause analysis detecting configuration bottlenecks, workspace starvation, and delivering 1-click executable T-SQL fixes.
+                    </p>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>
+                    {pleReport?.doctorInsights?.length || 0} Prescriptions Generated
+                  </div>
+                </div>
+
+                {(!pleReport?.doctorInsights || pleReport.doctorInsights.length === 0) ? (
+                  <div style={{ padding: '28px 16px', textAlign: 'center', color: '#94a3b8' }}>
+                    <CheckCircle2 size={24} color="#34d399" style={{ margin: '0 auto 8px' }} />
+                    <div style={{ fontSize: '13px', color: '#e2e8f0', fontWeight: 600 }}>Memory Health Optimal</div>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                      No memory configuration faults or worker starvation patterns detected.
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    {pleReport.doctorInsights.map((insight, idx) => {
+                      const isCrit = insight.severity === 'CRITICAL';
+                      const isWarn = insight.severity === 'WARNING';
+
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: '16px',
+                            borderRadius: '8px',
+                            background: isCrit
+                              ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.14), rgba(15, 23, 42, 0.8))'
+                              : isWarn
+                              ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(15, 23, 42, 0.8))'
+                              : 'rgba(15, 23, 42, 0.7)',
+                            border: isCrit
+                              ? '1px solid rgba(239, 68, 68, 0.45)'
+                              : isWarn
+                              ? '1px solid rgba(245, 158, 11, 0.35)'
+                              : '1px solid rgba(16, 185, 129, 0.35)'
+                          }}
+                        >
+                          {/* Header Line */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <span className={`badge ${isCrit ? 'badge-critical' : isWarn ? 'badge-warning' : 'badge-success'}`} style={{ fontSize: '10px' }}>
+                                {insight.severity}
+                              </span>
+                              <span className="badge badge-info" style={{ fontSize: '10px' }}>
+                                {insight.category.replace('_', ' ')}
+                              </span>
+                              <strong style={{ fontSize: '13.5px', color: '#f1f5f9' }}>
+                                {insight.title}
+                              </strong>
+                            </div>
+                          </div>
+
+                          {/* Diagnosis */}
+                          <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: 1.5, marginBottom: '8px' }}>
+                            {insight.diagnosis}
+                          </div>
+
+                          {/* Actionable Remedy */}
+                          <div style={{ padding: '8px 10px', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '10px' }}>
+                            <span style={{ fontSize: '10px', color: '#34d399', fontWeight: 700, textTransform: 'uppercase' }}>
+                              Actionable Remedy:
+                            </span>
+                            <div style={{ fontSize: '11px', color: '#a7f3d0', marginTop: '2px', lineHeight: 1.35 }}>
+                              {insight.actionableRemedy}
+                            </div>
+                          </div>
+
+                          {/* Copyable T-SQL Script */}
+                          {insight.suggestedTsql && (
+                            <div style={{ position: 'relative', marginTop: '8px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                <span style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  <Terminal size={12} color="#38bdf8" />
+                                  <span>Prescribed T-SQL Remediation:</span>
+                                </span>
+                              </div>
+                              <div style={{
+                                maxHeight: '120px',
+                                overflowY: 'auto',
+                                fontSize: '11px',
+                                fontFamily: 'Consolas, monospace',
+                                padding: '8px 80px 8px 10px',
+                                borderRadius: '4px',
+                                background: '#090d16',
+                                border: '1px solid rgba(255,255,255,0.08)',
+                                color: '#7dd3fc',
+                                lineHeight: 1.45,
+                                whiteSpace: 'pre-wrap'
+                              }}>
+                                {insight.suggestedTsql}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyQuery(insight.suggestedTsql, `ple-doc-${idx}`)}
+                                className="btn-copy-sm"
+                                style={{ position: 'absolute', right: '6px', top: '24px', padding: '3px 8px', fontSize: '10px' }}
+                              >
+                                {copiedQueryId === `ple-doc-${idx}` ? (
+                                  <>
+                                    <Check size={11} color="#34d399" />
+                                    <span style={{ color: '#34d399' }}>Copied</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy size={11} />
+                                    <span>Copy Script</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           )}
 
-          <div className="glass-panel radar-table-scroll-panel">
-            <table className="radar-sticky-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-              <thead>
-                <tr style={{ background: 'rgba(15, 23, 42, 0.95)', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Database & Object</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Index & Type</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Cached RAM (MB)</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>% of Buffer Cache</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Clean vs Dirty Ratio</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Row Count</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bufferPool.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} style={{ padding: '48px 16px', textAlign: 'center', color: '#94a3b8' }}>
-                      {isLoading ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                          <RefreshCw size={22} className="spin" style={{ color: '#38bdf8' }} />
-                          <span style={{ fontSize: '13px', color: '#e2e8f0', fontWeight: 600 }}>Scanning SQL Server RAM buffer descriptors...</span>
-                          <span style={{ fontSize: '11px', color: '#64748b' }}>Inspecting in-memory cache allocation units (typically takes 15–25s on large production servers)</span>
-                        </div>
-                      ) : bufferPoolError ? (
-                        <div style={{ color: '#fca5a5' }}>
-                          Unable to retrieve buffer pool metrics. Please verify SQL Server permissions above.
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
-                          <Database size={24} style={{ color: '#64748b' }} />
-                          <span style={{ fontSize: '13px', color: '#e2e8f0', fontWeight: 600 }}>No cached tables currently resident in Buffer Pool</span>
-                          <span style={{ fontSize: '11px', color: '#64748b' }}>
-                            Click "Poll Buffer Cache" to rescan in-memory data pages for this database.
-                          </span>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ) : (
-                  bufferPool.map((b, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                      <td style={{ padding: '10px 12px' }}>
-                        <div style={{ fontWeight: 700, color: '#f1f5f9' }}>
-                          {b.schemaName}.{b.objectName}
-                        </div>
-                        <div style={{ fontSize: '10.5px', color: '#64748b' }}>
-                          {b.databaseName}
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px 12px' }}>
-                        <div style={{ color: '#38bdf8', fontWeight: 600 }}>{b.indexName}</div>
-                        <span style={{ fontSize: '10px', color: '#94a3b8', background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '3px' }}>
-                          {b.indexType}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 12px', fontWeight: 700, color: '#e2e8f0' }}>
-                        {b.bufferSizeMb.toFixed(1)} MB
-                      </td>
-                      <td style={{ padding: '10px 12px', width: '140px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div style={{ flex: 1, height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
-                            <div style={{ width: `${Math.min(b.percentageOfBuffer || 0, 100)}%`, height: '100%', background: '#38bdf8' }} />
-                          </div>
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#38bdf8', minWidth: '36px' }}>
-                            {(b.percentageOfBuffer || 0).toFixed(1)}%
-                          </span>
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px 12px', minWidth: '160px' }}>
-                        <div style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                          <span style={{ color: '#38bdf8' }}>Clean: {b.cleanPagesMb.toFixed(1)} MB</span>
-                          <span style={{ color: '#f59e0b' }}>Dirty: {b.dirtyPagesMb.toFixed(1)} MB</span>
-                        </div>
-                        <div className="buffer-ratio-bar">
-                          <div className="buffer-clean-seg" style={{ width: `${(b.cleanPagesMb / (b.bufferSizeMb || 1)) * 100}%` }} />
-                          <div className="buffer-dirty-seg" style={{ width: `${(b.dirtyPagesMb / (b.bufferSizeMb || 1)) * 100}%` }} />
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px 12px', color: '#94a3b8' }}>
-                        {b.rowCount > 0 ? b.rowCount.toLocaleString() : 'N/A'}
-                      </td>
+          {/* VIEW 2: CACHE RESIDENT TABLES & INDEXES */}
+          {bufferTabMode === 'tables' && (
+            <div className="radar-subview-container" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {bufferPoolError && (
+                <div style={{ padding: '12px 16px', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', color: '#fca5a5', fontSize: '12px', marginBottom: '12px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <AlertTriangle size={18} style={{ color: '#ef4444', flexShrink: 0, marginTop: '2px' }} />
+                  <div>
+                    <strong style={{ color: '#f87171' }}>Buffer Pool Query Error:</strong> {bufferPoolError}
+                    <div style={{ marginTop: '4px', color: '#cbd5e1', fontSize: '11px' }}>
+                      Note: Inspecting <code>sys.dm_os_buffer_descriptors</code> requires <code>VIEW SERVER STATE</code> (SQL Server 2019 and earlier) or <code>VIEW SERVER PERFORMANCE STATE</code> (SQL Server 2022) permission for this login.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="glass-panel radar-table-scroll-panel">
+                <table className="radar-sticky-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(15, 23, 42, 0.95)', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Database & Object</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Index & Type</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Cached RAM (MB)</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>% of Buffer Cache</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Clean vs Dirty Ratio</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Row Count</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {bufferPool.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} style={{ padding: '48px 16px', textAlign: 'center', color: '#94a3b8' }}>
+                          {isLoading ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                              <RefreshCw size={22} className="spin" style={{ color: '#38bdf8' }} />
+                              <span style={{ fontSize: '13px', color: '#e2e8f0', fontWeight: 600 }}>Scanning SQL Server RAM buffer descriptors...</span>
+                              <span style={{ fontSize: '11px', color: '#64748b' }}>Inspecting in-memory cache allocation units (typically takes 15–25s on large production servers)</span>
+                            </div>
+                          ) : bufferPoolError ? (
+                            <div style={{ color: '#fca5a5' }}>
+                              Unable to retrieve buffer pool metrics. Please verify SQL Server permissions above.
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+                              <Database size={24} style={{ color: '#64748b' }} />
+                              <span style={{ fontSize: '13px', color: '#e2e8f0', fontWeight: 600 }}>No cached tables currently resident in Buffer Pool</span>
+                              <span style={{ fontSize: '11px', color: '#64748b' }}>
+                                Click "Poll Metrics" to rescan in-memory data pages for this database.
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ) : (
+                      bufferPool.map((b, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ fontWeight: 700, color: '#f1f5f9' }}>
+                              {b.schemaName}.{b.objectName}
+                            </div>
+                            <div style={{ fontSize: '10.5px', color: '#64748b' }}>
+                              {b.databaseName}
+                            </div>
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ color: '#38bdf8', fontWeight: 600 }}>{b.indexName}</div>
+                            <span style={{ fontSize: '10px', color: '#94a3b8', background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '3px' }}>
+                              {b.indexType}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 12px', fontWeight: 700, color: '#e2e8f0' }}>
+                            {b.bufferSizeMb.toFixed(1)} MB
+                          </td>
+                          <td style={{ padding: '10px 12px', width: '140px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div style={{ flex: 1, height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
+                                <div style={{ width: `${Math.min(b.percentageOfBuffer || 0, 100)}%`, height: '100%', background: '#38bdf8' }} />
+                              </div>
+                              <span style={{ fontSize: '11px', fontWeight: 700, color: '#38bdf8', minWidth: '36px' }}>
+                                {(b.percentageOfBuffer || 0).toFixed(1)}%
+                              </span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '10px 12px', minWidth: '160px' }}>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                              <span style={{ color: '#38bdf8' }}>Clean: {b.cleanPagesMb.toFixed(1)} MB</span>
+                              <span style={{ color: '#f59e0b' }}>Dirty: {b.dirtyPagesMb.toFixed(1)} MB</span>
+                            </div>
+                            <div className="buffer-ratio-bar">
+                              <div className="buffer-clean-seg" style={{ width: `${(b.cleanPagesMb / (b.bufferSizeMb || 1)) * 100}%` }} />
+                              <div className="buffer-dirty-seg" style={{ width: `${(b.dirtyPagesMb / (b.bufferSizeMb || 1)) * 100}%` }} />
+                            </div>
+                          </td>
+                          <td style={{ padding: '10px 12px', color: '#94a3b8' }}>
+                            {b.rowCount > 0 ? b.rowCount.toLocaleString() : 'N/A'}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

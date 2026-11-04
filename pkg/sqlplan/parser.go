@@ -125,6 +125,29 @@ func parsePlanWithDecoder(decoder *xml.Decoder, planName string) (*PlanAnalysis,
 		if totalCost > 0 {
 			stmt.CostPercentage = (stmt.StatementSubTreeCost / totalCost) * 100.0
 		}
+		// Two-pass: recompute each node's OWN operator cost (SubtreeCost - sum of children SubtreeCosts)
+		// This matches PerformanceStudio / SSMS "Cost (% of query)" logic exactly.
+		if stmt.RootNode != nil {
+			stmtCost := stmt.StatementSubTreeCost
+			if stmtCost <= 0 {
+				stmtCost = stmt.RootNode.EstimatedTotalSubtreeCost
+			}
+			if stmtCost <= 0 {
+				stmtCost = 1
+			}
+			computeNodeOperatorCost(stmt.RootNode, stmtCost)
+
+			// Compute self-time attribution and heatmap intensity (NodeTimeAttribution from PerformanceStudio)
+			stmtCpu := stmt.ActualCPUms
+			if stmt.QueryTimeStats != nil && stmt.QueryTimeStats.CpuTimeMs > 0 {
+				stmtCpu = stmt.QueryTimeStats.CpuTimeMs
+			}
+			stmtElapsed := stmt.ActualElapsedms
+			if stmt.QueryTimeStats != nil && stmt.QueryTimeStats.ElapsedTimeMs > 0 {
+				stmtElapsed = stmt.QueryTimeStats.ElapsedTimeMs
+			}
+			ComputeNodeTimeAttribution(stmt.RootNode, stmtCpu, stmtElapsed)
+		}
 		for _, mi := range stmt.MissingIndexes {
 			analysis.AllMissingIndexes = append(analysis.AllMissingIndexes, mi)
 		}
@@ -146,6 +169,9 @@ func parsePlanWithDecoder(decoder *xml.Decoder, planName string) (*PlanAnalysis,
 
 	// Extract Server Hardware & I/O Metrics (Total reads, RAM touched, CPU vs Clock, Table I/O Leaderboard)
 	analysis.HardwareMetrics = extractHardwareMetrics(root, analysis)
+
+	// Evaluate Page Life Expectancy (PLE) & Buffer Pool Eviction Threat
+	analysis.PLERiskReport = evaluatePLERisk(analysis)
 
 	return analysis, nil
 }
@@ -419,11 +445,70 @@ func parseStatement(elem *xmlElement) *StatementAnalysis {
 		}
 	}
 
+	// Extract TraceFlags from <TraceFlags> inside <QueryPlan>
+	stmt.TraceFlags = make([]*TraceFlagInfo, 0)
+	for _, tfElem := range elem.findAll("TraceFlag") {
+		tfVal, _ := strconv.Atoi(tfElem.Attr("Value"))
+		stmt.TraceFlags = append(stmt.TraceFlags, &TraceFlagInfo{
+			Value:  tfVal,
+			Scope:  tfElem.Attr("Scope"),
+			Status: tfElem.Attr("Status"),
+		})
+	}
+
+	// Extract QueryTimeStats (<QueryTimeStats CpuTime="200" ElapsedTime="230"/>)
+	if qts := elem.findFirst("QueryTimeStats"); qts != nil {
+		cpu, _ := strconv.ParseInt(qts.Attr("CpuTime"), 10, 64)
+		elapsed, _ := strconv.ParseInt(qts.Attr("ElapsedTime"), 10, 64)
+		stmt.QueryTimeStats = &QueryTimeStats{
+			CpuTimeMs:     cpu,
+			ElapsedTimeMs: elapsed,
+		}
+	}
+
+	// Extract Parameters (<ParameterList><ColumnReference Column="@param" ParameterCompiledValue="..." ParameterRuntimeValue="..."/></ParameterList>)
+	stmt.Parameters = make([]*StatementParameter, 0)
+	if paramList := elem.findFirst("ParameterList"); paramList != nil {
+		for _, col := range paramList.findAll("ColumnReference") {
+			compiled := col.Attr("ParameterCompiledValue")
+			runtime := col.Attr("ParameterRuntimeValue")
+			hasRuntime := runtime != ""
+			mismatch := hasRuntime && compiled != runtime
+			stmt.Parameters = append(stmt.Parameters, &StatementParameter{
+				Column:        col.Attr("Column"),
+				ParameterType: col.Attr("ParameterDataType"),
+				CompiledValue: compiled,
+				RuntimeValue:  runtime,
+				HasRuntime:    hasRuntime,
+				Mismatch:      mismatch,
+			})
+		}
+	}
+
+	// Extract per-statement WaitStats (<WaitStats> inside QueryPlan)
+	stmt.NodeWaitStats = make([]*WaitStat, 0)
+	for _, wsElem := range elem.findAll("WaitStats") {
+		for _, w := range wsElem.findAll("Wait") {
+			wType := w.Attr("WaitType")
+			wTime, _ := strconv.ParseInt(w.Attr("WaitTimeMs"), 10, 64)
+			wCount, _ := strconv.ParseInt(w.Attr("WaitCount"), 10, 64)
+			cat, desc := categorizeWaitType(wType)
+			stmt.NodeWaitStats = append(stmt.NodeWaitStats, &WaitStat{
+				WaitType:    wType,
+				WaitTimeMs:  wTime,
+				WaitCount:   wCount,
+				Category:    cat,
+				Description: desc,
+			})
+		}
+	}
+
 	// Aggregate statement hardware metrics and compute execution classification
 	aggregateStatementMetrics(stmt)
 
 	return stmt
 }
+
 
 func aggregateStatementMetrics(stmt *StatementAnalysis) {
 	if stmt.RootNode == nil {
@@ -607,6 +692,11 @@ func parseRelOp(elem *xmlElement, stmtTotalCost float64) *PlanNode {
 	tblCard, _ := strconv.ParseFloat(elem.Attr("TableCardinality"), 64)
 	parallel := elem.Attr("Parallel") == "1" || elem.Attr("Parallel") == "true"
 
+	execMode := elem.Attr("ExecutionMode")
+	if execMode == "" {
+		execMode = elem.Attr("EstimatedExecutionMode")
+	}
+
 	node := &PlanNode{
 		NodeID:                    nodeID,
 		PhysicalOp:                physOp,
@@ -618,12 +708,16 @@ func parseRelOp(elem *xmlElement, stmtTotalCost float64) *PlanNode {
 		EstimatedTotalSubtreeCost: subCost,
 		TableCardinality:          tblCard,
 		Parallel:                  parallel,
+		ExecutionMode:             execMode,
 		OutputColumns:             make([]string, 0),
 		Warnings:                  make([]string, 0),
 		Children:                  make([]*PlanNode, 0),
+		PerThreadStats:            make([]*NodeThreadStat, 0),
 	}
 
-	if stmtTotalCost > 0 {
+	// CostPercentage will be set precisely by computeNodeOperatorCost() after the tree is fully built.
+	// Temporarily store subtree-based % as a fallback only.
+	if stmtTotalCost > 0 && subCost > 0 {
 		node.CostPercentage = (subCost / stmtTotalCost) * 100.0
 	}
 
@@ -679,28 +773,40 @@ func parseRelOp(elem *xmlElement, stmtTotalCost float64) *PlanNode {
 		var totalLogReads, totalPhysReads, totalReadAheads, totalScans int64
 		var totalCPU, maxElapsed int64
 		for _, c := range counters {
-			if r, err := strconv.ParseFloat(c.Attr("ActualRows"), 64); err == nil {
-				totalActRows += r
+			tID, _ := strconv.Atoi(c.Attr("Thread"))
+			actRows, _ := strconv.ParseFloat(c.Attr("ActualRows"), 64)
+			actExec, _ := strconv.ParseInt(c.Attr("ActualExecutions"), 10, 64)
+			actCPU, _ := strconv.ParseInt(c.Attr("ActualCPUms"), 10, 64)
+			actEl, _ := strconv.ParseInt(c.Attr("ActualElapsedms"), 10, 64)
+			actLogReads, _ := strconv.ParseInt(c.Attr("ActualLogicalReads"), 10, 64)
+			actPhysReads, _ := strconv.ParseInt(c.Attr("ActualPhysicalReads"), 10, 64)
+			actReadAheads, _ := strconv.ParseInt(c.Attr("ActualReadAheads"), 10, 64)
+			actScans, _ := strconv.ParseInt(c.Attr("ActualScans"), 10, 64)
+
+			if actMode := c.Attr("ActualExecutionMode"); actMode != "" && node.ActualExecutionMode == "" {
+				node.ActualExecutionMode = actMode
 			}
-			if lr, err := strconv.ParseInt(c.Attr("ActualLogicalReads"), 10, 64); err == nil {
-				totalLogReads += lr
-			}
-			if pr, err := strconv.ParseInt(c.Attr("ActualPhysicalReads"), 10, 64); err == nil {
-				totalPhysReads += pr
-			}
-			if ra, err := strconv.ParseInt(c.Attr("ActualReadAheads"), 10, 64); err == nil {
-				totalReadAheads += ra
-			}
-			if sc, err := strconv.ParseInt(c.Attr("ActualScans"), 10, 64); err == nil {
-				totalScans += sc
-			}
-			if cpu, err := strconv.ParseInt(c.Attr("ActualCPUms"), 10, 64); err == nil {
-				totalCPU += cpu
-			}
-			if el, err := strconv.ParseInt(c.Attr("ActualElapsedms"), 10, 64); err == nil {
-				if el > maxElapsed {
-					maxElapsed = el
-				}
+
+			node.PerThreadStats = append(node.PerThreadStats, &NodeThreadStat{
+				ThreadID:            tID,
+				ActualRows:          int64(actRows),
+				ActualExecutions:    actExec,
+				ActualCPUMs:         actCPU,
+				ActualElapsedMs:     actEl,
+				ActualLogicalReads:  actLogReads,
+				ActualPhysicalReads: actPhysReads,
+				ActualReadAheads:    actReadAheads,
+				ActualScans:         actScans,
+			})
+
+			totalActRows += actRows
+			totalLogReads += actLogReads
+			totalPhysReads += actPhysReads
+			totalReadAheads += actReadAheads
+			totalScans += actScans
+			totalCPU += actCPU
+			if actEl > maxElapsed {
+				maxElapsed = actEl
 			}
 		}
 		node.ActualRows = totalActRows
@@ -745,18 +851,13 @@ func parseRelOp(elem *xmlElement, stmtTotalCost float64) *PlanNode {
 		}
 	}
 
-	// Identify Pain Points
+	// Identify Pain Points (structural — cost-based pain points are set by computeNodeOperatorCost after tree is built)
 	if node.IndexKind == "Heap" && (node.PhysicalOp == "RID Lookup" || node.PhysicalOp == "Table Scan") {
 		node.IsPainPoint = true
 		node.PainReason = "Heap Table: Missing Clustered Index causes expensive RID lookups or table scans."
 	} else if node.PhysicalOp == "Clustered Index Scan" && node.TableCardinality > 50000 {
 		node.IsPainPoint = true
 		node.PainReason = fmt.Sprintf("Full Clustered Index Scan on %s (%0.0f rows). Missing selective index seek.", node.Table, node.TableCardinality)
-	} else if node.CostPercentage > 30.0 {
-		node.IsPainPoint = true
-		if node.PainReason == "" {
-			node.PainReason = fmt.Sprintf("High operator cost (%0.1f%% of statement cost).", node.CostPercentage)
-		}
 	}
 
 	// Recursively parse child RelOps
@@ -777,6 +878,54 @@ func collectChildRelOps(elem *xmlElement, parentNode *PlanNode, stmtTotalCost fl
 		collectChildRelOps(child, parentNode, stmtTotalCost)
 	}
 }
+
+// computeNodeOperatorCost performs a second pass over the fully-built operator tree
+// to assign each node's CostPercentage based on its OWN work only (not its subtree).
+//
+// Algorithm mirrors PerformanceStudio's ShowPlanParser.Costs.cs exactly:
+//
+//	EstimatedOperatorCost = node.SubtreeCost - sum(children.SubtreeCosts)
+//	CostPercent           = EstimatedOperatorCost / totalStatementCost * 100
+//
+// This makes the cost badge on each node match what SSMS shows as
+// "Cost (% of query)" in the operator properties panel.
+func computeNodeOperatorCost(node *PlanNode, totalStatementCost float64) {
+	if node == nil || totalStatementCost <= 0 {
+		return
+	}
+	// Sum all direct children's subtree costs
+	var childrenSubtreeCost float64
+	for _, child := range node.Children {
+		childrenSubtreeCost += child.EstimatedTotalSubtreeCost
+	}
+	// Operator's own cost = its subtree cost minus what its children account for
+	ownCost := node.EstimatedTotalSubtreeCost - childrenSubtreeCost
+	if ownCost < 0 {
+		ownCost = 0
+	}
+	pct := (ownCost / totalStatementCost) * 100.0
+	// Clamp to [0, 100]
+	if pct > 100 {
+		pct = 100
+	}
+	if pct < 0 {
+		pct = 0
+	}
+	node.CostPercentage = math.Round(pct*10) / 10
+
+	// Set cost-based pain point now that we have the correct operator own-cost %
+	if !node.IsPainPoint && node.CostPercentage > 30.0 {
+		node.IsPainPoint = true
+		node.PainReason = fmt.Sprintf("High operator cost (%0.1f%% of query cost, %0.4f units).", node.CostPercentage, ownCost)
+	}
+
+	// Recurse into children
+	for _, child := range node.Children {
+		computeNodeOperatorCost(child, totalStatementCost)
+	}
+}
+
+
 
 func detectAntiPatterns(analysis *PlanAnalysis) {
 	var convertStmts []string

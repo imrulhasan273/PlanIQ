@@ -255,6 +255,30 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
   const hostName = status?.serverName || '';
   const dbName = status?.databaseName || '';
 
+  // 7-day Query Store & Extended Events SQLite sync state
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncNotice, setSyncNotice] = useState<{ text: string; isError?: boolean } | null>(null);
+
+  const handleSync7Days = async () => {
+    setIsSyncing(true);
+    setSyncNotice(null);
+    try {
+      const app = (window as any).go?.main?.App;
+      if (app && app.SyncSevenDayHistory) {
+        const res = await app.SyncSevenDayHistory();
+        if (res) {
+          setSyncNotice({ text: res.message, isError: !res.isQueryStoreOn });
+        }
+      } else {
+        setSyncNotice({ text: 'Sync is available when connected to a live database.', isError: true });
+      }
+    } catch (err: any) {
+      setSyncNotice({ text: `Sync failed: ${err?.message || err}`, isError: true });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   // Live queries dynamically loaded for the chosen time window
   const [windowQueries, setWindowQueries] = useState<QueryStoreEntry[]>([]);
 
@@ -701,6 +725,32 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
 
         {/* Right Action Pill / Breadcrumb */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={handleSync7Days}
+            disabled={isSyncing}
+            style={{
+              background: 'linear-gradient(135deg, #0284c7, #0369a1)',
+              color: '#ffffff',
+              border: 'none',
+              padding: '4px 10px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: isSyncing ? 'not-allowed' : 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              opacity: isSyncing ? 0.7 : 1
+            }}
+            title="Harvest the past 7 days of wait history from Query Store and deadlocks from system_health into local SQLite"
+          >
+            <Sparkles size={12} className={isSyncing ? 'spin' : ''} />
+            <span>{isSyncing ? 'Harvesting 7 Days...' : '⚡ Sync 7 Days (Query Store)'}</span>
+          </button>
+          <span className="badge badge-neutral" style={{ fontSize: '10.5px', padding: '3px 8px' }} title="Rolling 7-day snapshots cached in local workstation SQLite (%AppData%/PlanIQ/planiq_config.db)">
+            💾 SQLite Cache
+          </span>
           <span className="badge badge-info" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 9px' }}>
             <Server size={12} /> {hostName} ({dbName})
           </span>
@@ -710,6 +760,33 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
           </span>
         </div>
       </div>
+
+      {/* ── 7-DAY SYNC NOTIFICATION BANNER ── */}
+      {syncNotice && (
+        <div
+          style={{
+            background: syncNotice.isError ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)',
+            border: `1px solid ${syncNotice.isError ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)'}`,
+            color: syncNotice.isError ? '#ef4444' : '#10b981',
+            padding: '7px 14px',
+            borderRadius: '6px',
+            fontSize: '11.5px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px'
+          }}
+        >
+          <span>{syncNotice.text}</span>
+          <button
+            type="button"
+            onClick={() => setSyncNotice(null)}
+            style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* ── PERSPECTIVE SUBTABS (Matching SolarWinds DPA) ── */}
       <div className="dpa-perspective-nav" style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '8px' }}>

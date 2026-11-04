@@ -215,7 +215,7 @@ export const AIAdvisorTab: React.FC<AIAdvisorTabProps> = ({
             gap: '14px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', color: '#e2e8f0' }}>
+          <div className="offline-banner-text" style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' }}>
             <Sparkles size={16} color="#c084fc" style={{ flexShrink: 0 }} />
             <span>
               Currently in <strong>Offline Mode (Deterministic Rules)</strong>. Add a <strong>Google Gemini</strong>, <strong>OpenAI (GPT-4o)</strong>, or <strong>Local Ollama</strong> API key for deep multi-table reasoning and semantic query rewrites.

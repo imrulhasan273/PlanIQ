@@ -309,11 +309,23 @@ export interface AdvancedDiagnostics {
   scoreGrade: string;
 }
 
+export interface PLERiskAssessment {
+  riskLevel: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL' | string;
+  score: number;
+  headline: string;
+  summary: string;
+  estimatedScanVolumeMb: number;
+  bufferPoolEvictionRisk: string;
+  culpritOperators: string[];
+  mitigationAction: string;
+}
+
 export type PlanAnalysis = sqlplan.PlanAnalysis & {
   executiveVerdict?: ExecutiveVerdict;
   waitStats?: WaitStat[];
   diagnostics?: AdvancedDiagnostics;
   hardwareMetrics?: HardwareMetrics;
+  pleRiskReport?: PLERiskAssessment;
 };
 
 export type StatementAnalysis = sqlplan.StatementAnalysis & {
@@ -332,6 +344,23 @@ export type PlanNode = sqlplan.PlanNode & {
   hasCardinalitySkew?: boolean;
   skewRatio?: number;
   skewReason?: string;
+  selfCpuMs?: number;
+  selfElapsedMs?: number;
+  selfCpuPercent?: number;
+  selfElapsedPercent?: number;
+  heatIntensity?: number;
+  actualExecutionMode?: string;
+  perThreadStats?: Array<{
+    threadId: number;
+    actualRows: number;
+    actualExecutions: number;
+    actualCpuMs: number;
+    actualElapsedMs: number;
+    actualLogicalReads: number;
+    actualPhysicalReads: number;
+    actualReadAheads: number;
+    actualScans: number;
+  }>;
 };
 
 export type PlanWarning = sqlplan.PlanWarning;

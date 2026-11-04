@@ -17,7 +17,7 @@ func main() {
 
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:  "sqlplan-advisor",
+		Title:  "PlanIQ — SQL Server Execution Plan Visualizer & AI Advisor",
 		Width:  1024,
 		Height: 768,
 		AssetServer: &assetserver.Options{

@@ -1,12 +1,15 @@
 import { PlanAnalysis } from '../types/plan';
+import { applyFindingsAndWaitInsights } from './planFindings';
 
 /**
  * Ensures all array fields in PlanAnalysis and its nested diagnostic structures
  * are guaranteed to be arrays (fallback from null/undefined), preventing any
  * 'Cannot read properties of null (reading length)' exceptions across the UI.
+ * Also runs the PerformanceStudio benefit-scoring and wait-insights engine on the plan.
  */
 export function sanitizePlan(plan: PlanAnalysis): PlanAnalysis {
   if (!plan) return plan;
+  applyFindingsAndWaitInsights(plan);
 
   plan.statements = Array.isArray(plan.statements) ? plan.statements : [];
   plan.waitStats = Array.isArray(plan.waitStats) ? plan.waitStats : [];
@@ -55,5 +58,14 @@ export function sanitizePlan(plan: PlanAnalysis): PlanAnalysis {
     }
   }
 
+  if (plan.pleRiskReport) {
+    const ple = plan.pleRiskReport;
+    ple.culpritOperators = Array.isArray(ple.culpritOperators) ? ple.culpritOperators : [];
+    ple.riskLevel = ple.riskLevel || 'LOW';
+    ple.score = typeof ple.score === 'number' ? ple.score : 0;
+    ple.estimatedScanVolumeMb = typeof ple.estimatedScanVolumeMb === 'number' ? ple.estimatedScanVolumeMb : 0;
+  }
+
   return plan;
 }
+

@@ -416,7 +416,7 @@ export const DiagnosticTooltip: React.FC<DiagnosticTooltipProps> = ({ guideKey }
         createPortal(
           <div
             ref={popoverRef}
-            className="diag-info-popover glass-panel"
+            className="diag-info-popover"
             style={{
               position: 'fixed',
               top: `${coords.top}px`,

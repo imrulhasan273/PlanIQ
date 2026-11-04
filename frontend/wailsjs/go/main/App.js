@@ -30,6 +30,10 @@ export function GetCurrentWindowsUser() {
   return window['go']['main']['App']['GetCurrentWindowsUser']();
 }
 
+export function GetHistoricalWaitHistory(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetHistoricalWaitHistory'](arg1, arg2, arg3);
+}
+
 export function GetLiveActiveSessions(arg1) {
   return window['go']['main']['App']['GetLiveActiveSessions'](arg1);
 }
@@ -74,6 +78,10 @@ export function GetLiveMissingIndexes(arg1) {
   return window['go']['main']['App']['GetLiveMissingIndexes'](arg1);
 }
 
+export function GetLivePLEReport() {
+  return window['go']['main']['App']['GetLivePLEReport']();
+}
+
 export function GetLiveQueryStore(arg1, arg2) {
   return window['go']['main']['App']['GetLiveQueryStore'](arg1, arg2);
 }
@@ -104,6 +112,10 @@ export function GetLiveWaitHistory() {
 
 export function GetLiveWaitStats(arg1) {
   return window['go']['main']['App']['GetLiveWaitStats'](arg1);
+}
+
+export function GetQueryStoreDiagnostic(arg1) {
+  return window['go']['main']['App']['GetQueryStoreDiagnostic'](arg1);
 }
 
 export function GetRadarPagePollingConfig() {
@@ -144,6 +156,10 @@ export function SetDefaultDBConnection(arg1) {
 
 export function SetRadarPagePolling(arg1, arg2) {
   return window['go']['main']['App']['SetRadarPagePolling'](arg1, arg2);
+}
+
+export function SyncSevenDayHistory() {
+  return window['go']['main']['App']['SyncSevenDayHistory']();
 }
 
 export function TestDBConnection(arg1) {

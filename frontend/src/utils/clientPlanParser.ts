@@ -13,12 +13,14 @@ import {
   ConsolidatedIndex,
   ScalarUDFWarning,
   CardinalityEstimationEngine,
+  PLERiskAssessment,
 } from '../types/plan';
 import {
   computeExtraDiagnostics,
   buildFindingAntiPatterns,
   extraHealthPenalty,
 } from './extraDiagnostics';
+import { applyFindingsAndWaitInsights } from './planFindings';
 
 export function parseShowPlanXMLClient(xmlString: string, planName: string = 'Execution Plan'): PlanAnalysis {
   // Normalize XML: strip namespaces and declarations so browser DOMParser handles any encoding & querySelector matches tags directly
@@ -189,7 +191,53 @@ export function parseShowPlanXMLClient(xmlString: string, planName: string = 'Ex
       }
     }
 
+    // Trace flags
+    const traceFlags: { value: number; scope: string; status: string }[] = [];
+    stmtElem.querySelectorAll('TraceFlag').forEach((tf) => {
+      traceFlags.push({
+        value: parseInt(tf.getAttribute('Value') || '0', 10) || 0,
+        scope: tf.getAttribute('Scope') || 'Global',
+        status: tf.parentElement?.tagName === 'TraceFlagList' && tf.parentElement.getAttribute('IsCompileTime') === '0' ? 'Runtime' : 'Compile time',
+      });
+    });
+
+    // Parameters (sniffed compiled vs runtime values)
+    const stmtParameters: { column: string; parameterType: string; compiledValue: string; runtimeValue: string; hasRuntime: boolean; mismatch: boolean }[] = [];
+    stmtElem.querySelectorAll('ParameterList > ColumnReference').forEach((cr) => {
+      const compiled = cr.getAttribute('ParameterCompiledValue') || '';
+      const runtimeAttr = cr.getAttribute('ParameterRuntimeValue');
+      const hasRuntime = runtimeAttr !== null;
+      stmtParameters.push({
+        column: cr.getAttribute('Column') || '',
+        parameterType: cr.getAttribute('ParameterDataType') || '',
+        compiledValue: compiled,
+        runtimeValue: runtimeAttr || '',
+        hasRuntime,
+        mismatch: hasRuntime && runtimeAttr !== compiled,
+      });
+    });
+
+    const stmtQueryTimeStats = qts
+      ? { cpuTimeMs: actualCpuMs, elapsedTimeMs: actualElapsedMs }
+      : undefined;
+
     const stmtAnalysis = {
+      degreeOfParallelism: parseInt(qp?.getAttribute('DegreeOfParallelism') || '0', 10) || 0,
+      nonParallelPlanReason: qp?.getAttribute('NonParallelPlanReason') || '',
+      earlyAbortReason: stmtElem.getAttribute('StatementOptmEarlyAbortReason') || '',
+      memoryGrantInfo: (() => {
+        const mg = qp?.querySelector('MemoryGrantInfo');
+        if (!mg) return undefined;
+        return {
+          grantedKb: parseInt(mg.getAttribute('GrantedMemory') || '0', 10) || 0,
+          maxUsedKb: parseInt(mg.getAttribute('MaxUsedMemory') || '0', 10) || 0,
+          hasMaxUsed: mg.getAttribute('MaxUsedMemory') !== null,
+          grantWaitMs: parseInt(mg.getAttribute('GrantWaitTime') || '0', 10) || 0,
+        };
+      })(),
+      traceFlags,
+      queryTimeStats: stmtQueryTimeStats,
+      parameters: stmtParameters,
       statementId: stmtId,
       statementCompId: stmtCompId,
       statementType: stmtType,
@@ -413,7 +461,10 @@ export function parseShowPlanXMLClient(xmlString: string, planName: string = 'Ex
     } as any);
   });
 
-  return {
+  // Page Life Expectancy (PLE) Risk Rating
+  const pleRiskReport = evaluatePLERiskClient(statements);
+
+  const analysisResult = {
     planName,
     totalStatements: statements.length,
     totalSubTreeCost,
@@ -425,10 +476,13 @@ export function parseShowPlanXMLClient(xmlString: string, planName: string = 'Ex
     executiveVerdict,
     diagnostics,
     hardwareMetrics,
+    pleRiskReport,
     cachedPlanSizeKb: 0,
     maxCompileMemory: 0,
     globalWarnings: [],
   } as unknown as PlanAnalysis;
+  (analysisResult as any).findings = applyFindingsAndWaitInsights(analysisResult);
+  return analysisResult;
 }
 
 function parseRelOp(elem: Element, statementCost: number): PlanNode {
@@ -551,6 +605,38 @@ function parseRelOp(elem: Element, statementCost: number): PlanNode {
     seekPredicates = seek.getAttribute('ScalarString') || '';
   }
 
+  // Per-operator warnings (direct <Warnings> element only)
+  const operatorWarnings: { kind: string; description: string }[] = [];
+  Array.from(elem.children).forEach((c) => {
+    if (c.tagName !== 'Warnings') return;
+    if (c.getAttribute('NoJoinPredicate') === '1' || c.getAttribute('NoJoinPredicate') === 'true')
+      operatorWarnings.push({ kind: 'NoJoinPredicate', description: 'No join predicate — possible cartesian product.' });
+    if (c.getAttribute('ColumnsWithNoStatistics') !== null || c.querySelector('ColumnsWithNoStatistics'))
+      operatorWarnings.push({ kind: 'ColumnsWithNoStatistics', description: 'Columns with no statistics: ' + Array.from(c.querySelectorAll('ColumnReference')).map((x) => x.getAttribute('Column')).filter(Boolean).join(', ') });
+    c.querySelectorAll('SpillToTempDb').forEach((s) =>
+      operatorWarnings.push({ kind: 'SpillToTempDb', description: `Spill to tempdb (level ${s.getAttribute('SpillLevel') || '?'}, ${s.getAttribute('SpilledThreadCount') || '?'} thread(s)).` }));
+    c.querySelectorAll('Wait').forEach((w) =>
+      operatorWarnings.push({ kind: 'Wait', description: `${w.getAttribute('WaitType') || 'Wait'}: ${w.getAttribute('WaitTime') || 0} ms` }));
+    c.querySelectorAll('PlanAffectingConvert').forEach((p) =>
+      operatorWarnings.push({ kind: 'PlanAffectingConvert', description: `${p.getAttribute('ConvertIssue') || ''}: ${p.getAttribute('Expression') || ''}` }));
+    c.querySelectorAll('SortSpillDetails, HashSpillDetails').forEach((s) =>
+      operatorWarnings.push({ kind: s.tagName, description: `Granted ${s.getAttribute('GrantedMemoryKb') || 0} KB, used ${s.getAttribute('UsedMemoryKb') || 0} KB, writes ${s.getAttribute('WritesToTempDb') || 0}, reads ${s.getAttribute('ReadsFromTempDb') || 0}` }));
+  });
+  const estimateRebinds = parseFloat(elem.getAttribute('EstimateRebinds') || '0') || 0;
+  const estimateRewinds = parseFloat(elem.getAttribute('EstimateRewinds') || '0') || 0;
+  const executionMode = elem.getAttribute('EstimatedExecutionMode') || elem.getAttribute('ActualExecutionMode') || '';
+  let actualExecutions = 0;
+  let actualRebinds = 0;
+  let actualRewinds = 0;
+  directCounters.forEach((c) => {
+    actualExecutions += parseInt(c.getAttribute('ActualExecutions') || '0', 10) || 0;
+    actualRebinds += parseInt(c.getAttribute('ActualRebinds') || '0', 10) || 0;
+    actualRewinds += parseInt(c.getAttribute('ActualRewinds') || '0', 10) || 0;
+  });
+  const manyToMany = Array.from(elem.querySelectorAll('Merge')).some(
+    (m) => m.parentElement === elem && m.getAttribute('ManyToMany') === '1'
+  );
+
   // Recursive Children: immediate child RelOps inside this operator
   const children: PlanNode[] = [];
   Array.from(elem.children).forEach((childElem) => {
@@ -565,6 +651,14 @@ function parseRelOp(elem: Element, statementCost: number): PlanNode {
   });
 
   return {
+    operatorWarnings,
+    estimateRebinds,
+    estimateRewinds,
+    executionMode,
+    actualExecutions,
+    actualRebinds,
+    actualRewinds,
+    manyToMany,
     nodeId,
     physicalOp,
     logicalOp,
@@ -689,6 +783,105 @@ function generateExecutiveVerdict(statements: StatementAnalysis[], totalCost: nu
     topOperator: culprit.rootNode?.physicalOp || 'Operator',
     actionableFix: `Review query #${culprit.statementId} in the visualizer and AI Advisor to add recommended indexes or optimize joins and partition pruning.`,
   };
+}
+
+function evaluatePLERiskClient(statements: StatementAnalysis[]): PLERiskAssessment {
+  let totalLogicalReads = 0;
+  let totalEstRows = 0;
+  const scanOperators: string[] = [];
+  const seenOps = new Set<string>();
+
+  const walkNodes = (n: PlanNode | undefined) => {
+    if (!n) return;
+    const opLower = ((n.physicalOp || '') + ' ' + (n.logicalOp || '')).toLowerCase();
+    if (opLower.includes('scan')) {
+      let name = n.physicalOp;
+      if (n.table) {
+        name += ' on ' + n.table;
+      }
+      if (!seenOps.has(name)) {
+        seenOps.add(name);
+        scanOperators.push(name);
+      }
+      totalEstRows += n.estimateRows || 0;
+    }
+    if (n.children) {
+      n.children.forEach(walkNodes);
+    }
+  };
+
+  statements.forEach((stmt) => {
+    totalLogicalReads += stmt.actualLogicalReads || 0;
+    if (stmt.rootNode) {
+      walkNodes(stmt.rootNode);
+    }
+  });
+
+  let scanVolumeMB = 0;
+  if (totalLogicalReads > 0) {
+    scanVolumeMB = (totalLogicalReads * 8.0) / 1024.0;
+  } else if (totalEstRows > 0) {
+    scanVolumeMB = (totalEstRows * 200.0) / (1024.0 * 1024.0);
+  }
+
+  if (scanOperators.length === 0 && scanVolumeMB < 10) {
+    return {
+      riskLevel: 'LOW',
+      score: 5,
+      headline: 'Optimal Buffer Pool Footprint (Minimal PLE Impact)',
+      summary: 'No table or index scans detected. Query touches minimal pages via seeks and does not cause buffer pool eviction pressure.',
+      estimatedScanVolumeMb: scanVolumeMB,
+      bufferPoolEvictionRisk: 'Negligible (<0.1% buffer pool churn)',
+      culpritOperators: [],
+      mitigationAction: 'No PLE tuning required. Current index access paths protect buffer pool stability.',
+    };
+  }
+
+  if (scanVolumeMB > 1024 || totalLogicalReads > 100000 || totalEstRows > 1000000) {
+    return {
+      riskLevel: 'CRITICAL',
+      score: 95,
+      headline: 'Catastrophic Page Life Expectancy (PLE) Flush Risk',
+      summary: `Query reads ~${scanVolumeMB.toFixed(1)} MB of data pages across full scan operations (${scanOperators.join(', ')}). On standard production databases, this forces rapid eviction of active cached tables, cratering Page Life Expectancy (PLE) and triggering buffer pool churn.`,
+      estimatedScanVolumeMb: scanVolumeMB,
+      bufferPoolEvictionRisk: 'Catastrophic (>35% buffer pool eviction per run)',
+      culpritOperators: scanOperators,
+      mitigationAction: 'Create covering nonclustered index on scan filter/join keys to convert full scans into single-page seeks, eliminating RAM eviction.',
+    };
+  } else if (scanVolumeMB > 200 || totalLogicalReads > 25000 || totalEstRows > 200000) {
+    return {
+      riskLevel: 'HIGH',
+      score: 70,
+      headline: 'High Buffer Pool Ingestion (Elevated PLE Threat)',
+      summary: `Query ingests ~${scanVolumeMB.toFixed(1)} MB of data pages into memory. If executed repeatedly in high-concurrency environments, this will cause frequent PLE drops and disk I/O stalls.`,
+      estimatedScanVolumeMb: scanVolumeMB,
+      bufferPoolEvictionRisk: 'High (~10-25% buffer pool eviction per run)',
+      culpritOperators: scanOperators,
+      mitigationAction: 'Review missing indexes or apply SARGable filter predicates to narrow the row scan boundary.',
+    };
+  } else if (scanVolumeMB > 30 || scanOperators.length > 0) {
+    return {
+      riskLevel: 'MODERATE',
+      score: 40,
+      headline: 'Moderate Page Life Expectancy Footprint',
+      summary: `Query performs scan operations ingesting ~${scanVolumeMB.toFixed(1)} MB into the buffer pool. Acceptable for low-frequency reports, but monitor during peak hours.`,
+      estimatedScanVolumeMb: scanVolumeMB,
+      bufferPoolEvictionRisk: 'Moderate (~2-8% buffer pool eviction)',
+      culpritOperators: scanOperators,
+      mitigationAction: 'Evaluate if table scans can be satisfied by existing secondary indexes.',
+    };
+  } else {
+    return {
+      riskLevel: 'LOW',
+      score: 15,
+      headline: 'Low PLE Impact',
+      summary: 'Low memory ingestion. Query operates within safe buffer pool boundaries.',
+      estimatedScanVolumeMb: scanVolumeMB,
+      bufferPoolEvictionRisk: 'Low (<1% buffer pool eviction)',
+      culpritOperators: scanOperators,
+      mitigationAction: 'Maintain healthy statistics maintenance to preserve current execution path.',
+    };
+  }
 }
 
 export function comparePlansClient(planA: PlanAnalysis, planB: PlanAnalysis) {

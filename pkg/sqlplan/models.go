@@ -16,6 +16,19 @@ type PlanAnalysis struct {
 	AntiPatterns      []*AntiPattern       `json:"antiPatterns"`
 	Diagnostics       *AdvancedDiagnostics `json:"diagnostics,omitempty"`
 	HardwareMetrics   *HardwareMetrics     `json:"hardwareMetrics,omitempty"`
+	PLERiskReport     *PLERiskAssessment   `json:"pleRiskReport,omitempty"`
+}
+
+// PLERiskAssessment rates the execution plan's threat to Page Life Expectancy (Buffer Pool Churn)
+type PLERiskAssessment struct {
+	RiskLevel              string   `json:"riskLevel"`              // "LOW", "MODERATE", "HIGH", "CRITICAL"
+	Score                  int      `json:"score"`                  // 0 to 100 (100 = catastrophic RAM eviction threat)
+	Headline               string   `json:"headline"`
+	Summary                string   `json:"summary"`
+	EstimatedScanVolumeMB  float64  `json:"estimatedScanVolumeMb"`  // Estimated MB read into buffer pool
+	BufferPoolEvictionRisk string   `json:"bufferPoolEvictionRisk"` // e.g. "Flushes ~15-40% of buffer pool per run"
+	CulpritOperators       []string `json:"culpritOperators"`       // Names/IDs of operators performing scans
+	MitigationAction       string   `json:"mitigationAction"`       // Actionable index or rewrite fix
 }
 
 // ExecutiveVerdict is the 10-second instant root cause diagnosis
@@ -37,71 +50,131 @@ type WaitStat struct {
 	Description string `json:"description"`
 }
 
+// TraceFlagInfo represents a SQL Server trace flag active at compile or runtime
+type TraceFlagInfo struct {
+	Value  int    `json:"value"`
+	Scope  string `json:"scope"`  // "Global", "Session"
+	Status string `json:"status"` // "Compile time", "Runtime"
+}
+
+// QueryTimeStats holds the CPU and Elapsed ms figures from <QueryTimeStats>
+type QueryTimeStats struct {
+	CpuTimeMs     int64 `json:"cpuTimeMs"`
+	ElapsedTimeMs int64 `json:"elapsedTimeMs"`
+}
+
+// StatementParameter holds one entry from the <ParameterList> element
+type StatementParameter struct {
+	Column        string `json:"column"`
+	ParameterType string `json:"parameterType"`
+	CompiledValue string `json:"compiledValue"`
+	RuntimeValue  string `json:"runtimeValue"`
+	HasRuntime    bool   `json:"hasRuntime"`
+	Mismatch      bool   `json:"mismatch"` // compiled != runtime
+}
+
+// OperatorWarning is a per-node warning extracted from <Warnings> inside a RelOp
+type OperatorWarning struct {
+	Kind        string `json:"kind"`
+	Description string `json:"description"`
+}
+
+
 // StatementAnalysis represents an individual statement in a batch or stored proc
 type StatementAnalysis struct {
-	StatementID          string              `json:"statementId"`
-	StatementCompID      string              `json:"statementCompId"`
-	StatementType        string              `json:"statementType"`
-	StatementText        string              `json:"statementText"`
-	StatementSubTreeCost float64             `json:"statementSubTreeCost"`
-	StatementEstRows     float64             `json:"statementEstRows"`
-	CostPercentage       float64             `json:"costPercentage"`
-	CompileTimeMS        int                 `json:"compileTimeMs"`
-	CompileCPUMS         int                 `json:"compileCpuMs"`
-	CompileMemoryKB      int                 `json:"compileMemoryKb"`
-	OptimizationLevel    string              `json:"optimizationLevel"`
-	HasQueryPlan                  bool                `json:"hasQueryPlan"`
-	RootNode                      *PlanNode           `json:"rootNode,omitempty"`
-	Warnings                      []*PlanWarning      `json:"warnings"`
-	MissingIndexes                []*MissingIndexInfo `json:"missingIndexes"`
-	PainPointsCount               int                 `json:"painPointsCount"`
-	ActualCPUms                   int64               `json:"actualCpuMs"`
-	ActualElapsedms               int64               `json:"actualElapsedMs"`
-	ActualLogicalReads            int64               `json:"actualLogicalReads"`
-	ActualLogicalReadsMB          float64             `json:"actualLogicalReadsMb"`
-	ActualPhysicalReads           int64               `json:"actualPhysicalReads"`
-	ActualReadAheads              int64               `json:"actualReadAheads"`
-	HasActualMetrics              bool                `json:"hasActualMetrics"`
-	ExecutionClassification       string              `json:"executionClassification"`       // "IO_BOUND", "CPU_BOUND", "WAIT_BOUND", "BALANCED"
-	ExecutionClassificationReason string              `json:"executionClassificationReason"`
+	StatementID          string                 `json:"statementId"`
+	StatementCompID      string                 `json:"statementCompId"`
+	StatementType        string                 `json:"statementType"`
+	StatementText        string                 `json:"statementText"`
+	StatementSubTreeCost float64                `json:"statementSubTreeCost"`
+	StatementEstRows     float64                `json:"statementEstRows"`
+	CostPercentage       float64                `json:"costPercentage"`
+	CompileTimeMS        int                    `json:"compileTimeMs"`
+	CompileCPUMS         int                    `json:"compileCpuMs"`
+	CompileMemoryKB      int                    `json:"compileMemoryKb"`
+	OptimizationLevel    string                 `json:"optimizationLevel"`
+	HasQueryPlan                  bool                   `json:"hasQueryPlan"`
+	RootNode                      *PlanNode              `json:"rootNode,omitempty"`
+	Warnings                      []*PlanWarning         `json:"warnings"`
+	MissingIndexes                []*MissingIndexInfo    `json:"missingIndexes"`
+	PainPointsCount               int                    `json:"painPointsCount"`
+	ActualCPUms                   int64                  `json:"actualCpuMs"`
+	ActualElapsedms               int64                  `json:"actualElapsedMs"`
+	ActualLogicalReads            int64                  `json:"actualLogicalReads"`
+	ActualLogicalReadsMB          float64                `json:"actualLogicalReadsMb"`
+	ActualPhysicalReads           int64                  `json:"actualPhysicalReads"`
+	ActualReadAheads              int64                  `json:"actualReadAheads"`
+	HasActualMetrics              bool                   `json:"hasActualMetrics"`
+	ExecutionClassification       string                 `json:"executionClassification"`       // "IO_BOUND", "CPU_BOUND", "WAIT_BOUND", "BALANCED"
+	ExecutionClassificationReason string                 `json:"executionClassificationReason"`
+	// New: PerformanceStudio-equivalent right-panel data
+	TraceFlags     []*TraceFlagInfo      `json:"traceFlags"`
+	QueryTimeStats *QueryTimeStats       `json:"queryTimeStats,omitempty"`
+	Parameters     []*StatementParameter `json:"parameters"`
+	NodeWaitStats  []*WaitStat           `json:"nodeWaitStats"` // per-statement wait stats (alias for WaitStats in PerformanceStudio)
 }
 
 // PlanNode represents an individual operator in the relational tree
 type PlanNode struct {
-	NodeID                    int         `json:"nodeId"`
-	PhysicalOp                string      `json:"physicalOp"`
-	LogicalOp                 string      `json:"logicalOp"`
-	EstimateRows              float64     `json:"estimateRows"`
-	EstimatedRowsRead         float64     `json:"estimatedRowsRead"`
-	ActualRows                float64     `json:"actualRows"`
-	HasActualRows             bool        `json:"hasActualRows"`
-	HasCardinalitySkew        bool        `json:"hasCardinalitySkew"`
-	SkewRatio                 float64     `json:"skewRatio"`
-	SkewReason                string      `json:"skewReason"`
-	EstimateIO                float64     `json:"estimateIo"`
-	EstimateCPU               float64     `json:"estimateCpu"`
-	EstimatedTotalSubtreeCost float64     `json:"estimatedTotalSubtreeCost"`
-	CostPercentage            float64     `json:"costPercentage"`
-	TableCardinality          float64     `json:"tableCardinality"`
-	Parallel                  bool        `json:"parallel"`
-	ActualCPUms               int64       `json:"actualCpuMs"`
-	ActualElapsedms           int64       `json:"actualElapsedMs"`
-	ActualLogicalReads        int64       `json:"actualLogicalReads"`
-	ActualPhysicalReads       int64       `json:"actualPhysicalReads"`
-	ActualReadAheads          int64       `json:"actualReadAheads"`
-	ActualScans               int64       `json:"actualScans"`
-	Database                  string      `json:"database"`
-	Schema                    string      `json:"schema"`
-	Table                     string      `json:"table"`
-	Index                     string      `json:"index"`
-	IndexKind                 string      `json:"indexKind"` // Clustered, NonClustered, Heap
-	SeekPredicates            string      `json:"seekPredicates"`
-	Predicate                 string      `json:"predicate"`
-	OutputColumns             []string    `json:"outputColumns"`
-	Warnings                  []string    `json:"warnings"`
-	IsPainPoint               bool        `json:"isPainPoint"`
-	PainReason                string      `json:"painReason"`
-	Children                  []*PlanNode `json:"children"`
+	NodeID                    int                `json:"nodeId"`
+	PhysicalOp                string             `json:"physicalOp"`
+	LogicalOp                 string             `json:"logicalOp"`
+	EstimateRows              float64            `json:"estimateRows"`
+	EstimatedRowsRead         float64            `json:"estimatedRowsRead"`
+	ActualRows                float64            `json:"actualRows"`
+	HasActualRows             bool               `json:"hasActualRows"`
+	HasCardinalitySkew        bool               `json:"hasCardinalitySkew"`
+	SkewRatio                 float64            `json:"skewRatio"`
+	SkewReason                string             `json:"skewReason"`
+	EstimateIO                float64            `json:"estimateIo"`
+	EstimateCPU               float64            `json:"estimateCpu"`
+	EstimatedTotalSubtreeCost float64            `json:"estimatedTotalSubtreeCost"`
+	CostPercentage            float64            `json:"costPercentage"`
+	TableCardinality          float64            `json:"tableCardinality"`
+	Parallel                  bool               `json:"parallel"`
+	ActualCPUms               int64              `json:"actualCpuMs"`
+	ActualElapsedms           int64              `json:"actualElapsedMs"`
+	ActualLogicalReads        int64              `json:"actualLogicalReads"`
+	ActualPhysicalReads       int64              `json:"actualPhysicalReads"`
+	ActualReadAheads          int64              `json:"actualReadAheads"`
+	ActualScans               int64              `json:"actualScans"`
+	Database                  string             `json:"database"`
+	Schema                    string             `json:"schema"`
+	Table                     string             `json:"table"`
+	Index                     string             `json:"index"`
+	IndexKind                 string             `json:"indexKind"` // Clustered, NonClustered, Heap
+	SeekPredicates            string             `json:"seekPredicates"`
+	Predicate                 string             `json:"predicate"`
+	OutputColumns             []string           `json:"outputColumns"`
+	Warnings                  []string           `json:"warnings"`
+	IsPainPoint               bool               `json:"isPainPoint"`
+	PainReason                string             `json:"painReason"`
+	Children                  []*PlanNode        `json:"children"`
+	// New: PerformanceStudio-equivalent operator details
+	OperatorWarnings    []*OperatorWarning `json:"operatorWarnings"` // per-operator Warnings XML
+	EstimateRebinds     float64            `json:"estimateRebinds"`
+	EstimateRewinds     float64            `json:"estimateRewinds"`
+	ExecutionMode       string             `json:"executionMode"`       // Row / Batch
+	ActualExecutionMode string             `json:"actualExecutionMode"` // Row / Batch
+	SelfCPUMs           int64              `json:"selfCpuMs"`
+	SelfElapsedMs       int64              `json:"selfElapsedMs"`
+	SelfCPUPercent      float64            `json:"selfCpuPercent"`
+	SelfElapsedPercent  float64            `json:"selfElapsedPercent"`
+	HeatIntensity       float64            `json:"heatIntensity"` // 0.0 - 1.0 normalized against hottest operator
+	PerThreadStats      []*NodeThreadStat  `json:"perThreadStats"`
+}
+
+// NodeThreadStat captures runtime per-thread metrics from RunTimeCountersPerThread
+type NodeThreadStat struct {
+	ThreadID            int   `json:"threadId"`
+	ActualRows          int64 `json:"actualRows"`
+	ActualExecutions    int64 `json:"actualExecutions"`
+	ActualCPUMs         int64 `json:"actualCpuMs"`
+	ActualElapsedMs     int64 `json:"actualElapsedMs"`
+	ActualLogicalReads  int64 `json:"actualLogicalReads"`
+	ActualPhysicalReads int64 `json:"actualPhysicalReads"`
+	ActualReadAheads    int64 `json:"actualReadAheads"`
+	ActualScans         int64 `json:"actualScans"`
 }
 
 // PlanWarning represents an engine warning

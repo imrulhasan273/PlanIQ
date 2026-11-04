@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"math"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	_ "github.com/microsoft/go-mssqldb"
+	"sqlplan-advisor/pkg/configdb"
 )
 
 // Client manages connection and live query execution to SQL Server
@@ -27,6 +29,8 @@ type Client struct {
 	lastSchedSampleTime time.Time
 	lastSchedYields     map[int]int64
 	lastSchedSwitches   map[int]int64
+	lastPLEOverall      float64
+	lastPLETimestamp    time.Time
 }
 
 
@@ -563,6 +567,80 @@ func (c *Client) GetSessionPlan(ctx context.Context, planHandleHex string) (stri
 	return planXML.String, nil
 }
 
+// GetQueryStoreDiagnostic probes the server to understand why Query Store data may be empty
+func (c *Client) GetQueryStoreDiagnostic(ctx context.Context, hours int) (*QueryStoreDiagnostic, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.status.Connected || c.db == nil {
+		return nil, fmt.Errorf("not connected")
+	}
+	if hours <= 0 {
+		hours = 24
+	}
+
+	diag := &QueryStoreDiagnostic{}
+	diagCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	// 1. Current database, version, and QS state
+	probeSQL := `
+	SELECT
+		DB_NAME() AS current_db,
+		CAST(SERVERPROPERTY('ProductVersion') AS VARCHAR(50)) AS sql_version,
+		ISNULL(CAST(desired_state_desc AS VARCHAR(50)), 'N/A') AS qs_desired,
+		ISNULL(CAST(actual_state_desc AS VARCHAR(50)), 'N/A') AS qs_actual,
+		ISNULL(CASE WHEN actual_state IN (1,2,3,4) THEN 1 ELSE 0 END, 0) AS qs_on
+	FROM sys.database_query_store_options;`
+
+	row := c.db.QueryRowContext(diagCtx, probeSQL)
+	var qsOn int
+	if err := row.Scan(&diag.CurrentDB, &diag.SQLServerVersion, &diag.QSDesiredState, &diag.QSActualState, &qsOn); err != nil {
+		diag.QSError = fmt.Sprintf("QS options probe failed: %v", err)
+	}
+	diag.IsQueryStoreOn = qsOn == 1
+
+	// 2. Total rows in query_store_runtime_stats
+	if diag.IsQueryStoreOn {
+		r1 := c.db.QueryRowContext(diagCtx, `SELECT COUNT_BIG(*) FROM sys.query_store_runtime_stats;`)
+		if err := r1.Scan(&diag.QSRuntimeStatsRows); err != nil {
+			diag.QSError += fmt.Sprintf(" | Total QS count failed: %v", err)
+		}
+
+		// 3. Rows in time window
+		r2 := c.db.QueryRowContext(diagCtx,
+			`SELECT COUNT_BIG(*) FROM sys.query_store_runtime_stats WHERE last_execution_time >= DATEADD(HOUR, -@p1, GETUTCDATE());`, hours)
+		if err := r2.Scan(&diag.QSWindowRows); err != nil {
+			diag.QSError += fmt.Sprintf(" | QS window count failed: %v", err)
+		}
+	}
+
+	// 4. DMV plan cache total
+	r3 := c.db.QueryRowContext(diagCtx, `
+	SELECT COUNT_BIG(*) FROM sys.dm_exec_query_stats qs
+	CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+	WHERE st.text IS NOT NULL AND st.text NOT LIKE '%dm_exec_query_stats%';`)
+	if err := r3.Scan(&diag.DMVPlanCacheRows); err != nil {
+		diag.DMVError = fmt.Sprintf("DMV total count failed: %v", err)
+	}
+
+	// 5. DMV rows in time window
+	r4 := c.db.QueryRowContext(diagCtx, `
+	SELECT COUNT_BIG(*) FROM sys.dm_exec_query_stats qs
+	CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+	WHERE st.text IS NOT NULL AND st.text NOT LIKE '%dm_exec_query_stats%'
+	  AND qs.last_execution_time >= DATEADD(HOUR, -@p1, GETDATE());`, hours)
+	if err := r4.Scan(&diag.DMVWindowRows); err != nil {
+		diag.DMVError += fmt.Sprintf(" | DMV window count failed: %v", err)
+	}
+
+	fmt.Printf("[Diagnostic] DB=%s QSOn=%v QSTotal=%d QSWindow=%d DMVTotal=%d DMVWindow=%d QSErr=%s DMVErr=%s\n",
+		diag.CurrentDB, diag.IsQueryStoreOn, diag.QSRuntimeStatsRows, diag.QSWindowRows,
+		diag.DMVPlanCacheRows, diag.DMVWindowRows, diag.QSError, diag.DMVError)
+
+	return diag, nil
+}
+
 // GetQueryStoreTop queries top queries by CPU, duration, or reads from Query Store (default 24h)
 func (c *Client) GetQueryStoreTop(ctx context.Context, orderBy string, topN int) ([]QueryStoreEntry, error) {
 	return c.GetQueryStoreTopWindow(ctx, orderBy, topN, 24)
@@ -577,8 +655,8 @@ func (c *Client) GetQueryStoreTopWindow(ctx context.Context, orderBy string, top
 		return nil, fmt.Errorf("not connected")
 	}
 
-	if topN <= 0 || topN > 50 {
-		topN = 15
+	if topN <= 0 || topN > 500 {
+		topN = 25
 	}
 	if hours <= 0 {
 		hours = 24
@@ -587,59 +665,121 @@ func (c *Client) GetQueryStoreTopWindow(ctx context.Context, orderBy string, top
 	var sortCol string
 	switch strings.ToLower(orderBy) {
 	case "cpu":
-		sortCol = "SUM(rs.count_executions * rs.avg_cpu_time) DESC"
+		sortCol = "ps.total_cpu_us DESC"
 	case "duration":
-		sortCol = "SUM(rs.count_executions * rs.avg_duration) DESC"
+		sortCol = "ps.total_duration_us DESC"
 	case "reads":
-		sortCol = "SUM(rs.count_executions * rs.avg_logical_io_reads) DESC"
+		sortCol = "ps.total_reads DESC"
 	case "spills":
-		sortCol = "SUM(rs.count_executions * rs.avg_tempdb_space_used) DESC"
+		sortCol = "ps.total_reads DESC"
 	default:
-		sortCol = "SUM(rs.count_executions * rs.avg_cpu_time) DESC"
+		sortCol = "ps.total_cpu_us DESC"
 	}
 
+	// PerformanceStudio 4-phase architecture:
+	// Phase 1: Pre-filter matching interval IDs from sys.query_store_runtime_stats_interval
+	// Phase 2: Aggregate runtime_stats by plan_id into #plan_stats using EXISTS semi-join
+	// Phase 3 & 4: Hydrate TOP N with query text, plan XML, and metadata
 	sqlQuery := fmt.Sprintf(`
 	SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-	SELECT TOP %d
+
+	DROP TABLE IF EXISTS #intervals;
+	CREATE TABLE #intervals (
+		runtime_stats_interval_id bigint NOT NULL PRIMARY KEY CLUSTERED
+	);
+	INSERT INTO #intervals (runtime_stats_interval_id)
+	SELECT rsi.runtime_stats_interval_id
+	FROM sys.query_store_runtime_stats_interval AS rsi
+	WHERE rsi.start_time >= DATEADD(HOUR, -%d, GETUTCDATE())
+	OPTION (RECOMPILE);
+
+	DROP TABLE IF EXISTS #plan_stats;
+	CREATE TABLE #plan_stats (
+		plan_id bigint NOT NULL PRIMARY KEY CLUSTERED,
+		total_cpu_us float NOT NULL,
+		total_duration_us float NOT NULL,
+		total_reads float NOT NULL,
+		total_writes float NOT NULL,
+		total_physical_reads float NOT NULL,
+		total_memory_pages float NOT NULL,
+		total_executions bigint NOT NULL,
+		last_execution_time datetimeoffset NOT NULL,
+		execution_type_desc nvarchar(60) NOT NULL
+	);
+	INSERT INTO #plan_stats
+	SELECT
+		rs.plan_id,
+		SUM(rs.avg_cpu_time * rs.count_executions),
+		SUM(rs.avg_duration * rs.count_executions),
+		SUM(rs.avg_logical_io_reads * rs.count_executions),
+		SUM(rs.avg_logical_io_writes * rs.count_executions),
+		SUM(rs.avg_physical_io_reads * rs.count_executions),
+		SUM(rs.avg_query_max_used_memory * rs.count_executions),
+		SUM(rs.count_executions),
+		MAX(rs.last_execution_time),
+		ISNULL(MAX(rs.execution_type_desc), 'Regular')
+	FROM sys.query_store_runtime_stats AS rs
+	WHERE EXISTS
+	(
+		SELECT 1
+		FROM #intervals AS i
+		WHERE i.runtime_stats_interval_id = rs.runtime_stats_interval_id
+	)
+	GROUP BY rs.plan_id
+	OPTION (RECOMPILE);
+
+	SELECT TOP (%d)
 		q.query_id,
 		p.plan_id,
-		qt.query_sql_text,
-		SUM(rs.count_executions) AS total_executions,
-		SUM(rs.count_executions * rs.avg_cpu_time) / 1000.0 AS total_cpu_ms,
-		AVG(rs.avg_cpu_time) / 1000.0 AS avg_cpu_ms,
-		SUM(rs.count_executions * rs.avg_duration) / 1000.0 AS total_duration_ms,
-		AVG(rs.avg_duration) / 1000.0 AS avg_duration_ms,
-		SUM(rs.count_executions * rs.avg_logical_io_reads) AS total_logical_reads,
-		AVG(rs.avg_logical_io_reads) AS avg_logical_reads,
-		SUM(rs.count_executions * rs.avg_physical_io_reads) AS total_physical_reads,
-		AVG(rs.avg_physical_io_reads) AS avg_physical_reads,
-		SUM(rs.count_executions * rs.avg_tempdb_space_used) * 8.0 / 1024.0 AS total_spills_mb,
-		CONVERT(VARCHAR(19), MAX(rs.last_execution_time), 120) AS last_execution_time,
-		p.query_plan
-	FROM sys.query_store_query q
-	JOIN sys.query_store_plan p ON q.query_id = p.query_id
-	JOIN sys.query_store_query_text qt ON q.query_text_id = qt.query_text_id
-	JOIN sys.query_store_runtime_stats rs ON p.plan_id = rs.plan_id
-	WHERE rs.last_execution_time >= DATEADD(HOUR, -%d, GETUTCDATE())
-	GROUP BY q.query_id, p.plan_id, qt.query_sql_text, p.query_plan
+		ISNULL(CONVERT(varchar(64), q.query_hash, 1), '') AS query_hash,
+		ISNULL(CONVERT(varchar(64), p.query_plan_hash, 1), '') AS plan_hash,
+		ISNULL(OBJECT_SCHEMA_NAME(q.object_id, DB_ID()) + '.' + OBJECT_NAME(q.object_id, DB_ID()), '') AS module_name,
+		ISNULL(qt.query_sql_text, '') AS query_sql_text,
+		ps.total_executions,
+		CAST(ps.total_cpu_us / 1000.0 AS float) AS total_cpu_ms,
+		CAST((ps.total_cpu_us / 1000.0) / NULLIF(ps.total_executions, 0) AS float) AS avg_cpu_ms,
+		CAST(ps.total_duration_us / 1000.0 AS float) AS total_duration_ms,
+		CAST((ps.total_duration_us / 1000.0) / NULLIF(ps.total_executions, 0) AS float) AS avg_duration_ms,
+		CAST(ps.total_reads AS bigint) AS total_logical_reads,
+		CAST(ps.total_reads / NULLIF(ps.total_executions, 0) AS float) AS avg_logical_reads,
+		CAST(ps.total_physical_reads AS bigint) AS total_physical_reads,
+		CAST(ps.total_physical_reads / NULLIF(ps.total_executions, 0) AS float) AS avg_physical_reads,
+		CAST(ps.total_writes AS bigint) AS total_writes,
+		CAST(ps.total_writes / NULLIF(ps.total_executions, 0) AS float) AS avg_writes,
+		CAST(ps.total_memory_pages * 8.0 / 1024.0 AS float) AS total_memory_mb,
+		CAST((ps.total_memory_pages * 8.0 / 1024.0) / NULLIF(ps.total_executions, 0) AS float) AS avg_memory_mb,
+		0.0 AS total_spills_mb,
+		CONVERT(varchar(19), ps.last_execution_time, 120) AS last_execution_time,
+		ps.execution_type_desc AS execution_type,
+		ISNULL(p.query_plan, '') AS query_plan
+	FROM #plan_stats AS ps
+	JOIN sys.query_store_plan AS p ON ps.plan_id = p.plan_id
+	JOIN sys.query_store_query AS q ON p.query_id = q.query_id
+	JOIN sys.query_store_query_text AS qt ON q.query_text_id = qt.query_text_id
 	ORDER BY %s;
-	`, topN, hours, sortCol)
+	`, hours, topN, sortCol)
 
-	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	queryCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
 	rows, err := c.db.QueryContext(queryCtx, sqlQuery)
+	if err != nil {
+		fmt.Printf("[QueryStore] QS query failed (falling back to DMV): %v\n", err)
+	}
 	var entries []QueryStoreEntry
 
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var e QueryStoreEntry
-			var qText, planXML sql.NullString
+			var qText, planXML, qHash, pHash, modName, execType sql.NullString
 
 			err := rows.Scan(
 				&e.QueryID,
 				&e.PlanID,
+				&qHash,
+				&pHash,
+				&modName,
 				&qText,
 				&e.ExecutionCount,
 				&e.TotalCPUMs,
@@ -650,12 +790,30 @@ func (c *Client) GetQueryStoreTopWindow(ctx context.Context, orderBy string, top
 				&e.AvgLogicalReads,
 				&e.TotalPhysicalReads,
 				&e.AvgPhysicalReads,
+				&e.TotalWrites,
+				&e.AvgWrites,
+				&e.TotalMemoryMB,
+				&e.AvgMemoryMB,
 				&e.TotalSpillsMB,
 				&e.LastExecutionTime,
+				&execType,
 				&planXML,
 			)
 			if err != nil {
+				fmt.Printf("[QueryStore] Scan error: %v\n", err)
 				continue
+			}
+			if qHash.Valid {
+				e.QueryHash = qHash.String
+			}
+			if pHash.Valid {
+				e.PlanHash = pHash.String
+			}
+			if modName.Valid {
+				e.ModuleName = modName.String
+			}
+			if execType.Valid {
+				e.ExecutionType = execType.String
 			}
 			if qText.Valid {
 				e.QueryText = strings.TrimSpace(qText.String)
@@ -665,11 +823,55 @@ func (c *Client) GetQueryStoreTopWindow(ctx context.Context, orderBy string, top
 			}
 			entries = append(entries, e)
 		}
+
+		// Hydrate wait profile from sys.query_store_wait_stats if available
+		if len(entries) > 0 {
+			planIDs := make([]string, 0, len(entries))
+			for _, ent := range entries {
+				planIDs = append(planIDs, fmt.Sprintf("%d", ent.PlanID))
+			}
+			waitSQL := fmt.Sprintf(`
+			SELECT
+				w.plan_id,
+				w.wait_category_desc,
+				CAST(SUM(w.total_query_wait_time_ms) AS FLOAT) AS total_wait_ms
+			FROM sys.query_store_wait_stats w
+			JOIN sys.query_store_runtime_stats_interval i ON w.runtime_stats_interval_id = i.runtime_stats_interval_id
+			WHERE i.start_time >= DATEADD(HOUR, -%d, GETUTCDATE())
+			  AND w.plan_id IN (%s)
+			GROUP BY w.plan_id, w.wait_category_desc;`, hours, strings.Join(planIDs, ","))
+
+			wCtx, wCancel := context.WithTimeout(ctx, 8*time.Second)
+			wRows, wErr := c.db.QueryContext(wCtx, waitSQL)
+			wCancel()
+			if wErr == nil {
+				defer wRows.Close()
+				waitMap := make(map[int64]map[string]float64)
+				for wRows.Next() {
+					var pID int64
+					var cat string
+					var ms float64
+					if wRows.Scan(&pID, &cat, &ms) == nil {
+						if waitMap[pID] == nil {
+							waitMap[pID] = make(map[string]float64)
+						}
+						waitMap[pID][cat] = ms
+					}
+				}
+				for i := range entries {
+					if profile, ok := waitMap[entries[i].PlanID]; ok {
+						entries[i].WaitProfile = profile
+					}
+				}
+			}
+		}
 	}
+	fmt.Printf("[QueryStore] QS rows returned: %d (window=%dh, topN=%d, orderBy=%s)\n", len(entries), hours, topN, orderBy)
 
 	// If Query Store returned 0 rows or is not enabled, seamlessly pull real queries from DMV plan cache (sys.dm_exec_query_stats)
 	if len(entries) == 0 {
 		dmvEntries, dmvErr := c.getTopQueriesFromDMV(ctx, orderBy, topN, hours)
+		fmt.Printf("[QueryStore] DMV fallback returned: %d rows (err=%v)\n", len(dmvEntries), dmvErr)
 		if dmvErr == nil && len(dmvEntries) > 0 {
 			return dmvEntries, nil
 		}
@@ -678,10 +880,13 @@ func (c *Client) GetQueryStoreTopWindow(ctx context.Context, orderBy string, top
 	return entries, nil
 }
 
-// getTopQueriesFromDMV extracts real queries directly from sys.dm_exec_query_stats
+// getTopQueriesFromDMV extracts real queries directly from sys.dm_exec_query_stats (TOP N first for extreme speed)
 func (c *Client) getTopQueriesFromDMV(ctx context.Context, orderBy string, topN int, hours int) ([]QueryStoreEntry, error) {
 	if hours <= 0 {
 		hours = 24
+	}
+	if topN <= 0 || topN > 500 {
+		topN = 25
 	}
 	var dmvSort string
 	switch strings.ToLower(orderBy) {
@@ -697,107 +902,199 @@ func (c *Client) getTopQueriesFromDMV(ctx context.Context, orderBy string, topN 
 		dmvSort = "qs.total_worker_time DESC"
 	}
 
-	// Window-filtered query
+	// Filter and TOP N FIRST, then join sys.dm_exec_sql_text on only the TOP rows
 	dmvQuery := fmt.Sprintf(`
 	SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-	SELECT TOP %d
-		ABS(CAST(CHECKSUM(qs.query_hash) AS BIGINT)) AS query_id,
-		0 AS plan_id,
-		ISNULL(SUBSTRING(st.text, (qs.statement_start_offset/2)+1, 
-			((CASE qs.statement_end_offset
+	WITH top_qs AS (
+		SELECT TOP %d
+			qs.sql_handle,
+			qs.statement_start_offset,
+			qs.statement_end_offset,
+			qs.query_hash,
+			qs.query_plan_hash,
+			CAST(qs.execution_count AS BIGINT) AS execution_count,
+			CAST(qs.total_worker_time / 1000.0 AS FLOAT) AS total_cpu_ms,
+			CAST((qs.total_worker_time / 1000.0) / NULLIF(qs.execution_count, 0) AS FLOAT) AS avg_cpu_ms,
+			CAST(qs.total_elapsed_time / 1000.0 AS FLOAT) AS total_duration_ms,
+			CAST((qs.total_elapsed_time / 1000.0) / NULLIF(qs.execution_count, 0) AS FLOAT) AS avg_duration_ms,
+			CAST(qs.total_logical_reads AS BIGINT) AS total_logical_reads,
+			CAST(CAST(qs.total_logical_reads AS FLOAT) / NULLIF(qs.execution_count, 0) AS FLOAT) AS avg_logical_reads,
+			CAST(qs.total_physical_reads AS BIGINT) AS total_physical_reads,
+			CAST(CAST(qs.total_physical_reads AS FLOAT) / NULLIF(qs.execution_count, 0) AS FLOAT) AS avg_physical_reads,
+			CAST(qs.total_logical_writes AS BIGINT) AS total_writes,
+			CAST(CAST(qs.total_logical_writes AS FLOAT) / NULLIF(qs.execution_count, 0) AS FLOAT) AS avg_writes,
+			ISNULL(CONVERT(VARCHAR(19), qs.last_execution_time, 120), '') AS last_execution_time
+		FROM sys.dm_exec_query_stats qs
+		WHERE qs.last_execution_time >= DATEADD(HOUR, -%d, GETDATE())
+		ORDER BY %s
+	)
+	SELECT
+		ABS(CAST(CHECKSUM(tqs.query_hash) AS BIGINT)) AS query_id,
+		ABS(CAST(CHECKSUM(tqs.query_plan_hash) AS BIGINT)) AS plan_id,
+		ISNULL(CONVERT(VARCHAR(64), tqs.query_hash, 1), '') AS query_hash,
+		ISNULL(CONVERT(VARCHAR(64), tqs.query_plan_hash, 1), '') AS plan_hash,
+		ISNULL(OBJECT_SCHEMA_NAME(st.objectid, st.dbid) + '.' + OBJECT_NAME(st.objectid, st.dbid), '') AS module_name,
+		ISNULL(SUBSTRING(st.text, (tqs.statement_start_offset/2)+1, 
+			((CASE tqs.statement_end_offset
 			  WHEN -1 THEN DATALENGTH(st.text)
-			  ELSE qs.statement_end_offset
-			  END - qs.statement_start_offset)/2) + 1), st.text) AS query_sql_text,
-		qs.execution_count AS total_executions,
-		qs.total_worker_time / 1000.0 AS total_cpu_ms,
-		(qs.total_worker_time / 1000.0) / NULLIF(qs.execution_count, 0) AS avg_cpu_ms,
-		qs.total_elapsed_time / 1000.0 AS total_duration_ms,
-		(qs.total_elapsed_time / 1000.0) / NULLIF(qs.execution_count, 0) AS avg_duration_ms,
-		qs.total_logical_reads AS total_logical_reads,
-		qs.total_logical_reads / NULLIF(qs.execution_count, 0) AS avg_logical_reads,
-		qs.total_physical_reads AS total_physical_reads,
-		qs.total_physical_reads / NULLIF(qs.execution_count, 0) AS avg_physical_reads,
+			  ELSE tqs.statement_end_offset
+			  END - tqs.statement_start_offset)/2) + 1), st.text) AS query_sql_text,
+		tqs.execution_count,
+		tqs.total_cpu_ms,
+		tqs.avg_cpu_ms,
+		tqs.total_duration_ms,
+		tqs.avg_duration_ms,
+		tqs.total_logical_reads,
+		tqs.avg_logical_reads,
+		tqs.total_physical_reads,
+		tqs.avg_physical_reads,
+		tqs.total_writes,
+		tqs.avg_writes,
+		0.0 AS total_memory_mb,
+		0.0 AS avg_memory_mb,
 		0.0 AS total_spills_mb,
-		CONVERT(VARCHAR(19), qs.last_execution_time, 120) AS last_execution_time
-	FROM sys.dm_exec_query_stats qs
-	CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+		tqs.last_execution_time,
+		'Regular' AS execution_type
+	FROM top_qs tqs
+	CROSS APPLY sys.dm_exec_sql_text(tqs.sql_handle) st
 	WHERE st.text IS NOT NULL AND st.text NOT LIKE '%%%%dm_exec_query_stats%%%%'
-	  AND qs.last_execution_time >= DATEADD(HOUR, -%d, GETDATE())
 	ORDER BY %s;
-	`, topN, hours, dmvSort)
+	`, topN, hours, dmvSort, dmvSort)
 
-	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
+	dmvCtx, dmvCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer dmvCancel()
 
-	rows, err := c.db.QueryContext(queryCtx, dmvQuery)
+	rows, err := c.db.QueryContext(dmvCtx, dmvQuery)
+	if err != nil {
+		fmt.Printf("[DMV] Windowed query error: %v\n", err)
+		return nil, err
+	}
 	var entries []QueryStoreEntry
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var e QueryStoreEntry
-			var qText sql.NullString
-			if err := rows.Scan(
-				&e.QueryID,
-				&e.PlanID,
-				&qText,
-				&e.ExecutionCount,
-				&e.TotalCPUMs,
-				&e.AvgCPUMs,
-				&e.TotalDurationMs,
-				&e.AvgDurationMs,
-				&e.TotalLogicalReads,
-				&e.AvgLogicalReads,
-				&e.TotalPhysicalReads,
-				&e.AvgPhysicalReads,
-				&e.TotalSpillsMB,
-				&e.LastExecutionTime,
-			); err == nil {
-				if qText.Valid {
-					e.QueryText = strings.TrimSpace(qText.String)
-				}
-				entries = append(entries, e)
+	defer rows.Close()
+	for rows.Next() {
+		var e QueryStoreEntry
+		var qText, qHash, pHash, modName, execType sql.NullString
+		if err := rows.Scan(
+			&e.QueryID,
+			&e.PlanID,
+			&qHash,
+			&pHash,
+			&modName,
+			&qText,
+			&e.ExecutionCount,
+			&e.TotalCPUMs,
+			&e.AvgCPUMs,
+			&e.TotalDurationMs,
+			&e.AvgDurationMs,
+			&e.TotalLogicalReads,
+			&e.AvgLogicalReads,
+			&e.TotalPhysicalReads,
+			&e.AvgPhysicalReads,
+			&e.TotalWrites,
+			&e.AvgWrites,
+			&e.TotalMemoryMB,
+			&e.AvgMemoryMB,
+			&e.TotalSpillsMB,
+			&e.LastExecutionTime,
+			&execType,
+		); err == nil {
+			if qHash.Valid {
+				e.QueryHash = qHash.String
 			}
+			if pHash.Valid {
+				e.PlanHash = pHash.String
+			}
+			if modName.Valid {
+				e.ModuleName = modName.String
+			}
+			if execType.Valid {
+				e.ExecutionType = execType.String
+			}
+			if qText.Valid {
+				e.QueryText = strings.TrimSpace(qText.String)
+			}
+			entries = append(entries, e)
+		} else {
+			fmt.Printf("[DMV] Scan error: %v\n", err)
 		}
 	}
 
-	// If no queries returned for the window, fall back to recent plan cache
+	fmt.Printf("[DMV] Windowed query returned %d rows (window=%dh)\n", len(entries), hours)
+
+	// If no queries returned for the window, fall back to entire plan cache (no time filter)
 	if len(entries) == 0 {
 		fallbackQuery := fmt.Sprintf(`
 		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-		SELECT TOP %d
-			ABS(CAST(CHECKSUM(qs.query_hash) AS BIGINT)) AS query_id,
-			0 AS plan_id,
-			ISNULL(SUBSTRING(st.text, (qs.statement_start_offset/2)+1, 
-				((CASE qs.statement_end_offset
+		WITH top_qs AS (
+			SELECT TOP %d
+				qs.sql_handle,
+				qs.statement_start_offset,
+				qs.statement_end_offset,
+				qs.query_hash,
+				qs.query_plan_hash,
+				CAST(qs.execution_count AS BIGINT) AS execution_count,
+				CAST(qs.total_worker_time / 1000.0 AS FLOAT) AS total_cpu_ms,
+				CAST((qs.total_worker_time / 1000.0) / NULLIF(qs.execution_count, 0) AS FLOAT) AS avg_cpu_ms,
+				CAST(qs.total_elapsed_time / 1000.0 AS FLOAT) AS total_duration_ms,
+				CAST((qs.total_elapsed_time / 1000.0) / NULLIF(qs.execution_count, 0) AS FLOAT) AS avg_duration_ms,
+				CAST(qs.total_logical_reads AS BIGINT) AS total_logical_reads,
+				CAST(CAST(qs.total_logical_reads AS FLOAT) / NULLIF(qs.execution_count, 0) AS FLOAT) AS avg_logical_reads,
+				CAST(qs.total_physical_reads AS BIGINT) AS total_physical_reads,
+				CAST(CAST(qs.total_physical_reads AS FLOAT) / NULLIF(qs.execution_count, 0) AS FLOAT) AS avg_physical_reads,
+				CAST(qs.total_logical_writes AS BIGINT) AS total_writes,
+				CAST(CAST(qs.total_logical_writes AS FLOAT) / NULLIF(qs.execution_count, 0) AS FLOAT) AS avg_writes,
+				ISNULL(CONVERT(VARCHAR(19), qs.last_execution_time, 120), '') AS last_execution_time
+			FROM sys.dm_exec_query_stats qs
+			ORDER BY %s
+		)
+		SELECT
+			ABS(CAST(CHECKSUM(tqs.query_hash) AS BIGINT)) AS query_id,
+			ABS(CAST(CHECKSUM(tqs.query_plan_hash) AS BIGINT)) AS plan_id,
+			ISNULL(CONVERT(VARCHAR(64), tqs.query_hash, 1), '') AS query_hash,
+			ISNULL(CONVERT(VARCHAR(64), tqs.query_plan_hash, 1), '') AS plan_hash,
+			ISNULL(OBJECT_SCHEMA_NAME(st.objectid, st.dbid) + '.' + OBJECT_NAME(st.objectid, st.dbid), '') AS module_name,
+			ISNULL(SUBSTRING(st.text, (tqs.statement_start_offset/2)+1, 
+				((CASE tqs.statement_end_offset
 				  WHEN -1 THEN DATALENGTH(st.text)
-				  ELSE qs.statement_end_offset
-				  END - qs.statement_start_offset)/2) + 1), st.text) AS query_sql_text,
-			qs.execution_count AS total_executions,
-			qs.total_worker_time / 1000.0 AS total_cpu_ms,
-			(qs.total_worker_time / 1000.0) / NULLIF(qs.execution_count, 0) AS avg_cpu_ms,
-			qs.total_elapsed_time / 1000.0 AS total_duration_ms,
-			(qs.total_elapsed_time / 1000.0) / NULLIF(qs.execution_count, 0) AS avg_duration_ms,
-			qs.total_logical_reads AS total_logical_reads,
-			qs.total_logical_reads / NULLIF(qs.execution_count, 0) AS avg_logical_reads,
-			qs.total_physical_reads AS total_physical_reads,
-			qs.total_physical_reads / NULLIF(qs.execution_count, 0) AS avg_physical_reads,
+				  ELSE tqs.statement_end_offset
+				  END - tqs.statement_start_offset)/2) + 1), st.text) AS query_sql_text,
+			tqs.execution_count,
+			tqs.total_cpu_ms,
+			tqs.avg_cpu_ms,
+			tqs.total_duration_ms,
+			tqs.avg_duration_ms,
+			tqs.total_logical_reads,
+			tqs.avg_logical_reads,
+			tqs.total_physical_reads,
+			tqs.avg_physical_reads,
+			tqs.total_writes,
+			tqs.avg_writes,
+			0.0 AS total_memory_mb,
+			0.0 AS avg_memory_mb,
 			0.0 AS total_spills_mb,
-			CONVERT(VARCHAR(19), qs.last_execution_time, 120) AS last_execution_time
-		FROM sys.dm_exec_query_stats qs
-		CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+			tqs.last_execution_time,
+			'Regular' AS execution_type
+		FROM top_qs tqs
+		CROSS APPLY sys.dm_exec_sql_text(tqs.sql_handle) st
 		WHERE st.text IS NOT NULL AND st.text NOT LIKE '%%%%dm_exec_query_stats%%%%'
 		ORDER BY %s;
-		`, topN, dmvSort)
+		`, topN, dmvSort, dmvSort)
 
-		fbRows, fbErr := c.db.QueryContext(queryCtx, fallbackQuery)
+		// Create a fresh context — the previous dmvCtx may already be expired
+		fbCtx, fbCancel := context.WithTimeout(ctx, 15*time.Second)
+		defer fbCancel()
+		fbRows, fbErr := c.db.QueryContext(fbCtx, fallbackQuery)
 		if fbErr == nil {
 			defer fbRows.Close()
 			for fbRows.Next() {
 				var e QueryStoreEntry
-				var qText sql.NullString
+				var qText, qHash, pHash, modName, execType sql.NullString
 				if err := fbRows.Scan(
 					&e.QueryID,
 					&e.PlanID,
+					&qHash,
+					&pHash,
+					&modName,
 					&qText,
 					&e.ExecutionCount,
 					&e.TotalCPUMs,
@@ -808,9 +1105,26 @@ func (c *Client) getTopQueriesFromDMV(ctx context.Context, orderBy string, topN 
 					&e.AvgLogicalReads,
 					&e.TotalPhysicalReads,
 					&e.AvgPhysicalReads,
+					&e.TotalWrites,
+					&e.AvgWrites,
+					&e.TotalMemoryMB,
+					&e.AvgMemoryMB,
 					&e.TotalSpillsMB,
 					&e.LastExecutionTime,
+					&execType,
 				); err == nil {
+					if qHash.Valid {
+						e.QueryHash = qHash.String
+					}
+					if pHash.Valid {
+						e.PlanHash = pHash.String
+					}
+					if modName.Valid {
+						e.ModuleName = modName.String
+					}
+					if execType.Valid {
+						e.ExecutionType = execType.String
+					}
 					if qText.Valid {
 						e.QueryText = strings.TrimSpace(qText.String)
 					}
@@ -1132,12 +1446,32 @@ func parseDeadlockMetadata(xmlStr string) (victimSpid int, procCount int, resCou
 }
 
 // GetLiveDeadlocks queries the default system_health Extended Events ring buffer & event file
+// If disconnected or offline, it transparently returns cached deadlocks from local SQLite.
 func (c *Client) GetLiveDeadlocks(ctx context.Context, limit int) ([]LiveDeadlockReport, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	if !c.status.Connected || c.db == nil {
-		return nil, fmt.Errorf("not connected")
+		store, err := configdb.GetDB()
+		if err == nil {
+			cached, err := store.GetStoredDeadlocks(c.status.ServerName, 7)
+			if err == nil && len(cached) > 0 {
+				var reps []LiveDeadlockReport
+				for _, d := range cached {
+					reps = append(reps, LiveDeadlockReport{
+						Timestamp:           d.Timestamp,
+						VictimSPID:          d.VictimSPID,
+						ProcessCount:        d.ProcessCount,
+						LockedResourceCount: d.LockedResourceCount,
+						DeadlockType:        d.DeadlockType,
+						DeadlockGraphXML:    d.DeadlockGraphXML,
+						Summary:             d.Summary,
+					})
+				}
+				return reps, nil
+			}
+		}
+		return nil, fmt.Errorf("not connected and no local deadlock history available")
 	}
 
 	if limit <= 0 || limit > 25 {
@@ -1227,6 +1561,30 @@ func (c *Client) GetLiveDeadlocks(ctx context.Context, limit int) ([]LiveDeadloc
 				}
 			}
 		}
+	}
+
+	// Persist to local SQLite for offline deadlock analysis
+	if len(reports) > 0 {
+		go func(reps []LiveDeadlockReport, srv string) {
+			store, err := configdb.GetDB()
+			if err != nil {
+				return
+			}
+			var stored []configdb.StoredDeadlock
+			for _, r := range reps {
+				stored = append(stored, configdb.StoredDeadlock{
+					ServerName:          srv,
+					Timestamp:           r.Timestamp,
+					VictimSPID:          r.VictimSPID,
+					DeadlockGraphXML:    r.DeadlockGraphXML,
+					ProcessCount:        r.ProcessCount,
+					LockedResourceCount: r.LockedResourceCount,
+					DeadlockType:        r.DeadlockType,
+					Summary:             r.Summary,
+				})
+			}
+			_ = store.SaveDeadlockSnapshots(srv, stored)
+		}(reports, c.status.ServerName)
 	}
 
 	return reports, nil
@@ -1849,23 +2207,49 @@ func (c *Client) GetPerformanceAdvisors(ctx context.Context) ([]PerformanceAdvis
 }
 
 // GetWaitHistory returns hourly/daily wait time history and anomalies (SolarWinds DPA Trend Chart)
+// If connected to SQL Server, it queries the past 7 days from sys.query_store_wait_stats and caches locally.
+// If disconnected or offline, it transparently returns cached points from local SQLite.
 func (c *Client) GetWaitHistory(ctx context.Context) ([]WaitTimeHistoryPoint, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	// 1. Offline Fallback: If not connected, load from local SQLite cache
 	if !c.status.Connected || c.db == nil {
-		return nil, fmt.Errorf("not connected")
+		store, err := configdb.GetDB()
+		if err == nil {
+			cached, err := store.GetStoredWaitHistory(c.status.ServerName, c.status.DatabaseName, 7)
+			if err == nil && len(cached) > 0 {
+				var pts []WaitTimeHistoryPoint
+				for _, p := range cached {
+					pts = append(pts, WaitTimeHistoryPoint{
+						IntervalLabel:  p.IntervalLabel,
+						TotalWaitMs:    p.TotalWaitMs,
+						CPUWaitMs:      p.CPUWaitMs,
+						LockWaitMs:     p.LockWaitMs,
+						IOWaitMs:       p.IOWaitMs,
+						MemoryWaitMs:   p.MemoryWaitMs,
+						OtherWaitMs:    p.OtherWaitMs,
+						ExecutionCount: p.ExecutionCount,
+						IsAnomaly:      p.IsAnomaly,
+						AnomalyReason:  p.AnomalyReason,
+					})
+				}
+				return pts, nil
+			}
+		}
+		return nil, fmt.Errorf("not connected and no local history cache available")
 	}
 
-	queryCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	queryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 
+	// Query up to 168 hourly intervals (7 days) from Query Store
 	const sqlWaitHistory = `
 	SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
-	SET LOCK_TIMEOUT 1000;
+	SET LOCK_TIMEOUT 1500;
 	IF EXISTS (SELECT 1 FROM sys.databases WHERE name = DB_NAME() AND is_query_store_on = 1)
 	BEGIN
-		SELECT TOP (16)
+		SELECT TOP (168)
 			CONVERT(VARCHAR(16), i.start_time, 120) AS interval_label,
 			ISNULL(SUM(w.total_query_wait_time_ms), 0) AS total_wait_ms,
 			ISNULL(SUM(CASE WHEN w.wait_category_desc = 'CPU' THEN w.total_query_wait_time_ms ELSE 0 END), 0) AS cpu_wait_ms,
@@ -1876,6 +2260,7 @@ func (c *Client) GetWaitHistory(ctx context.Context) ([]WaitTimeHistoryPoint, er
 			COUNT(DISTINCT w.plan_id) AS exec_count
 		FROM sys.query_store_wait_stats w
 		JOIN sys.query_store_runtime_stats_interval i ON w.runtime_stats_interval_id = i.runtime_stats_interval_id
+		WHERE i.start_time >= DATEADD(DAY, -7, SYSDATETIMEOFFSET())
 		GROUP BY i.start_time
 		ORDER BY i.start_time DESC;
 	END
@@ -1887,6 +2272,29 @@ func (c *Client) GetWaitHistory(ctx context.Context) ([]WaitTimeHistoryPoint, er
 
 	rows, err := c.db.QueryContext(queryCtx, sqlWaitHistory)
 	if err != nil {
+		// If query fails, attempt to read from local SQLite
+		store, sErr := configdb.GetDB()
+		if sErr == nil {
+			cached, cErr := store.GetStoredWaitHistory(c.status.ServerName, c.status.DatabaseName, 7)
+			if cErr == nil && len(cached) > 0 {
+				var pts []WaitTimeHistoryPoint
+				for _, p := range cached {
+					pts = append(pts, WaitTimeHistoryPoint{
+						IntervalLabel:  p.IntervalLabel,
+						TotalWaitMs:    p.TotalWaitMs,
+						CPUWaitMs:      p.CPUWaitMs,
+						LockWaitMs:     p.LockWaitMs,
+						IOWaitMs:       p.IOWaitMs,
+						MemoryWaitMs:   p.MemoryWaitMs,
+						OtherWaitMs:    p.OtherWaitMs,
+						ExecutionCount: p.ExecutionCount,
+						IsAnomaly:      p.IsAnomaly,
+						AnomalyReason:  p.AnomalyReason,
+					})
+				}
+				return pts, nil
+			}
+		}
 		return nil, fmt.Errorf("failed to query wait history: %w", err)
 	}
 	defer rows.Close()
@@ -1923,7 +2331,80 @@ func (c *Client) GetWaitHistory(ctx context.Context) ([]WaitTimeHistoryPoint, er
 		points = append(points, p)
 	}
 
+	// 2. Persist to local SQLite for instant offline playback & history scrubbing
+	if len(points) > 0 {
+		go func(pts []WaitTimeHistoryPoint, srv, dbName string) {
+			store, err := configdb.GetDB()
+			if err != nil {
+				return
+			}
+			var stored []configdb.StoredWaitPoint
+			for _, p := range pts {
+				stored = append(stored, configdb.StoredWaitPoint{
+					ServerName:     srv,
+					DatabaseName:   dbName,
+					IntervalLabel:  p.IntervalLabel,
+					TotalWaitMs:    p.TotalWaitMs,
+					CPUWaitMs:      p.CPUWaitMs,
+					LockWaitMs:     p.LockWaitMs,
+					IOWaitMs:       p.IOWaitMs,
+					MemoryWaitMs:   p.MemoryWaitMs,
+					OtherWaitMs:    p.OtherWaitMs,
+					ExecutionCount: p.ExecutionCount,
+					IsAnomaly:      p.IsAnomaly,
+					AnomalyReason:  p.AnomalyReason,
+				})
+			}
+			_ = store.SaveWaitHistorySnapshots(srv, dbName, stored)
+			_ = store.PurgeOldWaitHistory(7)
+		}(points, c.status.ServerName, c.status.DatabaseName)
+	}
+
 	return points, nil
+}
+
+// SyncSevenDayHistory explicitly pulls 7-day rolling telemetry from Query Store and system_health,
+// persisting all points into local SQLite so the DBA has full offline history.
+func (c *Client) SyncSevenDayHistory(ctx context.Context) (*SevenDaySyncResult, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.status.Connected || c.db == nil {
+		return nil, fmt.Errorf("cannot sync history: not connected to SQL Server")
+	}
+
+	res := &SevenDaySyncResult{
+		ServerName:   c.status.ServerName,
+		DatabaseName: c.status.DatabaseName,
+		SyncedAt:     time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// 1. Check if Query Store is enabled
+	var qsOn int
+	checkCtx, checkCancel := context.WithTimeout(ctx, 4*time.Second)
+	defer checkCancel()
+	_ = c.db.QueryRowContext(checkCtx, `SELECT is_query_store_on FROM sys.databases WHERE name = DB_NAME();`).Scan(&qsOn)
+	res.IsQueryStoreOn = (qsOn == 1)
+
+	// 2. Fetch wait history (up to 7 days = 168 hours)
+	pts, err := c.GetWaitHistory(ctx)
+	if err == nil {
+		res.IntervalsSynced = len(pts)
+	}
+
+	// 3. Fetch deadlocks from system_health
+	deadlocks, dErr := c.GetLiveDeadlocks(ctx, 25)
+	if dErr == nil {
+		res.DeadlocksSynced = len(deadlocks)
+	}
+
+	if !res.IsQueryStoreOn {
+		res.Message = fmt.Sprintf("Synced %d deadlocks from system_health. Note: Query Store is currently DISABLED on database '%s'. Enable Query Store for full hourly wait category breakdowns.", res.DeadlocksSynced, res.DatabaseName)
+	} else {
+		res.Message = fmt.Sprintf("Successfully harvested %d hourly wait intervals and %d deadlocks from Query Store & system_health into local SQLite.", res.IntervalsSynced, res.DeadlocksSynced)
+	}
+
+	return res, nil
 }
 
 // GetBufferPoolUsage returns memory distribution of tables and indexes in SQL Server buffer pool (sys.dm_os_buffer_descriptors)
@@ -2458,6 +2939,480 @@ func (c *Client) GetEngineInternals(ctx context.Context) (*EngineInternalsReport
 		report.CrossNUMALatencyRisk = "Moderate"
 	} else {
 		report.CrossNUMALatencyRisk = "Low (Optimal Local Memory Allocation)"
+	}
+
+	return report, nil
+}
+
+// GetPLEReport provides complete server and per-NUMA Page Life Expectancy diagnostics,
+// correlating PLE drops with culprit queries forcing buffer pool evictions, deep pressure gauges,
+// table eviction impact tracking, and automated AI Doctor tuning remediations.
+func (c *Client) GetPLEReport(ctx context.Context) (*PLEReport, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Offline or demo fallback
+	if !c.status.Connected || c.db == nil {
+		return getDemoPLEReport(), nil
+	}
+
+	queryCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+
+	report := &PLEReport{
+		LastEvaluatedAt:      time.Now().Format("2006-01-02 15:04:05"),
+		NUMANodes:            []NUMAPLENode{},
+		CulpritQueries:       []PLECulpritQuery{},
+		TableEvictionImpacts: []TableEvictionImpact{},
+		DoctorInsights:       []PLEDoctorInsight{},
+	}
+
+	// 1. Fetch Total Server Memory in GB from sys.dm_os_sys_info
+	var memKB float64
+	errMem := c.db.QueryRowContext(queryCtx, `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT CAST(physical_memory_kb AS FLOAT) FROM sys.dm_os_sys_info;
+	`).Scan(&memKB)
+	if errMem == nil && memKB > 0 {
+		report.TotalMemoryGB = math.Round((memKB/(1024.0*1024.0))*10.0) / 10.0
+	} else {
+		report.TotalMemoryGB = 16.0 // Sensible default if DMV restricted
+	}
+
+	// Target PLE formula: (RAM_GB / 4.0) * 300.0 (realistic baseline for modern RAM sizes)
+	report.TargetPLE = math.Max(300.0, (report.TotalMemoryGB/4.0)*300.0)
+
+	// 2. Fetch Instance-Wide Overall Page Life Expectancy & Memory Pressure Counters
+	_ = c.db.QueryRowContext(queryCtx, `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT CAST(ISNULL(cntr_value, 0) AS FLOAT)
+		FROM sys.dm_os_performance_counters
+		WHERE counter_name = 'Page life expectancy'
+		  AND object_name LIKE '%:Buffer Manager%';
+	`).Scan(&report.OverallPLE)
+
+	// Fetch Lazy Writes/sec, Free List Stalls/sec, Page reads/sec, Page writes/sec
+	var lazyWrites, freeListStalls, pageReads, pageWrites float64
+	rowsPerf, errPerf := c.db.QueryContext(queryCtx, `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT RTRIM(counter_name), CAST(cntr_value AS FLOAT)
+		FROM sys.dm_os_performance_counters
+		WHERE object_name LIKE '%:Buffer Manager%'
+		  AND counter_name IN ('Lazy writes/sec', 'Free list stalls/sec', 'Page reads/sec', 'Page writes/sec');
+	`)
+	if errPerf == nil {
+		defer rowsPerf.Close()
+		for rowsPerf.Next() {
+			var name string
+			var val float64
+			if err := rowsPerf.Scan(&name, &val); err == nil {
+				switch name {
+				case "Lazy writes/sec":
+					lazyWrites = val
+				case "Free list stalls/sec":
+					freeListStalls = val
+				case "Page reads/sec":
+					pageReads = val
+				case "Page writes/sec":
+					pageWrites = val
+				}
+			}
+		}
+	}
+	report.LazyWritesPerSec = lazyWrites
+	report.FreeListStallsPerSec = freeListStalls
+	report.PageReadsPerSec = pageReads
+	report.PageWritesPerSec = pageWrites
+	report.PageReadsMBPerSec = math.Round((pageReads*8.0/1024.0)*10.0) / 10.0
+
+	// Fetch Buffer Cache Hit Ratio
+	var hitRatio, hitBase float64
+	_ = c.db.QueryRowContext(queryCtx, `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT 
+			ISNULL(MAX(CASE WHEN counter_name = 'Buffer cache hit ratio' THEN CAST(cntr_value AS FLOAT) END), 0),
+			ISNULL(MAX(CASE WHEN counter_name = 'Buffer cache hit ratio base' THEN CAST(cntr_value AS FLOAT) END), 0)
+		FROM sys.dm_os_performance_counters
+		WHERE object_name LIKE '%:Buffer Manager%'
+		  AND counter_name IN ('Buffer cache hit ratio', 'Buffer cache hit ratio base');
+	`).Scan(&hitRatio, &hitBase)
+	if hitBase > 0 {
+		report.BufferCacheHitRatio = math.Round((hitRatio/hitBase)*1000.0) / 10.0
+	} else {
+		report.BufferCacheHitRatio = 99.0
+	}
+
+	// Fetch Max Server Memory (MB) from sys.configurations
+	_ = c.db.QueryRowContext(queryCtx, `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT CAST(value_in_use AS BIGINT)
+		FROM sys.configurations
+		WHERE name = 'max server memory (MB)';
+	`).Scan(&report.MaxServerMemoryMB)
+
+	// Fetch Target and Total Server Memory (MB)
+	_ = c.db.QueryRowContext(queryCtx, `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT 
+			ISNULL(MAX(CASE WHEN counter_name = 'Target Server Memory (KB)' THEN CAST(cntr_value AS BIGINT)/1024 END), 0),
+			ISNULL(MAX(CASE WHEN counter_name = 'Total Server Memory (KB)' THEN CAST(cntr_value AS BIGINT)/1024 END), 0)
+		FROM sys.dm_os_performance_counters
+		WHERE object_name LIKE '%:Memory Manager%'
+		  AND counter_name IN ('Target Server Memory (KB)', 'Total Server Memory (KB)');
+	`).Scan(&report.TargetServerMemoryMB, &report.TotalServerMemoryMB)
+
+	// Fetch Memory Grants Pending Count
+	_ = c.db.QueryRowContext(queryCtx, `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT COUNT(1)
+		FROM sys.dm_exec_query_memory_grants
+		WHERE is_next_candidate IS NOT NULL OR grant_time IS NULL;
+	`).Scan(&report.MemoryGrantsPendingCount)
+
+	// Calculate PLE Burn Velocity & Verdict
+	if c.lastPLEOverall > 0 && !c.lastPLETimestamp.IsZero() {
+		elapsedMin := time.Since(c.lastPLETimestamp).Minutes()
+		if elapsedMin > 0.05 { // at least 3 seconds between evaluations
+			diff := report.OverallPLE - c.lastPLEOverall
+			burnRate := diff / elapsedMin
+			report.PLEBurnRateSecondsPerMin = math.Round(burnRate*10.0) / 10.0
+
+			if report.PLEBurnRateSecondsPerMin < -60.0 {
+				report.PLEBurnVerdict = "ACTIVE CACHE COLLAPSE"
+			} else if report.PLEBurnRateSecondsPerMin < -15.0 {
+				report.PLEBurnVerdict = "EVICTION SURGE"
+			} else if report.PLEBurnRateSecondsPerMin > 15.0 {
+				report.PLEBurnVerdict = "CACHE RECOVERY"
+			} else {
+				report.PLEBurnVerdict = "STEADY STATE"
+			}
+		} else {
+			report.PLEBurnRateSecondsPerMin = 0.0
+			report.PLEBurnVerdict = "STEADY STATE"
+		}
+	} else {
+		report.PLEBurnRateSecondsPerMin = 0.0
+		report.PLEBurnVerdict = "STEADY STATE"
+	}
+	c.lastPLEOverall = report.OverallPLE
+	c.lastPLETimestamp = time.Now()
+
+	// 3. Fetch Per-NUMA Node Page Life Expectancy & Memory Allocation
+	nodeRows, errNodes := c.db.QueryContext(queryCtx, `
+		SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+		SELECT 
+			CAST(RIGHT(RTRIM(p.instance_name), 3) AS INT) AS node_id,
+			RTRIM(p.instance_name) AS node_name,
+			CAST(p.cntr_value AS FLOAT) AS ple_seconds,
+			ISNULL(CAST(m.pages_kb / 1024.0 AS FLOAT), 0) AS mem_mb,
+			ISNULL(m.foreign_page_count, 0) AS foreign_pages
+		FROM sys.dm_os_performance_counters p
+		LEFT JOIN sys.dm_os_memory_nodes m 
+			ON CAST(RIGHT(RTRIM(p.instance_name), 3) AS INT) = m.memory_node_id
+		WHERE p.counter_name = 'Page life expectancy'
+		  AND p.object_name LIKE '%:Buffer Node%'
+		ORDER BY node_id ASC;
+	`)
+
+	if errNodes == nil {
+		defer nodeRows.Close()
+		for nodeRows.Next() {
+			var n NUMAPLENode
+			var fPages int64
+			if err := nodeRows.Scan(&n.NodeID, &n.NodeName, &n.PLESeconds, &n.MemoryAllocatedMB, &fPages); err == nil {
+				if n.MemoryAllocatedMB > 0 && fPages > 0 {
+					n.ForeignPageRatio = math.Round(((float64(fPages)*8.0/1024.0)/n.MemoryAllocatedMB)*10000.0) / 100.0
+				}
+				report.NUMANodes = append(report.NUMANodes, n)
+			}
+		}
+	}
+
+	report.NodeCount = len(report.NUMANodes)
+	report.IsNUMA = report.NodeCount > 1
+
+	// Calculate per-node baseline targets and status
+	nodeTarget := report.TargetPLE
+	if report.NodeCount > 1 {
+		nodeTarget = math.Max(300.0, (report.TotalMemoryGB/float64(report.NodeCount)/4.0)*300.0)
+	}
+
+	var minNodePLE, maxNodePLE float64
+	var minNodeID int
+	for i := range report.NUMANodes {
+		report.NUMANodes[i].TargetPLE = nodeTarget
+		ple := report.NUMANodes[i].PLESeconds
+		if i == 0 || ple < minNodePLE {
+			minNodePLE = ple
+			minNodeID = report.NUMANodes[i].NodeID
+		}
+		if i == 0 || ple > maxNodePLE {
+			maxNodePLE = ple
+		}
+
+		if ple < 300.0 || (nodeTarget > 0 && ple < nodeTarget*0.4) {
+			report.NUMANodes[i].Status = "CRITICAL"
+		} else if nodeTarget > 0 && ple < nodeTarget*0.75 {
+			report.NUMANodes[i].Status = "DEGRADED"
+		} else {
+			report.NUMANodes[i].Status = "HEALTHY"
+		}
+	}
+
+	// 4. Determine Overall Status & Synthesis Summary
+	if report.OverallPLE < 300.0 || report.OverallPLE < report.TargetPLE*0.4 {
+		report.Status = "CRITICAL"
+		report.Summary = fmt.Sprintf("Critical buffer pool churn! Overall PLE is %.0fs (Baseline: %.0fs for %.0f GB RAM). Data pages stay in cache for only %.1f minutes before forced eviction.",
+			report.OverallPLE, report.TargetPLE, report.TotalMemoryGB, report.OverallPLE/60.0)
+	} else if report.OverallPLE < report.TargetPLE*0.75 {
+		report.Status = "WARNING"
+		report.Summary = fmt.Sprintf("Degraded Page Life Expectancy. Overall PLE is %.0fs (Target: %.0fs for %.0f GB RAM). Large table scans or inadequate RAM are causing elevated page churn.",
+			report.OverallPLE, report.TargetPLE, report.TotalMemoryGB)
+	} else {
+		report.Status = "HEALTHY"
+		report.Summary = fmt.Sprintf("Buffer pool cache is healthy. Overall PLE is %.0fs, comfortably exceeding the dynamic baseline of %.0fs (%.0f GB RAM). Cache churn is minimal.",
+			report.OverallPLE, report.TargetPLE, report.TotalMemoryGB)
+	}
+
+	// Flag NUMA Skew / Imbalance
+	if report.IsNUMA && maxNodePLE > 0 && minNodePLE < (maxNodePLE*0.45) && minNodePLE < nodeTarget {
+		if report.Status == "HEALTHY" {
+			report.Status = "WARNING"
+		}
+		report.Summary += fmt.Sprintf(" Warning: NUMA node memory imbalance! Node %d PLE (%.0fs) is dramatically lower than Node with %.0fs, indicating localized buffer pool saturation or parallel thread skew.",
+			minNodeID, minNodePLE, maxNodePLE)
+	}
+
+	// 5. Query Store / DMV Culprit Queries (Feature A: Culprit Attribution)
+	const sqlCulprits = `
+	SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+	SET LOCK_TIMEOUT 1500;
+	IF EXISTS (SELECT 1 FROM sys.databases WHERE name = DB_NAME() AND is_query_store_on = 1)
+	BEGIN
+		SELECT TOP (15)
+			q.query_id,
+			p.plan_id,
+			ISNULL(CONVERT(VARCHAR(64), q.query_hash, 1), '') AS query_hash,
+			ISNULL(qt.query_sql_text, '') AS query_text,
+			CAST(SUM(rs.count_executions) AS BIGINT) AS exec_count,
+			CAST(ROUND(AVG(rs.avg_physical_io_reads * 8.0 / 1024.0), 2) AS FLOAT) AS avg_phys_mb,
+			CAST(ROUND(SUM(rs.avg_physical_io_reads * rs.count_executions * 8.0 / 1024.0), 2) AS FLOAT) AS total_phys_mb,
+			CAST(ROUND(AVG(rs.avg_logical_io_reads * 8.0 / 1024.0), 2) AS FLOAT) AS avg_log_mb,
+			CAST(ROUND(AVG(rs.avg_duration / 1000.0), 2) AS FLOAT) AS avg_dur_ms,
+			CAST(ROUND(AVG(rs.avg_cpu_time / 1000.0), 2) AS FLOAT) AS avg_cpu_ms,
+			ISNULL(CONVERT(VARCHAR(19), MAX(rs.last_execution_time), 120), '') AS last_exec_time
+		FROM sys.query_store_runtime_stats rs
+		JOIN sys.query_store_plan p ON rs.plan_id = p.plan_id
+		JOIN sys.query_store_query q ON p.query_id = q.query_id
+		JOIN sys.query_store_query_text qt ON q.query_text_id = qt.query_text_id
+		WHERE rs.avg_physical_io_reads > 5 OR rs.avg_logical_io_reads > 2000
+		GROUP BY q.query_id, p.plan_id, q.query_hash, qt.query_sql_text
+		ORDER BY total_phys_mb DESC;
+	END
+	ELSE
+	BEGIN
+		SELECT TOP (15)
+			0 AS query_id,
+			0 AS plan_id,
+			ISNULL(CONVERT(VARCHAR(64), qs.query_hash, 1), '') AS query_hash,
+			ISNULL(t.text, '') AS query_text,
+			qs.execution_count AS exec_count,
+			CAST(ROUND((qs.total_physical_reads * 8.0 / 1024.0) / NULLIF(qs.execution_count, 0), 2) AS FLOAT) AS avg_phys_mb,
+			CAST(ROUND(qs.total_physical_reads * 8.0 / 1024.0, 2) AS FLOAT) AS total_phys_mb,
+			CAST(ROUND((qs.total_logical_reads * 8.0 / 1024.0) / NULLIF(qs.execution_count, 0), 2) AS FLOAT) AS avg_log_mb,
+			CAST(ROUND((qs.total_elapsed_time / 1000.0) / NULLIF(qs.execution_count, 0), 2) AS FLOAT) AS avg_dur_ms,
+			CAST(ROUND((qs.total_worker_time / 1000.0) / NULLIF(qs.execution_count, 0), 2) AS FLOAT) AS avg_cpu_ms,
+			ISNULL(CONVERT(VARCHAR(19), qs.last_execution_time, 120), '') AS last_exec_time
+		FROM sys.dm_exec_query_stats qs
+		CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) t
+		WHERE qs.total_physical_reads > 0
+		ORDER BY qs.total_physical_reads DESC;
+	END
+	`
+
+	rows, errCulprits := c.db.QueryContext(queryCtx, sqlCulprits)
+	if errCulprits == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var q PLECulpritQuery
+			if err := rows.Scan(
+				&q.QueryID,
+				&q.PlanID,
+				&q.QueryHash,
+				&q.QueryText,
+				&q.ExecutionCount,
+				&q.AvgPhysicalReadsMB,
+				&q.TotalPhysicalReadsMB,
+				&q.AvgLogicalReadsMB,
+				&q.AvgDurationMS,
+				&q.AvgCPUMS,
+				&q.LastExecutionTime,
+			); err == nil {
+				q.QueryText = strings.TrimSpace(q.QueryText)
+				if q.AvgPhysicalReadsMB >= 500.0 || q.TotalPhysicalReadsMB >= 10000.0 {
+					q.ImpactSeverity = "CRITICAL"
+					q.BufferPoolFlushRisk = fmt.Sprintf("Severe: Cold disk reads (~%.1f MB/run, %.0f MB total) actively evicting active working set from buffer pool",
+						q.AvgPhysicalReadsMB, q.TotalPhysicalReadsMB)
+				} else if q.AvgPhysicalReadsMB >= 50.0 || q.TotalPhysicalReadsMB >= 1000.0 {
+					q.ImpactSeverity = "HIGH"
+					q.BufferPoolFlushRisk = fmt.Sprintf("High: Frequent table scans (~%.1f MB/run) creating steady page churn and lowering PLE",
+						q.AvgPhysicalReadsMB)
+				} else {
+					q.ImpactSeverity = "ELEVATED"
+					q.BufferPoolFlushRisk = fmt.Sprintf("Elevated: Generates physical I/O (~%.1f MB/run) upon execution",
+						q.AvgPhysicalReadsMB)
+				}
+				report.CulpritQueries = append(report.CulpritQueries, q)
+			}
+		}
+	}
+
+	// 6. Table Eviction Impact Tracker (Which tables are currently cached and at risk of eviction)
+	const sqlEviction = `
+	SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+	SET LOCK_TIMEOUT 1500;
+	SELECT TOP (6)
+		ISNULL(DB_NAME(p.database_id), 'Unknown') AS database_name,
+		ISNULL(OBJECT_SCHEMA_NAME(p.object_id, p.database_id), 'dbo') AS schema_name,
+		ISNULL(OBJECT_NAME(p.object_id, p.database_id), 'Table_' + CAST(p.object_id AS VARCHAR(20))) AS table_name,
+		ISNULL(i.name, 'HEAP') AS index_name,
+		CAST(ROUND(COUNT(b.page_id) * 8.0 / 1024.0, 1) AS FLOAT) AS cached_mb
+	FROM sys.dm_os_buffer_descriptors b WITH (NOLOCK)
+	JOIN sys.allocation_units a WITH (NOLOCK) ON b.allocation_unit_id = a.allocation_unit_id
+	JOIN sys.partitions p WITH (NOLOCK) ON a.container_id = p.hobt_id
+	LEFT JOIN sys.indexes i WITH (NOLOCK) ON p.object_id = i.object_id AND p.index_id = i.index_id
+	WHERE b.database_id > 4 AND p.object_id > 100
+	GROUP BY p.database_id, p.object_id, i.name
+	ORDER BY cached_mb DESC;
+	`
+	rowsEvict, errEvict := c.db.QueryContext(queryCtx, sqlEviction)
+	if errEvict == nil {
+		defer rowsEvict.Close()
+		var totalCached float64
+		type tempTbl struct {
+			dbName, schName, tblName, idxName string
+			cachedMB                          float64
+		}
+		var tempItems []tempTbl
+		for rowsEvict.Next() {
+			var itm tempTbl
+			if err := rowsEvict.Scan(&itm.dbName, &itm.schName, &itm.tblName, &itm.idxName, &itm.cachedMB); err == nil {
+				totalCached += itm.cachedMB
+				tempItems = append(tempItems, itm)
+			}
+		}
+		for idx, itm := range tempItems {
+			pct := 0.0
+			if totalCached > 0 {
+				pct = math.Round((itm.cachedMB/totalCached)*1000.0) / 10.0
+			}
+			risk := "MODERATE"
+			reason := "Stable in buffer pool under current workload."
+			culprit := "N/A"
+			if report.OverallPLE < 300.0 || (idx == 0 && report.OverallPLE < report.TargetPLE) {
+				risk = "CRITICAL"
+				reason = fmt.Sprintf("High turnover: ~%.1f MB of cached pages are being aggressively evicted by memory pressure.", itm.cachedMB)
+				if len(report.CulpritQueries) > 0 {
+					culprit = report.CulpritQueries[0].QueryHash
+				}
+			} else if report.OverallPLE < report.TargetPLE*0.75 {
+				risk = "HIGH"
+				reason = "Active scan activity in other tables is degrading cached retention time."
+				if len(report.CulpritQueries) > 0 {
+					culprit = report.CulpritQueries[0].QueryHash
+				}
+			}
+			report.TableEvictionImpacts = append(report.TableEvictionImpacts, TableEvictionImpact{
+				DatabaseName:       itm.dbName,
+				SchemaName:         itm.schName,
+				TableName:          itm.tblName,
+				IndexName:          itm.idxName,
+				CurrentCachedMB:    itm.cachedMB,
+				BufferPoolPercent:  pct,
+				EvictionRisk:       risk,
+				DisplacementReason: reason,
+				PushedOutByQuery:   culprit,
+				EstimatedEvictedMB: math.Round(itm.cachedMB * 0.4),
+			})
+		}
+	}
+
+	// 7. Automated AI PLE Doctor & Remediation Diagnoses
+	// Check 1: Uncapped Max Server Memory
+	if report.MaxServerMemoryMB >= 2147483647 || report.MaxServerMemoryMB == 0 {
+		recommendedMB := int64(math.Max(4096.0, (report.TotalMemoryGB-4.0)*1024.0))
+		report.DoctorInsights = append(report.DoctorInsights, PLEDoctorInsight{
+			Category:         "Max Server Memory Sizing",
+			Severity:         "CRITICAL",
+			Title:            "Uncapped Max Server Memory (Default 2,147,483,647 MB)",
+			Diagnosis:        "SQL Server has no memory boundary configured. When the OS or external processes require memory, Windows will force SQL Server pages into the disk pagefile, causing immediate PLE collapse and micro-freezes.",
+			ActionableRemedy: fmt.Sprintf("Cap 'max server memory (MB)' leaving 4-8 GB reserved for Windows OS (Recommended: %d MB).", recommendedMB),
+			SuggestedTSQL: fmt.Sprintf(`EXEC sp_configure 'show advanced options', 1;
+RECONFIGURE;
+GO
+EXEC sp_configure 'max server memory (MB)', %d;
+RECONFIGURE;
+GO`, recommendedMB),
+		})
+	}
+
+	// Check 2: Free List Stalls / Lazy Writer Pressure
+	if report.FreeListStallsPerSec > 2.0 || report.LazyWritesPerSec > 20.0 {
+		report.DoctorInsights = append(report.DoctorInsights, PLEDoctorInsight{
+			Category:         "Memory Pressure & Free List Stalls",
+			Severity:         "CRITICAL",
+			Title:            fmt.Sprintf("Active Free List Stalls (%.1f/sec) & Lazy Writer Pressure", report.FreeListStallsPerSec),
+			Diagnosis:        fmt.Sprintf("Worker threads are actively suspended waiting for the buffer pool to allocate clean memory pages. The Lazy Writer is issuing %.1f writes/sec to flush dirty pages under emergency pressure.", report.LazyWritesPerSec),
+			ActionableRemedy: "Identify and tune the heaviest I/O queries or add physical RAM to buffer working sets.",
+			SuggestedTSQL: `-- Check which queries are currently requesting the highest memory grants
+SELECT TOP 10 
+    session_id, request_id, scheduler_id, dop, 
+    requested_memory_kb / 1024 AS requested_mb, 
+    granted_memory_kb / 1024 AS granted_mb, 
+    wait_time_ms, wait_type
+FROM sys.dm_exec_query_memory_grants
+ORDER BY requested_memory_kb DESC;`,
+		})
+	}
+
+	// Check 3: Query Memory Grant Workspace Stealing (RESOURCE_SEMAPHORE)
+	if report.MemoryGrantsPendingCount > 0 {
+		report.DoctorInsights = append(report.DoctorInsights, PLEDoctorInsight{
+			Category:         "Memory Workspace Steal",
+			Severity:         "CRITICAL",
+			Title:            fmt.Sprintf("%d Queries Pending Memory Grants (RESOURCE_SEMAPHORE)", report.MemoryGrantsPendingCount),
+			Diagnosis:        "Queries requiring oversized Sort and Hash memory grants are depleting available buffer pool memory, forcing data cache pages out prematurely.",
+			ActionableRemedy: "Review skewed Cardinality Estimator spills and query max memory grant percentages via Resource Governor.",
+			SuggestedTSQL: `-- Inspect queries queued for memory grants
+SELECT 
+    r.session_id, r.status, r.wait_type, r.wait_time, 
+    t.text AS sql_text
+FROM sys.dm_exec_requests r
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.wait_type LIKE '%RESOURCE_SEMAPHORE%';`,
+		})
+	}
+
+	// Check 4: Top Cold-Read Culprit Query
+	if len(report.CulpritQueries) > 0 && report.CulpritQueries[0].AvgPhysicalReadsMB > 50.0 {
+		topQ := report.CulpritQueries[0]
+		report.DoctorInsights = append(report.DoctorInsights, PLEDoctorInsight{
+			Category:         "Missing Index Eviction Threat",
+			Severity:         "WARNING",
+			Title:            fmt.Sprintf("Culprit Query [%s] Reading %.1f MB Cold Disk per Execution", topQ.QueryHash, topQ.AvgPhysicalReadsMB),
+			Diagnosis:        fmt.Sprintf("This query has performed %.0f MB of total physical reads across %d executions. Each run flushes existing cached pages to make room for cold table scans.", topQ.TotalPhysicalReadsMB, topQ.ExecutionCount),
+			ActionableRemedy: "Inspect the execution plan in the 'Plan Visualizer' tab. Add missing index or covering include columns to eliminate table scan.",
+			SuggestedTSQL: fmt.Sprintf(`-- Inspect query execution plan for hash %s
+SELECT TOP 5 
+    qs.execution_count,
+    qs.total_physical_reads * 8 / 1024 AS total_physical_mb,
+    qs.total_logical_reads * 8 / 1024 AS total_logical_mb,
+    qp.query_plan
+FROM sys.dm_exec_query_stats qs
+CROSS APPLY sys.dm_exec_query_plan(qs.plan_handle) qp
+WHERE qs.query_hash = %s
+ORDER BY qs.total_physical_reads DESC;`, topQ.QueryHash, topQ.QueryHash),
+		})
 	}
 
 	return report, nil

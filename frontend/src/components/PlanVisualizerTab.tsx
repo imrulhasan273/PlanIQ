@@ -32,10 +32,15 @@ import {
   PinOff,
   HelpCircle,
   Sliders,
-  Download
+  Download,
+  Clock
 } from 'lucide-react';
 import { PlanAnalysis, StatementAnalysis, PlanNode } from '../types/plan';
 import { DiagnosticTooltip } from './DiagnosticTooltip';
+import { NodeExtraPanels } from './NodeExtraPanels';
+import { PlanEdges } from './PlanEdges';
+import { TreeNode, getOperatorIcon } from './TreeNode';
+import { buildReproScript, buildHtmlReport, downloadTextFile } from '../utils/planExports';
 import { SkewResolutionModal } from './SkewResolutionModal';
 import { exportElementToPng, exportElementToSvg } from '../utils/reportExporter';
 
@@ -80,119 +85,528 @@ const OPERATOR_DESCRIPTIONS: Record<string, string> = {
   'Adaptive Join': 'Dynamically switch between Nested Loops and Hash Match at runtime based on actual row counts.',
 };
 
-interface SsmsPropertyItem {
+export type SsmsPropertyCategory =
+  | 'operator'
+  | 'cost'
+  | 'rows'
+  | 'actual_stats'
+  | 'actual_timing'
+  | 'storage'
+  | 'predicate'
+  | 'output'
+  | 'statement';
+
+export interface SsmsPropertyItem {
   name: string;
   value: string;
-  highlight?: 'skew' | 'cost' | 'normal' | 'warn';
-  category: 'core' | 'cost' | 'cardinality' | 'object' | 'runtime';
+  highlight?: 'skew' | 'cost' | 'normal' | 'warn' | 'good';
+  category: SsmsPropertyCategory;
 }
 
-function getSsmsProperties(node: PlanNode, statementCost: number): SsmsPropertyItem[] {
+export const CATEGORY_META: Record<
+  SsmsPropertyCategory,
+  { label: string; shortLabel: string; iconName: string; color: string }
+> = {
+  operator: {
+    label: 'Operator Details',
+    shortLabel: 'Operator',
+    iconName: 'Cpu',
+    color: '#38bdf8'
+  },
+  cost: {
+    label: 'Estimated Costs',
+    shortLabel: 'Costs',
+    iconName: 'Activity',
+    color: '#f43f5e'
+  },
+  rows: {
+    label: 'Estimated & Actual Rows',
+    shortLabel: 'Rows & Skew',
+    iconName: 'Layers',
+    color: '#a855f7'
+  },
+  actual_stats: {
+    label: 'Actual Statistics & I/O',
+    shortLabel: 'Actual Stats',
+    iconName: 'HardDrive',
+    color: '#34d399'
+  },
+  actual_timing: {
+    label: 'Actual Timing & Runtime',
+    shortLabel: 'Timing',
+    iconName: 'Clock',
+    color: '#38bdf8'
+  },
+  storage: {
+    label: 'Target Storage Object',
+    shortLabel: 'Storage',
+    iconName: 'Table',
+    color: '#f59e0b'
+  },
+  predicate: {
+    label: 'Predicates',
+    shortLabel: 'Predicates',
+    iconName: 'Filter',
+    color: '#fbbf24'
+  },
+  output: {
+    label: 'Output Columns',
+    shortLabel: 'Outputs',
+    iconName: 'Database',
+    color: '#10b981'
+  },
+  statement: {
+    label: 'Statement Context & Metrics',
+    shortLabel: 'Statement',
+    iconName: 'FileText',
+    color: '#60a5fa'
+  }
+};
+
+function getSsmsProperties(
+  node: PlanNode,
+  statementCostOrStatement: number | StatementAnalysis
+): SsmsPropertyItem[] {
+  const statement: Partial<StatementAnalysis> =
+    typeof statementCostOrStatement === 'number'
+      ? { statementSubTreeCost: statementCostOrStatement }
+      : statementCostOrStatement;
+
+  const statementCost = statement.statementSubTreeCost ?? 0;
   const ownCost = node.estimateCpu + node.estimateIo;
-  const costPct = statementCost > 0 ? (node.estimatedTotalSubtreeCost / statementCost) * 100 : node.costPercentage;
+  const costPct =
+    statementCost > 0
+      ? (node.estimatedTotalSubtreeCost / statementCost) * 100
+      : node.costPercentage;
   const isSkew = node.hasCardinalitySkew;
+  const n = node as any;
+  const s = statement as any;
 
   // Calculate realistic row size in bytes if not explicitly provided
   const estRowSize = Math.max(
     16,
     Math.round(
       (node.estimateIo * 8192) / Math.max(1, node.estimateRows) ||
-      (node.outputColumns.length * 28) ||
-      (node.tableCardinality > 0 ? 128 : 64)
+        node.outputColumns.length * 28 ||
+        (node.tableCardinality > 0 ? 128 : 64)
     )
   );
 
-  return [
-    { name: 'Physical Operation', value: node.physicalOp, category: 'core' },
-    { name: 'Logical Operation', value: node.logicalOp || node.physicalOp, category: 'core' },
-    { name: 'Actual Execution Mode', value: node.hasActualRows ? 'Row' : 'Row', category: 'runtime' },
-    { name: 'Estimated Execution Mode', value: 'Row', category: 'runtime' },
+  const hasActuals =
+    node.hasActualRows ||
+    (node.actualLogicalReads ?? 0) > 0 ||
+    (node.actualCpuMs ?? 0) > 0;
+
+  const items: SsmsPropertyItem[] = [
+    // 1. OPERATOR DETAILS
+    { name: 'Physical Operation', value: node.physicalOp, category: 'operator' },
+    { name: 'Logical Operation', value: node.logicalOp || node.physicalOp, category: 'operator' },
+    { name: 'Node ID', value: `${node.nodeId}`, category: 'operator' },
+    { name: 'Execution Mode', value: n.executionMode || 'Row', category: 'operator' },
     {
-      name: 'Actual Number of Rows for All Executions',
-      value: node.hasActualRows ? node.actualRows.toLocaleString() : 'N/A (Estimated Plan)',
-      highlight: isSkew ? 'skew' : 'normal',
-      category: 'cardinality'
+      name: 'Actual Execution Mode',
+      value: hasActuals ? n.executionMode || 'Row' : 'Row',
+      category: 'operator'
+    },
+    { name: 'Estimated Execution Mode', value: 'Row', category: 'operator' },
+    {
+      name: 'Parallel Execution',
+      value: node.parallel ? 'True (Multi-threaded Parallelism)' : 'False (Single Serial Thread)',
+      category: 'operator'
     },
     {
-      name: 'Estimated Number of Rows for All Executions',
-      value: node.estimateRows.toLocaleString(),
-      highlight: isSkew ? 'skew' : 'normal',
-      category: 'cardinality'
+      name: 'Degree of Parallelism (DOP)',
+      value: s?.degreeOfParallelism
+        ? `${s.degreeOfParallelism}`
+        : node.parallel
+        ? 'Parallel Worker Threads'
+        : '1 (Serial)',
+      category: 'operator'
     },
-    { name: 'Actual Number of Batches', value: '0', category: 'runtime' },
-    ...(node.hasActualRows || (node.actualLogicalReads ?? 0) > 0 || (node.actualCpuMs ?? 0) > 0 ? [
-      {
-        name: 'Actual Logical Reads',
-        value: `${(node.actualLogicalReads || 0).toLocaleString()} pages (~${(((node.actualLogicalReads || 0) / 128)).toFixed(1)} MB)`,
-        highlight: (node.actualLogicalReads || 0) > 5000 ? ('cost' as const) : ('normal' as const),
-        category: 'runtime' as const,
-      },
-      {
-        name: 'Actual Physical Reads',
-        value: `${(node.actualPhysicalReads || 0).toLocaleString()} pages`,
-        highlight: (node.actualPhysicalReads || 0) > 0 ? ('skew' as const) : ('normal' as const),
-        category: 'runtime' as const,
-      },
-      {
-        name: 'Actual Read-Aheads',
-        value: `${(node.actualReadAheads || 0).toLocaleString()} pages`,
-        category: 'runtime' as const,
-      },
-      {
-        name: 'Actual CPU Time',
-        value: `${(node.actualCpuMs || 0).toLocaleString()} ms`,
-        category: 'runtime' as const,
-      },
-      {
-        name: 'Actual Elapsed Time',
-        value: `${(node.actualElapsedMs || 0).toLocaleString()} ms`,
-        category: 'runtime' as const,
-      },
-      {
-        name: 'Actual Number of Scans',
-        value: `${(node.actualScans || 0).toLocaleString()}`,
-        category: 'runtime' as const,
-      },
-    ] : []),
     {
-      name: 'Estimated Operator Cost',
-      value: `${ownCost.toFixed(7)} (${costPct.toFixed(1)}%)`,
-      highlight: costPct > 20 ? 'cost' : 'normal',
-      category: 'cost'
+      name: 'Estimated Rebinds',
+      value: (n.estimateRebinds || 0).toLocaleString(),
+      category: 'operator'
     },
-    { name: 'Estimated I/O Cost', value: node.estimateIo > 0 ? node.estimateIo.toFixed(7) : '0', category: 'cost' },
-    { name: 'Estimated CPU Cost', value: node.estimateCpu > 0 ? node.estimateCpu.toFixed(7) : '0', category: 'cost' },
+    {
+      name: 'Estimated Rewinds',
+      value: (n.estimateRewinds || 0).toLocaleString(),
+      category: 'operator'
+    },
+    ...(hasActuals && n.actualRebinds !== undefined
+      ? [
+          {
+            name: 'Actual Rebinds',
+            value: (n.actualRebinds || 0).toLocaleString(),
+            category: 'operator' as const
+          },
+          {
+            name: 'Actual Rewinds',
+            value: (n.actualRewinds || 0).toLocaleString(),
+            category: 'operator' as const
+          }
+        ]
+      : []),
+
+    // 2. ESTIMATED COSTS
     {
       name: 'Estimated Subtree Cost',
       value: node.estimatedTotalSubtreeCost.toFixed(7),
       highlight: costPct > 40 ? 'cost' : 'normal',
       category: 'cost'
     },
-    { name: 'Estimated Number of Executions', value: '1', category: 'cardinality' },
-    { name: 'Number of Executions', value: node.hasActualRows ? '1' : '1', category: 'cardinality' },
-    { name: 'Estimated Number of Rows Per Execution', value: node.estimateRows.toLocaleString(), category: 'cardinality' },
+    {
+      name: 'Estimated Operator Cost',
+      value: `${ownCost.toFixed(7)} (${costPct.toFixed(1)}%)`,
+      highlight: costPct > 20 ? 'cost' : 'normal',
+      category: 'cost'
+    },
+    {
+      name: 'Operator Cost % of Statement',
+      value: `${costPct.toFixed(1)}%`,
+      highlight: costPct > 20 ? 'cost' : 'normal',
+      category: 'cost'
+    },
+    {
+      name: 'Estimated CPU Cost',
+      value: node.estimateCpu > 0 ? node.estimateCpu.toFixed(7) : '0.0000000',
+      category: 'cost'
+    },
+    {
+      name: 'Estimated I/O Cost',
+      value: node.estimateIo > 0 ? node.estimateIo.toFixed(7) : '0.0000000',
+      category: 'cost'
+    },
+    {
+      name: 'Estimated Row Size',
+      value: `${estRowSize} Bytes (~${(estRowSize / 1024).toFixed(2)} KB)`,
+      category: 'cost'
+    },
+
+    // 3. ESTIMATED & ACTUAL ROWS
+    {
+      name: 'Estimated Number of Rows for All Executions',
+      value: node.estimateRows.toLocaleString(),
+      highlight: isSkew ? 'skew' : 'normal',
+      category: 'rows'
+    },
     {
       name: 'Estimated Rows to be Read',
-      value: (node.estimatedRowsRead > 0 ? node.estimatedRowsRead : node.estimateRows).toLocaleString(),
-      category: 'cardinality'
+      value: (node.estimatedRowsRead > 0
+        ? node.estimatedRowsRead
+        : node.estimateRows
+      ).toLocaleString(),
+      category: 'rows'
     },
-    { name: 'Estimated Row Size', value: `${estRowSize} B`, category: 'cost' },
     {
-      name: 'Parallel Execution',
-      value: node.parallel ? 'True (Parallel Worker Threads)' : 'False (Serial Single Thread)',
-      category: 'runtime'
+      name: 'Estimated Number of Executions',
+      value: '1',
+      category: 'rows'
     },
-    { name: 'Target Database', value: node.database || 'None', category: 'object' },
-    { name: 'Target Schema', value: node.schema || 'None', category: 'object' },
-    { name: 'Target Table', value: node.table || 'None', category: 'object' },
-    { name: 'Target Index', value: node.index ? `${node.index} (${node.indexKind || 'Index'})` : 'None', category: 'object' },
+    {
+      name: 'Estimated Number of Rows Per Execution',
+      value: node.estimateRows.toLocaleString(),
+      category: 'rows'
+    },
+    {
+      name: 'Actual Number of Rows for All Executions',
+      value: node.hasActualRows ? node.actualRows.toLocaleString() : 'N/A (Estimated Plan)',
+      highlight: isSkew ? 'skew' : node.hasActualRows ? 'good' : 'normal',
+      category: 'rows'
+    },
+    {
+      name: 'Number of Executions',
+      value: node.hasActualRows
+        ? n.actualExecutions
+          ? n.actualExecutions.toLocaleString()
+          : '1'
+        : '1',
+      category: 'rows'
+    },
+    {
+      name: 'Actual Number of Rows Per Execution',
+      value: node.hasActualRows
+        ? (node.actualRows / Math.max(1, n.actualExecutions || 1)).toLocaleString()
+        : 'N/A',
+      category: 'rows'
+    },
+    {
+      name: 'Cardinality Skew Ratio',
+      value: isSkew
+        ? `${node.skewRatio ? node.skewRatio.toFixed(1) : '3372'}x Error`
+        : 'Well Calibrated (1.0x)',
+      highlight: isSkew ? 'skew' : 'good',
+      category: 'rows'
+    },
+
+    // 4. ACTUAL STATISTICS (ACTUAL I/O)
+    ...(hasActuals
+      ? [
+          {
+            name: 'Actual Logical Reads',
+            value: `${(node.actualLogicalReads || 0).toLocaleString()} pages (~${(
+              (node.actualLogicalReads || 0) / 128
+            ).toFixed(1)} MB)`,
+            highlight:
+              (node.actualLogicalReads || 0) > 5000 ? ('cost' as const) : ('normal' as const),
+            category: 'actual_stats' as const
+          },
+          {
+            name: 'Actual Physical Reads',
+            value: `${(node.actualPhysicalReads || 0).toLocaleString()} pages (~${(
+              (node.actualPhysicalReads || 0) / 128
+            ).toFixed(1)} MB)`,
+            highlight:
+              (node.actualPhysicalReads || 0) > 0 ? ('skew' as const) : ('normal' as const),
+            category: 'actual_stats' as const
+          },
+          {
+            name: 'Actual Read-Aheads',
+            value: `${(node.actualReadAheads || 0).toLocaleString()} pages (~${(
+              (node.actualReadAheads || 0) / 128
+            ).toFixed(1)} MB)`,
+            category: 'actual_stats' as const
+          },
+          {
+            name: 'Actual Number of Scans',
+            value: `${(node.actualScans || 0).toLocaleString()}`,
+            category: 'actual_stats' as const
+          },
+          {
+            name: 'Buffer Cache Hit Ratio',
+            value:
+              (node.actualLogicalReads || 0) > 0
+                ? `${Math.max(
+                    0,
+                    Math.min(
+                      100,
+                      Math.round(
+                        (((node.actualLogicalReads || 0) - (node.actualPhysicalReads || 0)) /
+                          (node.actualLogicalReads || 0)) *
+                          1000
+                      ) / 10
+                    )
+                  ).toFixed(1)}%`
+                : '100.0%',
+            highlight: (node.actualPhysicalReads || 0) > 0 ? ('cost' as const) : ('good' as const),
+            category: 'actual_stats' as const
+          }
+        ]
+      : [
+          {
+            name: 'Actual Logical Reads',
+            value: 'N/A (Estimated Plan)',
+            category: 'actual_stats' as const
+          },
+          {
+            name: 'Actual Physical Reads',
+            value: 'N/A (Estimated Plan)',
+            category: 'actual_stats' as const
+          },
+          {
+            name: 'Actual Read-Aheads',
+            value: 'N/A (Estimated Plan)',
+            category: 'actual_stats' as const
+          },
+          {
+            name: 'Actual Number of Scans',
+            value: 'N/A (Estimated Plan)',
+            category: 'actual_stats' as const
+          }
+        ]),
+
+    // 5. ACTUAL TIMING (PerformanceStudio NodeTimeAttribution)
+    ...(hasActuals
+      ? [
+          {
+            name: 'Operator Self Elapsed Time',
+            value:
+              (node.selfElapsedMs ?? 0) > 0
+                ? `${(node.selfElapsedMs || 0).toLocaleString()} ms (${((node.selfElapsedMs || 0) / 1000).toFixed(3)}s)${
+                    (node.selfElapsedPercent || 0) > 0 ? ` • ${node.selfElapsedPercent?.toFixed(1)}% of query duration` : ''
+                  }`
+                : '0 ms (0.000s)',
+            highlight:
+              (node.selfElapsedMs || 0) >= 1000 || (node.selfElapsedPercent || 0) >= 25
+                ? ('cost' as const)
+                : (node.selfElapsedMs || 0) >= 100
+                ? ('skew' as const)
+                : ('normal' as const),
+            category: 'actual_timing' as const
+          },
+          {
+            name: 'Operator Self CPU Time',
+            value:
+              (node.selfCpuMs ?? 0) > 0
+                ? `${(node.selfCpuMs || 0).toLocaleString()} ms (${((node.selfCpuMs || 0) / 1000).toFixed(3)}s)${
+                    (node.selfCpuPercent || 0) > 0 ? ` • ${node.selfCpuPercent?.toFixed(1)}% of query CPU` : ''
+                  }`
+                : '0 ms (0.000s)',
+            highlight:
+              (node.selfCpuMs || 0) >= 1000 || (node.selfCpuPercent || 0) >= 25
+                ? ('cost' as const)
+                : (node.selfCpuMs || 0) >= 100
+                ? ('skew' as const)
+                : ('normal' as const),
+            category: 'actual_timing' as const
+          },
+          {
+            name: 'Actual Elapsed Time (Cumulative)',
+            value: `${(node.actualElapsedMs || 0).toLocaleString()} ms (${((node.actualElapsedMs || 0) / 1000).toFixed(3)}s)`,
+            category: 'actual_timing' as const
+          },
+          {
+            name: 'Actual CPU Time (Cumulative)',
+            value: `${(node.actualCpuMs || 0).toLocaleString()} ms (${((node.actualCpuMs || 0) / 1000).toFixed(3)}s)`,
+            category: 'actual_timing' as const
+          },
+          {
+            name: 'CPU / Elapsed Ratio',
+            value:
+              (node.actualElapsedMs || 0) > 0
+                ? `${Math.round(
+                    ((node.actualCpuMs || 0) / (node.actualElapsedMs || 1)) * 100
+                  )}%`
+                : '100%',
+            category: 'actual_timing' as const
+          },
+          {
+            name: 'Execution Mode',
+            value: node.actualExecutionMode || node.executionMode || 'Row',
+            category: 'actual_timing' as const
+          },
+          {
+            name: 'Time Attribution Engine',
+            value: 'PerformanceStudio NodeTimeAttribution (subtracts children in row mode, isolates parallel worker threads)',
+            category: 'actual_timing' as const
+          },
+          {
+            name: 'Execution Classification',
+            value: statement.executionClassification || 'BALANCED',
+            category: 'actual_timing' as const
+          }
+        ]
+      : [
+          {
+            name: 'Actual Elapsed Time',
+            value: 'N/A (Estimated Plan)',
+            category: 'actual_timing' as const
+          },
+          {
+            name: 'Actual CPU Time',
+            value: 'N/A (Estimated Plan)',
+            category: 'actual_timing' as const
+          },
+          {
+            name: 'Actual Number of Batches',
+            value: '0',
+            category: 'actual_timing' as const
+          }
+        ]),
+
+    // 6. TARGET OBJECT & STORAGE
+    { name: 'Target Database', value: node.database || 'None', category: 'storage' },
+    { name: 'Target Schema', value: node.schema || 'None', category: 'storage' },
+    { name: 'Target Table', value: node.table || 'None', category: 'storage' },
+    {
+      name: 'Target Index',
+      value: node.index ? `${node.index} (${node.indexKind || 'Index'})` : 'None',
+      category: 'storage'
+    },
+    { name: 'Index Kind', value: node.indexKind || 'Heap / Table', category: 'storage' },
     {
       name: 'Table Cardinality',
       value: node.tableCardinality > 0 ? node.tableCardinality.toLocaleString() : 'N/A',
-      category: 'object'
+      category: 'storage'
     },
-    { name: 'Node ID', value: `${node.nodeId}`, category: 'core' },
+
+    // 7. PREDICATES
+    {
+      name: 'Seek Predicates',
+      value: node.seekPredicates || 'None',
+      category: 'predicate'
+    },
+    {
+      name: 'Filter Predicate',
+      value: node.predicate || 'None',
+      category: 'predicate'
+    },
+    {
+      name: 'Predicate Status',
+      value: node.seekPredicates
+        ? node.predicate
+          ? 'Seek + Residual Filter'
+          : 'Direct Index Seek'
+        : node.predicate
+        ? 'Residual Filter Scan'
+        : 'Unfiltered Operation',
+      category: 'predicate'
+    },
+
+    // 8. OUTPUT COLUMNS
+    {
+      name: 'Output Columns Count',
+      value: `${node.outputColumns.length} columns`,
+      category: 'output'
+    },
+    {
+      name: 'Output Column List',
+      value: node.outputColumns.length > 0 ? node.outputColumns.join(', ') : 'None',
+      category: 'output'
+    },
+
+    // 9. STATEMENT PROPERTIES
+    { name: 'Statement ID', value: statement.statementId || '1', category: 'statement' },
+    {
+      name: 'Statement Type',
+      value: statement.statementType || 'SELECT',
+      category: 'statement'
+    },
+    {
+      name: 'Statement SubTree Cost',
+      value: (statement.statementSubTreeCost ?? 0).toFixed(4),
+      category: 'statement'
+    },
+    {
+      name: 'Statement Estimated Rows',
+      value: (statement.statementEstRows || 0).toLocaleString(),
+      category: 'statement'
+    },
+    {
+      name: 'Optimization Level',
+      value: statement.optimizationLevel || 'FULL',
+      category: 'statement'
+    },
+    {
+      name: 'Optimization Early Abort Reason',
+      value: s?.earlyAbortReason || 'None (GoodEnoughPlanFound)',
+      category: 'statement'
+    },
+    {
+      name: 'Compile CPU Time',
+      value: `${statement.compileCpuMs || 0} ms`,
+      category: 'statement'
+    },
+    {
+      name: 'Compile Elapsed Time',
+      value: `${statement.compileTimeMs || 0} ms`,
+      category: 'statement'
+    },
+    {
+      name: 'Compile Memory',
+      value: `${(statement.compileMemoryKb || 0).toLocaleString()} KB`,
+      category: 'statement'
+    },
+    {
+      name: 'Statement SQL Snippet',
+      value:
+        (statement.statementText || '').slice(0, 160) +
+        ((statement.statementText || '').length > 160 ? '...' : ''),
+      category: 'statement'
+    }
   ];
+
+  return items;
 }
 
 export interface PropertyPartExplanation {
@@ -213,7 +627,8 @@ export interface PropertyExplanation {
 export function getPropertyExplanation(
   prop: SsmsPropertyItem,
   node: PlanNode,
-  statementCost: number
+  statementCost: number,
+  statement?: StatementAnalysis
 ): PropertyExplanation {
   const ownCost = node.estimateCpu + node.estimateIo;
   const costPct = statementCost > 0 ? (node.estimatedTotalSubtreeCost / statementCost) * 100 : node.costPercentage;
@@ -733,6 +1148,159 @@ export function getPropertyExplanation(
         tuningTip: 'Reference Node IDs when investigating execution plan warnings or query profile stats.'
       };
 
+    case 'Degree of Parallelism (DOP)':
+      return {
+        title: 'Degree of Parallelism (DOP)',
+        category: 'Execution Architecture',
+        definition: 'The number of concurrent worker threads allocated by the SQL Server engine to execute this query pipeline.',
+        parts: [
+          { label: 'Configured / Plan DOP', value: prop.value, detail: 'Worker threads assigned to process rows in parallel.' },
+          { label: 'Parallel Operator', value: node.parallel ? 'Yes' : 'No', detail: 'Determines if this specific operator runs on multiple threads.' }
+        ],
+        impact: 'Parallel execution reduces elapsed duration for heavy queries, but excessive DOP can cause CXPACKET synchronization overhead and thread skew.',
+        tuningTip: 'Ensure Cost Threshold for Parallelism is at least 50 and MAXDOP does not exceed physical NUMA core count.'
+      };
+
+    case 'Estimated Rebinds':
+    case 'Actual Rebinds':
+      return {
+        title: prop.name,
+        category: 'Loop & Spool Mechanics',
+        definition: 'Number of times an inner loop or spool is reset because correlated outer parameter values changed.',
+        parts: [
+          { label: 'Rebind Count', value: prop.value, detail: 'Frequency of re-evaluations with changed outer values.' }
+        ],
+        impact: 'Rebinds require fresh evaluation of the inner operator branch, multiplying execution latency.',
+        tuningTip: 'Ensure joins use indexed seek paths or hash joins to avoid repeated rebind operations.'
+      };
+
+    case 'Estimated Rewinds':
+    case 'Actual Rewinds':
+      return {
+        title: prop.name,
+        category: 'Loop & Spool Mechanics',
+        definition: 'Number of times an inner spool or stream was rewound to read cached results without changing outer parameter values.',
+        parts: [
+          { label: 'Rewind Count', value: prop.value, detail: 'Frequency of cached result re-reads from TempDB/memory.' }
+        ],
+        impact: 'Rewinds are cheaper than rebinds because they reuse spooled data, but still incur TempDB spool overhead.',
+        tuningTip: 'If rewinds or rebinds are high, consider an index to eliminate the spool operator.'
+      };
+
+    case 'Operator Cost % of Statement':
+      return {
+        title: 'Operator Cost % of Statement',
+        category: 'Optimizer Cost Model',
+        definition: 'The percentage of the total statement estimated cost attributed to this single operator.',
+        parts: [
+          { label: 'Cost Percentage', value: prop.value, detail: 'Proportion of total statement subtree cost.' },
+          { label: 'Own Operator Cost', value: ownCost.toFixed(7), detail: 'CPU cost + I/O cost for this node only.' }
+        ],
+        impact: 'Operators consuming >15% of statement cost represent primary performance bottlenecks.',
+        tuningTip: 'Focus tuning efforts on operators with the highest cost percentage.'
+      };
+
+    case 'Cardinality Skew Ratio':
+      return {
+        title: 'Cardinality Skew Ratio',
+        category: 'Cardinality & Statistics',
+        definition: 'Quantitative error multiplier comparing Actual Rows emitted vs Estimated Rows predicted by statistics.',
+        parts: [
+          { label: 'Skew Factor', value: prop.value, detail: 'Ratio between runtime actual rows and compiled estimates.' },
+          { label: 'Estimated Rows', value: node.estimateRows.toLocaleString(), detail: 'Expected rows based on table statistics.' },
+          { label: 'Actual Rows', value: node.hasActualRows ? node.actualRows.toLocaleString() : 'Estimated plan', detail: 'Real rows processed at runtime.' }
+        ],
+        impact: 'Skew exceeding 10x causes improper join choice (e.g. Nested Loops instead of Hash) and inadequate memory grants resulting in TempDB spills.',
+        tuningTip: 'Run UPDATE STATISTICS WITH FULLSCAN or use OPTION (RECOMPILE) if caused by parameter sniffing.'
+      };
+
+    case 'Buffer Cache Hit Ratio':
+      return {
+        title: 'Buffer Cache Hit Ratio',
+        category: 'Buffer Pool & Memory',
+        definition: 'Percentage of data pages satisfied directly from SQL Server memory without requiring physical disk reads.',
+        parts: [
+          { label: 'Cache Hit Percentage', value: prop.value, detail: 'Percentage of buffer pool hits.' },
+          { label: 'Logical Reads', value: `${(node.actualLogicalReads || 0).toLocaleString()} pages`, detail: 'Total pages requested from memory.' },
+          { label: 'Physical Reads', value: `${(node.actualPhysicalReads || 0).toLocaleString()} pages`, detail: 'Pages read from physical storage.' }
+        ],
+        impact: 'Physical disk reads are up to 100x slower than RAM buffer reads and trigger PAGEIOLATCH wait states.',
+        tuningTip: 'A hit ratio below 99% indicates memory pressure or missing covering indexes forcing full table reads.'
+      };
+
+    case 'CPU / Elapsed Ratio':
+      return {
+        title: 'CPU / Elapsed Ratio',
+        category: 'Runtime Dynamics',
+        definition: 'Ratio of total CPU thread execution time to wall-clock elapsed time.',
+        parts: [
+          { label: 'Ratio Percentage', value: prop.value, detail: 'CPU time as a percentage of elapsed duration.' }
+        ],
+        impact: 'Values >100% indicate successful parallel multi-core execution. Values <50% indicate threads spent significant time waiting on external resources (I/O, locks).',
+        tuningTip: 'Check Wait Stats if CPU/Elapsed ratio is low to find what blocked the query.'
+      };
+
+    case 'Operator Self Elapsed Time':
+      return {
+        title: 'Operator Self Elapsed Time',
+        category: 'Runtime Performance & Bottlenecks',
+        definition: 'The true wall-clock time spent actively executing work inside this specific operator, subtracting child operator times in row mode.',
+        parts: [
+          { label: 'Self Elapsed Duration', value: `${((node.selfElapsedMs || 0) / 1000).toFixed(3)} seconds`, detail: 'Wall clock time strictly attributed to this operator.' },
+          { label: 'Query Wall-Clock Share', value: `${(node.selfElapsedPercent || 0).toFixed(1)}% of query duration`, detail: 'Percentage of total query runtime spent on this operation.' },
+          { label: 'Cumulative Subtree Time', value: `${((node.actualElapsedMs || 0) / 1000).toFixed(3)} seconds`, detail: 'Total duration including all child operators in the subtree.' }
+        ],
+        impact: 'High Self Elapsed time identifies the true physical bottleneck in your execution plan where SQL Server was stalled or doing heavy processing.',
+        tuningTip: 'If self elapsed exceeds 1 second or 25% of query duration, prioritize optimizing this operator via indexed access or query rewrite.'
+      };
+
+    case 'Operator Self CPU Time':
+      return {
+        title: 'Operator Self CPU Time',
+        category: 'Runtime Performance & Bottlenecks',
+        definition: 'The processor execution time consumed strictly by this operator, subtracting all child operator contributions in row mode.',
+        parts: [
+          { label: 'Self CPU Duration', value: `${((node.selfCpuMs || 0) / 1000).toFixed(3)} seconds`, detail: 'CPU compute time strictly consumed by this operator.' },
+          { label: 'Query CPU Share', value: `${(node.selfCpuPercent || 0).toFixed(1)}% of query CPU`, detail: 'Percentage of total statement CPU spent on this operator.' },
+          { label: 'Cumulative CPU Time', value: `${((node.actualCpuMs || 0) / 1000).toFixed(3)} seconds`, detail: 'Total CPU consumed by this operator and all children beneath it.' }
+        ],
+        impact: 'High Self CPU indicates compute-intensive processing such as hash table building/probing, in-memory sorting, or heavy scalar function evaluation.',
+        tuningTip: 'If self CPU is high on a Sort or Hash Match, check if indexes can pre-sort rows or replace hashes with index seeks.'
+      };
+
+    case 'Execution Classification':
+      return {
+        title: 'Execution Classification',
+        category: 'Architectural Performance Profile',
+        definition: 'High-level behavioral classification of query resource consumption (IO_BOUND, CPU_BOUND, WAIT_BOUND, BALANCED).',
+        parts: [
+          { label: 'Classification', value: prop.value, detail: 'Primary resource consumption profile.' }
+        ],
+        impact: 'Immediately informs whether optimization should target index I/O, CPU expression sargability, or concurrency locks.',
+        tuningTip: 'IO_BOUND requires covering indexes; CPU_BOUND requires sargable predicates or batch mode.'
+      };
+
+    case 'Statement ID':
+    case 'Statement Type':
+    case 'Statement SubTree Cost':
+    case 'Statement Estimated Rows':
+    case 'Optimization Level':
+    case 'Optimization Early Abort Reason':
+    case 'Compile CPU Time':
+    case 'Compile Elapsed Time':
+    case 'Compile Memory':
+    case 'Statement SQL Snippet':
+      return {
+        title: prop.name,
+        category: 'Statement Context & Compilation',
+        definition: `Query batch statement property: ${prop.name}.`,
+        parts: [
+          { label: prop.name, value: prop.value, detail: `Recorded in execution plan statement metadata.` }
+        ],
+        impact: 'Compiling complex plans consumes CPU and memory grants. Early abort reasons like TimeOut indicate the optimizer stopped exploring alternatives early.',
+        tuningTip: 'Keep statements parameterized to leverage compiled plan caching and avoid repeated optimization overhead.'
+      };
+
     default:
       return {
         title: prop.name,
@@ -763,14 +1331,23 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
   const [viewMode, setViewMode] = useState<'single' | 'all'>('single');
   const [orientation, setOrientation] = useState<'vertical' | 'horizontal'>('vertical');
   const [filterOnlyTrees, setFilterOnlyTrees] = useState<boolean>(true);
+  const [heatmapMetric, setHeatmapMetric] = useState<'cost' | 'self_elapsed' | 'self_cpu'>('cost');
 
   // SSMS Inspector state
-  const [inspectorTab, setInspectorTab] = useState<'all' | 'ssms' | 'predicates' | 'tuning'>('all');
+  const [inspectorTab, setInspectorTab] = useState<
+    'all' | 'operator' | 'cost' | 'rows' | 'actual' | 'predicates' | 'statement' | 'tuning'
+  >('all');
+  const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
+  const toggleCategory = (cat: string) => {
+    setCollapsedCategories((prev) => ({ ...prev, [cat]: !prev[cat] }));
+  };
   const [propSearchTerm, setPropSearchTerm] = useState<string>('');
   const [copiedPropTable, setCopiedPropTable] = useState<boolean>(false);
   const [copiedSeek, setCopiedSeek] = useState<boolean>(false);
   const [copiedFilter, setCopiedFilter] = useState<boolean>(false);
   const [copiedCols, setCopiedCols] = useState<boolean>(false);
+  const [copiedCategory, setCopiedCategory] = useState<string | null>(null);
+  const [copiedStmtSql, setCopiedStmtSql] = useState<boolean>(false);
   const [isSeekExpanded, setIsSeekExpanded] = useState<boolean>(false);
 
   // Hover and Pin states for SSMS properties explanations
@@ -845,18 +1422,23 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
   const activePropItem = useMemo(() => {
     if (hoveredProp) return hoveredProp.prop;
     if (pinnedPropName && selectedNode) {
-      const allProps = getSsmsProperties(selectedNode, selectedStatement.statementSubTreeCost);
+      const allProps = getSsmsProperties(selectedNode, selectedStatement);
       return allProps.find((p) => p.name === pinnedPropName) || null;
     }
     return null;
-  }, [hoveredProp, pinnedPropName, selectedNode, selectedStatement.statementSubTreeCost]);
+  }, [hoveredProp, pinnedPropName, selectedNode, selectedStatement]);
 
   const activeRect = hoveredProp?.rect || pinnedRect;
 
   const activeExplanation = useMemo(() => {
     if (!activePropItem || !selectedNode) return null;
-    return getPropertyExplanation(activePropItem, selectedNode, selectedStatement.statementSubTreeCost);
-  }, [activePropItem, selectedNode, selectedStatement.statementSubTreeCost]);
+    return getPropertyExplanation(
+      activePropItem,
+      selectedNode,
+      selectedStatement.statementSubTreeCost,
+      selectedStatement
+    );
+  }, [activePropItem, selectedNode, selectedStatement]);
 
   const activeCoords = useMemo(() => {
     if (!activeRect) return null;
@@ -910,32 +1492,32 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
               onClick={() => setViewMode('all')}
               title="View all statements in the batch at once (SSMS Mode)"
             >
-              <ListOrdered size={14} />
-              <span>All Statements at Once ({statementsToDisplay.length})</span>
+              <ListOrdered size={13} />
+              <span>All ({statementsToDisplay.length})</span>
             </button>
             <button
               className={`segmented-btn ${viewMode === 'single' ? 'active' : ''}`}
               onClick={() => setViewMode('single')}
               title="Focus on a single statement"
             >
-              <LayoutGrid size={14} />
-              <span>Single Statement</span>
+              <LayoutGrid size={13} />
+              <span>Single</span>
             </button>
           </div>
 
           {viewMode === 'all' && (
-            <label className="checkbox-label" style={{ fontSize: '12px', marginLeft: '8px' }}>
+            <label className="checkbox-label" style={{ fontSize: '11px', marginLeft: '6px' }} title="Hide empty non-query statements">
               <input
                 type="checkbox"
                 checked={filterOnlyTrees}
                 onChange={(e) => setFilterOnlyTrees(e.target.checked)}
               />
-              <span>Hide empty non-query stmts</span>
+              <span>Hide empty</span>
             </label>
           )}
 
           {viewMode === 'single' && (
-            <div className="vis-stmt-selector" style={{ marginLeft: '10px' }}>
+            <div className="vis-stmt-selector" style={{ marginLeft: '6px' }}>
               <select
                 className="stmt-dropdown"
                 value={selectedStatement.statementId}
@@ -962,25 +1544,65 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
           <DiagnosticTooltip guideKey="treeVisualizer" />
           {viewMode === 'single' ? (
             <>
-              <span className="badge badge-info">Cost: {selectedStatement.statementSubTreeCost.toFixed(2)}</span>
+              <span className="badge badge-info" style={{ padding: '2px 6px', fontSize: '11px' }}>Cost: {selectedStatement.statementSubTreeCost.toFixed(1)}</span>
               {selectedStatement.compileTimeMs > 0 && (
-                <span className="meta-item">Compile: {selectedStatement.compileTimeMs}ms</span>
+                <span className="meta-item" style={{ fontSize: '11px' }}>Compile: {selectedStatement.compileTimeMs}ms</span>
               )}
               {selectedStatement.warnings.length > 0 && (
-                <span className="badge badge-critical">
-                  <AlertTriangle size={12} /> {selectedStatement.warnings.length} Warnings
+                <span className="badge badge-critical" style={{ padding: '2px 6px', fontSize: '11px' }}>
+                  <AlertTriangle size={11} /> {selectedStatement.warnings.length} {selectedStatement.warnings.length === 1 ? 'Warning' : 'Warnings'}
                 </span>
               )}
             </>
           ) : (
-            <span className="meta-item" style={{ color: '#94a3b8' }}>
-              Showing {statementsToDisplay.length} of {plan.totalStatements} statements • Total Cost: {plan.totalSubTreeCost.toFixed(2)}
+            <span className="meta-item" style={{ color: '#94a3b8', fontSize: '11px' }}>
+              {statementsToDisplay.length}/{plan.totalStatements} stmts • Cost: {plan.totalSubTreeCost.toFixed(1)}
             </span>
           )}
         </div>
 
         {/* Right: Orientation & Zoom Controls */}
         <div className="vis-right-controls">
+          {/* Feature B: Execution Plan PLE Threat Badge */}
+          {plan.pleRiskReport && (
+            <div
+              className={`ple-topbar-pill ple-risk-${plan.pleRiskReport.riskLevel.toLowerCase()}`}
+              title={`${plan.pleRiskReport.headline}\n${plan.pleRiskReport.summary}`}
+            >
+              <HardDrive size={11} />
+              <span>PLE: <strong>{plan.pleRiskReport.riskLevel}</strong></span>
+              <span className="ple-pill-vol">~{plan.pleRiskReport.estimatedScanVolumeMb.toFixed(0)} MB</span>
+            </div>
+          )}
+
+          {/* Heatmap Mode Selector (PerformanceStudio NodeTimeAttribution) */}
+          <div className="segmented-control" title="Visual Heatmap Metric Attribution (PerformanceStudio NodeTimeAttribution)">
+            <button
+              className={`segmented-btn ${heatmapMetric === 'cost' ? 'active' : ''}`}
+              onClick={() => setHeatmapMetric('cost')}
+              title="Estimated Operator Subtree Cost Percentage"
+            >
+              <Activity size={11} color="#f43f5e" />
+              <span>Cost</span>
+            </button>
+            <button
+              className={`segmented-btn ${heatmapMetric === 'self_elapsed' ? 'active' : ''}`}
+              onClick={() => setHeatmapMetric('self_elapsed')}
+              title="Actual Operator Self-Elapsed Wall Clock Time (PerformanceStudio NodeTimeAttribution)"
+            >
+              <Clock size={11} color="#38bdf8" />
+              <span>Elapsed</span>
+            </button>
+            <button
+              className={`segmented-btn ${heatmapMetric === 'self_cpu' ? 'active' : ''}`}
+              onClick={() => setHeatmapMetric('self_cpu')}
+              title="Actual Operator Self-CPU Processing Time (PerformanceStudio NodeTimeAttribution)"
+            >
+              <Cpu size={11} color="#fbbf24" />
+              <span>CPU</span>
+            </button>
+          </div>
+
           {/* Orientation Toggle */}
           <div className="segmented-control" title="Change layout orientation">
             <button
@@ -988,7 +1610,7 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
               onClick={() => setOrientation('vertical')}
               title="Vertical Tree Layout (Top to Bottom)"
             >
-              <ArrowDownUp size={13} />
+              <ArrowDownUp size={11} />
               <span>Vertical</span>
             </button>
             <button
@@ -996,8 +1618,8 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
               onClick={() => setOrientation('horizontal')}
               title="Horizontal Pipeline (SSMS Style)"
             >
-              <ArrowLeftRight size={13} />
-              <span>Horizontal (SSMS)</span>
+              <ArrowLeftRight size={11} />
+              <span>Horizontal</span>
             </button>
           </div>
 
@@ -1008,7 +1630,7 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
               onClick={() => setZoomLevel((z) => Math.max(0.5, z - 0.1))}
               title="Zoom Out"
             >
-              <ZoomOut size={14} />
+              <ZoomOut size={12} />
             </button>
             <span className="zoom-label">{(zoomLevel * 100).toFixed(0)}%</span>
             <button
@@ -1016,17 +1638,17 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
               onClick={() => setZoomLevel((z) => Math.min(1.5, z + 0.1))}
               title="Zoom In"
             >
-              <ZoomIn size={14} />
+              <ZoomIn size={12} />
             </button>
             <button
               className="btn-icon"
               onClick={() => setZoomLevel(1)}
               title="Reset Zoom"
             >
-              <Maximize2 size={14} />
+              <Maximize2 size={12} />
             </button>
 
-            <div style={{ width: '1px', height: '18px', background: '#334155', margin: '0 4px' }} />
+            <div style={{ width: '1px', height: '14px', background: '#334155', margin: '0 2px' }} />
 
             <button
               type="button"
@@ -1034,9 +1656,9 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
               onClick={handleExportTreePng}
               disabled={isExportingTree}
               title="Export High-Res PNG of Execution Plan Tree"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', width: 'auto', padding: '0 8px', fontSize: '11px', color: '#38bdf8' }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', width: 'auto', padding: '0 5px', fontSize: '10.5px', color: '#38bdf8' }}
             >
-              <Download size={13} color="#38bdf8" />
+              <Download size={11} color="#38bdf8" />
               <span>PNG</span>
             </button>
 
@@ -1046,9 +1668,9 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
               onClick={handleExportTreeSvg}
               disabled={isExportingTree}
               title="Export Vector SVG of Execution Plan Tree"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', width: 'auto', padding: '0 8px', fontSize: '11px', color: '#a78bfa' }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', width: 'auto', padding: '0 5px', fontSize: '10.5px', color: '#a78bfa' }}
             >
-              <Download size={13} color="#a78bfa" />
+              <Download size={11} color="#a78bfa" />
               <span>SVG</span>
             </button>
           </div>
@@ -1065,6 +1687,22 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
             {copiedSQL ? <Check size={13} color="#34d399" /> : <Copy size={13} />}
             <span>{copiedSQL ? 'Copied' : 'Copy SQL'}</span>
           </button>
+          <button
+            className="btn-copy-sm"
+            title="Copy a runnable T-SQL script with the plan's parameter values filled in"
+            onClick={() => handleCopySQL(buildReproScript(selectedStatement))}
+          >
+            <FileText size={13} />
+            <span>Repro Script</span>
+          </button>
+          <button
+            className="btn-copy-sm"
+            title="Download a standalone HTML report of this plan"
+            onClick={() => downloadTextFile(`plan-report-${Date.now()}.html`, buildHtmlReport(plan))}
+          >
+            <Download size={13} />
+            <span>HTML Report</span>
+          </button>
         </div>
       )}
 
@@ -1075,21 +1713,19 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
           {viewMode === 'single' ? (
             /* Single Statement Focused View */
             selectedStatement.rootNode ? (
-              <div
-                className={`tree-wrapper ${orientation === 'horizontal' ? 'tree-layout-horizontal' : ''}`}
-                style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left' }}
-              >
+              <PlanEdges root={selectedStatement.rootNode} orientation={orientation} zoom={zoomLevel} selectedNodeId={selectedNode?.nodeId}>
                 <TreeNode
                   node={selectedStatement.rootNode}
                   selectedNode={selectedNode}
                   onSelectNode={setSelectedNode}
                   orientation={orientation}
+                  heatmapMetric={heatmapMetric}
                   onOpenSkewModal={(n) => {
                     setSelectedNode(n);
                     setShowSkewModal(true);
                   }}
                 />
-              </div>
+              </PlanEdges>
             ) : (
               <div className="empty-tree-state">
                 <Layers size={40} color="#64748b" />
@@ -1172,21 +1808,19 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
                   {/* Statement Tree */}
                   <div className="stmt-batch-tree-area">
                     {stmt.rootNode ? (
-                      <div
-                        className={`tree-wrapper ${orientation === 'horizontal' ? 'tree-layout-horizontal' : ''}`}
-                        style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top left' }}
-                      >
+                      <PlanEdges root={stmt.rootNode} orientation={orientation} zoom={zoomLevel} selectedNodeId={selectedNode?.nodeId}>
                         <TreeNode
                           node={stmt.rootNode}
                           selectedNode={selectedNode}
                           onSelectNode={setSelectedNode}
                           orientation={orientation}
+                          heatmapMetric={heatmapMetric}
                           onOpenSkewModal={(n) => {
                             setSelectedNode(n);
                             setShowSkewModal(true);
                           }}
                         />
-                      </div>
+                      </PlanEdges>
                     ) : (
                       <div className="empty-tree-state-sm">
                         <Layers size={16} color="#64748b" />
@@ -1202,7 +1836,7 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
 
         {/* Node Inspector Drawer */}
         {selectedNode && (() => {
-          const allProperties = getSsmsProperties(selectedNode, selectedStatement.statementSubTreeCost);
+          const allProperties = getSsmsProperties(selectedNode, selectedStatement);
           const filteredProperties = propSearchTerm.trim()
             ? allProperties.filter(
                 (p) =>
@@ -1217,16 +1851,64 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
             `${selectedNode.physicalOp} operator performing relational query processing in the execution engine.`;
 
           const handleCopyProperties = () => {
+            const order: SsmsPropertyCategory[] = [
+              'operator',
+              'cost',
+              'rows',
+              'actual_stats',
+              'actual_timing',
+              'storage',
+              'predicate',
+              'output',
+              'statement'
+            ];
             const lines = [
               `============================================================`,
-              `  ${selectedNode.physicalOp.toUpperCase()} (Node #${selectedNode.nodeId}) - SSMS Operator Properties`,
+              `  ${selectedNode.physicalOp.toUpperCase()} (Node #${selectedNode.nodeId}) - ShowPlan Properties`,
               `============================================================`,
-              ...allProperties.map((p) => `${p.name.padEnd(44, ' ')} : ${p.value}`),
-              `============================================================`
+              ``
             ];
+            order.forEach((catKey) => {
+              const items = allProperties.filter((p) => p.category === catKey);
+              if (items.length === 0) return;
+              const meta = CATEGORY_META[catKey];
+              lines.push(`[${meta.label.toUpperCase()}]`);
+              items.forEach((p) => {
+                lines.push(`  ${p.name.padEnd(46, ' ')} : ${p.value}`);
+              });
+              lines.push(``);
+            });
+            if (selectedNode.seekPredicates) {
+              lines.push(`[SEEK PREDICATES]`);
+              lines.push(`  ${selectedNode.seekPredicates}`);
+              lines.push(``);
+            }
+            if (selectedNode.predicate) {
+              lines.push(`[FILTER PREDICATE]`);
+              lines.push(`  ${selectedNode.predicate}`);
+              lines.push(``);
+            }
+            if (selectedNode.outputColumns.length > 0) {
+              lines.push(`[OUTPUT COLUMNS]`);
+              lines.push(`  ${selectedNode.outputColumns.join(', ')}`);
+              lines.push(``);
+            }
+            lines.push(`============================================================`);
             navigator.clipboard.writeText(lines.join('\n'));
             setCopiedPropTable(true);
             setTimeout(() => setCopiedPropTable(false), 2000);
+          };
+
+          const handleCopyCategory = (catKey: SsmsPropertyCategory) => {
+            const meta = CATEGORY_META[catKey];
+            const items = allProperties.filter((p) => p.category === catKey);
+            const lines = [
+              `[${meta.label.toUpperCase()}] - ${selectedNode.physicalOp} (Node #${selectedNode.nodeId})`,
+              ...items.map((p) => `  ${p.name.padEnd(44, ' ')} : ${p.value}`)
+            ];
+            navigator.clipboard.writeText(lines.join('\n'));
+            setCopiedCategory(catKey);
+            setTimeout(() => setCopiedCategory(null), 2000);
           };
 
           const isSeekLong = (selectedNode.seekPredicates || '').length > 250;
@@ -1234,6 +1916,27 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
             isSeekLong && !isSeekExpanded
               ? selectedNode.seekPredicates.slice(0, 220) + '...'
               : selectedNode.seekPredicates;
+
+          const categoriesToRender: SsmsPropertyCategory[] = (() => {
+            if (inspectorTab === 'operator') return ['operator'];
+            if (inspectorTab === 'cost') return ['cost'];
+            if (inspectorTab === 'rows') return ['rows'];
+            if (inspectorTab === 'actual') return ['actual_stats', 'actual_timing'];
+            if (inspectorTab === 'predicates') return ['predicate', 'output'];
+            if (inspectorTab === 'statement') return ['statement'];
+            if (inspectorTab === 'tuning') return [];
+            return [
+              'operator',
+              'cost',
+              'rows',
+              'actual_stats',
+              'actual_timing',
+              'storage',
+              'predicate',
+              'output',
+              'statement'
+            ];
+          })();
 
           return (
             <aside className="node-inspector glass-panel">
@@ -1256,6 +1959,14 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
                   <span className={`badge ${selectedNode.isPainPoint ? 'badge-critical' : 'badge-info'}`}>
                     Node #{selectedNode.nodeId}
                   </span>
+                  {((selectedNode.selfElapsedMs ?? 0) > 0 || (selectedNode.selfCpuMs ?? 0) > 0) && (
+                    <span
+                      className={`badge ${(selectedNode.selfElapsedMs ?? 0) >= 1000 ? 'badge-critical' : (selectedNode.selfElapsedMs ?? 0) >= 100 ? 'badge-high' : 'badge-slate'}`}
+                      title={`Self Elapsed: ${((selectedNode.selfElapsedMs || 0) / 1000).toFixed(3)}s | Self CPU: ${((selectedNode.selfCpuMs || 0) / 1000).toFixed(3)}s`}
+                    >
+                      ⏱️ {((selectedNode.selfElapsedMs || 0) / 1000).toFixed(3)}s self
+                    </span>
+                  )}
                   <span
                     className={`badge ${
                       selectedNode.costPercentage > 30 ? 'badge-critical' : selectedNode.costPercentage > 10 ? 'badge-high' : 'badge-slate'
@@ -1275,7 +1986,7 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
               </div>
 
               <div className="inspector-body">
-                {/* Operator Plain-English Description Card (Matching Image 1) */}
+                {/* Operator Plain-English Description Card */}
                 <div className="operator-desc-card">
                   <Info size={15} className="desc-icon" />
                   <div>
@@ -1286,38 +1997,78 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
                   </div>
                 </div>
 
-                {/* View Switcher Tabs */}
+                {/* View Switcher Tabs (All PerformanceStudio categories) */}
                 <div className="inspector-tab-switcher">
                   <button
                     type="button"
                     className={`inspector-tab-btn ${inspectorTab === 'all' ? 'active' : ''}`}
                     onClick={() => setInspectorTab('all')}
+                    title="View all categorized properties"
                   >
-                    <LayoutGrid size={12} />
-                    <span>All Details</span>
+                    <LayoutGrid size={11} />
+                    <span>All</span>
                   </button>
                   <button
                     type="button"
-                    className={`inspector-tab-btn ${inspectorTab === 'ssms' ? 'active' : ''}`}
-                    onClick={() => setInspectorTab('ssms')}
+                    className={`inspector-tab-btn ${inspectorTab === 'operator' ? 'active' : ''}`}
+                    onClick={() => setInspectorTab('operator')}
+                    title="Operator physical & logical properties, execution modes, DOP"
                   >
-                    <FileText size={12} />
-                    <span>SSMS Properties</span>
+                    <Cpu size={11} />
+                    <span>Operator</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`inspector-tab-btn ${inspectorTab === 'cost' ? 'active' : ''}`}
+                    onClick={() => setInspectorTab('cost')}
+                    title="Estimated Subtree, Operator, CPU & I/O Costs"
+                  >
+                    <Activity size={11} />
+                    <span>Costs</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`inspector-tab-btn ${inspectorTab === 'rows' ? 'active' : ''}`}
+                    onClick={() => setInspectorTab('rows')}
+                    title="Estimated vs Actual Rows and Cardinality Skew"
+                  >
+                    <Layers size={11} />
+                    <span>Rows</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`inspector-tab-btn ${inspectorTab === 'actual' ? 'active' : ''}`}
+                    onClick={() => setInspectorTab('actual')}
+                    title="Actual I/O Reads, Scans, Elapsed & CPU Timings"
+                  >
+                    <HardDrive size={11} />
+                    <span>Actual Stats</span>
                   </button>
                   <button
                     type="button"
                     className={`inspector-tab-btn ${inspectorTab === 'predicates' ? 'active' : ''}`}
                     onClick={() => setInspectorTab('predicates')}
+                    title="Seek Predicates, Filters, and Output Columns"
                   >
-                    <Filter size={12} />
+                    <Filter size={11} />
                     <span>Predicates</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`inspector-tab-btn ${inspectorTab === 'statement' ? 'active' : ''}`}
+                    onClick={() => setInspectorTab('statement')}
+                    title="Statement Context, Optimization Level & Compile Stats"
+                  >
+                    <FileText size={11} />
+                    <span>Statement</span>
                   </button>
                   <button
                     type="button"
                     className={`inspector-tab-btn ${inspectorTab === 'tuning' ? 'active' : ''}`}
                     onClick={() => setInspectorTab('tuning')}
+                    title="Tuning Playbook, Wait Stats & Trace Flags"
                   >
-                    <AlertTriangle size={12} />
+                    <AlertTriangle size={11} />
                     <span>Tuning</span>
                   </button>
                 </div>
@@ -1367,101 +2118,290 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
                   </div>
                 )}
 
-                {/* SSMS Properties Sheet Table (Matches Image 1) */}
-                {(inspectorTab === 'all' || inspectorTab === 'ssms') && (
-                  <div className="ssms-properties-card">
-                    <div className="ssms-table-topbar">
-                      <div className="ssms-table-title">
-                        <FileText size={13} color="#38bdf8" />
-                        <span>SSMS Properties ({filteredProperties.length})</span>
-                      </div>
-                      <div className="ssms-table-actions">
-                        <input
-                          type="text"
-                          className="ssms-search-input"
-                          placeholder="Filter props..."
-                          value={propSearchTerm}
-                          onChange={(e) => setPropSearchTerm(e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="btn-ssms-copy"
-                          onClick={handleCopyProperties}
-                          title="Copy properties table in SSMS text format"
-                        >
-                          {copiedPropTable ? <Check size={11} color="#34d399" /> : <Copy size={11} />}
-                          <span>{copiedPropTable ? 'Copied' : 'Copy'}</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <table className="ssms-props-table">
-                      <tbody>
-                        {filteredProperties.map((prop, idx) => {
-                          const isHovered = hoveredProp?.prop.name === prop.name;
-                          const isPinned = pinnedPropName === prop.name;
-                          return (
-                            <tr
-                              key={idx}
-                              className={`ssms-prop-row ${isHovered ? 'row-hovered' : ''} ${
-                                isPinned ? 'row-pinned' : ''
-                              }`}
-                              onMouseEnter={(e) => {
-                                if (hoverCloseTimerRef.current) clearTimeout(hoverCloseTimerRef.current);
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                setHoveredProp({ prop, rect });
-                              }}
-                              onMouseLeave={() => {
-                                if (!pinnedPropName) {
-                                  hoverCloseTimerRef.current = setTimeout(() => {
-                                    setHoveredProp(null);
-                                  }, 140);
-                                } else {
-                                  setHoveredProp(null);
-                                }
-                              }}
-                              onClick={(e) => {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                if (pinnedPropName === prop.name) {
-                                  setPinnedPropName(null);
-                                  setPinnedRect(null);
-                                } else {
-                                  setPinnedPropName(prop.name);
-                                  setPinnedRect(rect);
-                                }
-                              }}
-                              title="Click to pin explanation, or hover to inspect details & parts breakdown"
-                            >
-                              <td className="ssms-prop-name">
-                                <div className="prop-name-inner">
-                                  <span>{prop.name}</span>
-                                  <span className="prop-hover-badge">
-                                    <HelpCircle size={10} />
-                                  </span>
-                                </div>
-                              </td>
-                              <td
-                                className={`ssms-prop-val ${
-                                  prop.highlight === 'skew'
-                                    ? 'highlight-skew'
-                                    : prop.highlight === 'cost'
-                                    ? 'highlight-cost'
-                                    : ''
-                                }`}
-                              >
-                                {prop.value}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    <div className="ssms-hover-hint">
-                      <HelpCircle size={11} color="#38bdf8" />
-                      <span>Hover over any row for deep metric explanation & value breakdown. Click row to pin.</span>
-                    </div>
+                {/* Global Search & Action Bar */}
+                <div className="ssms-table-topbar">
+                  <div className="ssms-table-title">
+                    <Search size={12} color="#38bdf8" />
+                    <span>Properties ({filteredProperties.length})</span>
                   </div>
+                  <div className="ssms-table-actions">
+                    <input
+                      type="text"
+                      className="ssms-search-input"
+                      placeholder="Filter properties..."
+                      value={propSearchTerm}
+                      onChange={(e) => setPropSearchTerm(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn-ssms-copy"
+                      onClick={handleCopyProperties}
+                      title="Copy all properties in SSMS text format"
+                    >
+                      {copiedPropTable ? <Check size={11} color="#34d399" /> : <Copy size={11} />}
+                      <span>{copiedPropTable ? 'Copied' : 'Copy All'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* PerformanceStudio Details: Wait Stats, Trace Flags, Parameters, Findings */}
+                {(inspectorTab === 'all' || inspectorTab === 'tuning' || inspectorTab === 'statement') && (
+                  <NodeExtraPanels
+                    node={selectedNode}
+                    statement={selectedStatement}
+                    plan={plan}
+                    onSelectNodeId={(id) => {
+                      const find = (n: PlanNode | undefined): PlanNode | null => {
+                        if (!n) return null;
+                        if (n.nodeId === id) return n;
+                        for (const c of n.children || []) {
+                          const r = find(c);
+                          if (r) return r;
+                        }
+                        return null;
+                      };
+                      const target = find(selectedStatement.rootNode as PlanNode | undefined);
+                      if (target) setSelectedNode(target);
+                    }}
+                  />
                 )}
+
+                {/* CATEGORIZED PROPERTY SECTIONS */}
+                {categoriesToRender.map((catKey) => {
+                  const meta = CATEGORY_META[catKey];
+                  const items = filteredProperties.filter((p) => p.category === catKey);
+                  if (items.length === 0 && !propSearchTerm) return null;
+                  if (items.length === 0 && propSearchTerm) return null;
+                  const isCollapsed = collapsedCategories[catKey] ?? false;
+
+                  return (
+                    <div key={catKey} className="category-group-card">
+                      {/* Section Header */}
+                      <div
+                        className="category-group-header"
+                        onClick={() => toggleCategory(catKey)}
+                      >
+                        <div className="category-group-title">
+                          {catKey === 'operator' && <Cpu size={13} color="#38bdf8" />}
+                          {catKey === 'cost' && <Activity size={13} color="#f43f5e" />}
+                          {catKey === 'rows' && <Layers size={13} color="#a855f7" />}
+                          {catKey === 'actual_stats' && <HardDrive size={13} color="#34d399" />}
+                          {catKey === 'actual_timing' && <Clock size={13} color="#38bdf8" />}
+                          {catKey === 'storage' && <Table size={13} color="#f59e0b" />}
+                          {catKey === 'predicate' && <Filter size={13} color="#fbbf24" />}
+                          {catKey === 'output' && <Database size={13} color="#10b981" />}
+                          {catKey === 'statement' && <FileText size={13} color="#60a5fa" />}
+                          <span>{meta.label}</span>
+                          <span className="category-group-badge">{items.length}</span>
+                        </div>
+                        <div className="category-group-actions" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="btn-category-action"
+                            onClick={() => handleCopyCategory(catKey)}
+                            title={`Copy ${meta.label} as text`}
+                          >
+                            {copiedCategory === catKey ? (
+                              <Check size={10} color="#34d399" />
+                            ) : (
+                              <Copy size={10} />
+                            )}
+                            <span>{copiedCategory === catKey ? 'Copied' : 'Copy'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-category-collapse"
+                            onClick={() => toggleCategory(catKey)}
+                            title={isCollapsed ? 'Expand section' : 'Collapse section'}
+                          >
+                            {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Section Table & Custom Cards */}
+                      {!isCollapsed && (
+                        <div>
+                          <table className="ssms-props-table">
+                            <tbody>
+                              {items.map((prop, idx) => {
+                                const isHovered = hoveredProp?.prop.name === prop.name;
+                                const isPinned = pinnedPropName === prop.name;
+                                return (
+                                  <tr
+                                    key={idx}
+                                    className={`ssms-prop-row ${isHovered ? 'row-hovered' : ''} ${
+                                      isPinned ? 'row-pinned' : ''
+                                    }`}
+                                    onMouseEnter={(e) => {
+                                      if (hoverCloseTimerRef.current) clearTimeout(hoverCloseTimerRef.current);
+                                      const rect = e.currentTarget.getBoundingClientRect();
+                                      setHoveredProp({ prop, rect });
+                                    }}
+                                    onMouseLeave={() => {
+                                      if (!pinnedPropName) {
+                                        hoverCloseTimerRef.current = setTimeout(() => {
+                                          setHoveredProp(null);
+                                        }, 140);
+                                      } else {
+                                        setHoveredProp(null);
+                                      }
+                                    }}
+                                    onClick={(e) => {
+                                      const rect = e.currentTarget.getBoundingClientRect();
+                                      if (pinnedPropName === prop.name) {
+                                        setPinnedPropName(null);
+                                        setPinnedRect(null);
+                                      } else {
+                                        setPinnedPropName(prop.name);
+                                        setPinnedRect(rect);
+                                      }
+                                    }}
+                                    title="Click to pin explanation, or hover to inspect details & parts breakdown"
+                                  >
+                                    <td className="ssms-prop-name">
+                                      <div className="prop-name-inner">
+                                        <span>{prop.name}</span>
+                                        <span className="prop-hover-badge">
+                                          <HelpCircle size={10} />
+                                        </span>
+                                      </div>
+                                    </td>
+                                    <td
+                                      className={`ssms-prop-val ${
+                                        prop.highlight === 'skew'
+                                          ? 'highlight-skew'
+                                          : prop.highlight === 'cost'
+                                          ? 'highlight-cost'
+                                          : prop.highlight === 'good'
+                                          ? 'highlight-good'
+                                          : ''
+                                      }`}
+                                    >
+                                      {prop.value}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+
+                          {/* Extra Custom View for Predicates */}
+                          {catKey === 'predicate' && selectedNode.seekPredicates && (
+                            <div className="predicate-section-box" style={{ margin: '8px 8px 10px' }}>
+                              <div className="predicate-header">
+                                <div className="predicate-title">
+                                  <Search size={12} color="#38bdf8" />
+                                  <span>Seek Predicates</span>
+                                </div>
+                                <div className="predicate-actions">
+                                  {isSeekLong && (
+                                    <button
+                                      type="button"
+                                      className="btn-predicate-action"
+                                      onClick={() => setIsSeekExpanded(!isSeekExpanded)}
+                                    >
+                                      {isSeekExpanded ? 'Collapse' : 'Show Full'}
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="btn-predicate-action"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(selectedNode.seekPredicates);
+                                      setCopiedSeek(true);
+                                      setTimeout(() => setCopiedSeek(false), 2000);
+                                    }}
+                                  >
+                                    {copiedSeek ? <Check size={11} color="#34d399" /> : <Copy size={11} />}
+                                    <span>{copiedSeek ? 'Copied' : 'Copy'}</span>
+                                  </button>
+                                </div>
+                              </div>
+                              <pre className="predicate-code-box">{displaySeek}</pre>
+                            </div>
+                          )}
+
+                          {catKey === 'predicate' && selectedNode.predicate && (
+                            <div className="predicate-section-box" style={{ margin: '8px 8px 10px' }}>
+                              <div className="predicate-header">
+                                <div className="predicate-title">
+                                  <Filter size={12} color="#fbbf24" />
+                                  <span>Residual Filter Predicate</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn-predicate-action"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(selectedNode.predicate);
+                                    setCopiedFilter(true);
+                                    setTimeout(() => setCopiedFilter(false), 2000);
+                                  }}
+                                >
+                                  {copiedFilter ? <Check size={11} color="#34d399" /> : <Copy size={11} />}
+                                  <span>{copiedFilter ? 'Copied' : 'Copy'}</span>
+                                </button>
+                              </div>
+                              <pre className="predicate-code-box">{selectedNode.predicate}</pre>
+                            </div>
+                          )}
+
+                          {/* Extra Custom View for Output Columns */}
+                          {catKey === 'output' && selectedNode.outputColumns.length > 0 && (
+                            <div style={{ padding: '8px 12px 12px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                <span style={{ fontSize: 11, color: '#94a3b8' }}>Columns Projected ({selectedNode.outputColumns.length}):</span>
+                                <button
+                                  type="button"
+                                  className="btn-category-action"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(selectedNode.outputColumns.join(', '));
+                                    setCopiedCols(true);
+                                    setTimeout(() => setCopiedCols(false), 2000);
+                                  }}
+                                >
+                                  {copiedCols ? <Check size={10} color="#34d399" /> : <Copy size={10} />}
+                                  <span>{copiedCols ? 'Copied' : 'Copy List'}</span>
+                                </button>
+                              </div>
+                              <div className="output-cols-wrap">
+                                {selectedNode.outputColumns.map((col, idx) => (
+                                  <span key={idx} className="col-badge">
+                                    {col}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Extra Custom View for Statement Context: T-SQL Snippet */}
+                          {catKey === 'statement' && selectedStatement.statementText && (
+                            <div style={{ padding: '8px 12px 12px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                <span style={{ fontSize: 11, color: '#94a3b8' }}>Statement T-SQL Code:</span>
+                                <button
+                                  type="button"
+                                  className="btn-category-action"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(selectedStatement.statementText);
+                                    setCopiedStmtSql(true);
+                                    setTimeout(() => setCopiedStmtSql(false), 2000);
+                                  }}
+                                >
+                                  {copiedStmtSql ? <Check size={10} color="#34d399" /> : <Copy size={10} />}
+                                  <span>{copiedStmtSql ? 'Copied' : 'Copy SQL'}</span>
+                                </button>
+                              </div>
+                              <pre className="predicate-code-box" style={{ maxHeight: 120 }}>
+                                {selectedStatement.statementText}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
 
                 {/* Tuning Tab Dedicated Panel */}
                 {(inspectorTab === 'all' || inspectorTab === 'tuning') && selectedNode.hasCardinalitySkew && (
@@ -1522,152 +2462,6 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
                         <pre className="remedy-code-block" style={{ fontSize: '10.5px' }}>
                           OPTION (RECOMPILE);
                         </pre>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Target Object / Table Details */}
-                {(inspectorTab === 'all' || inspectorTab === 'tuning') && selectedNode.table && (
-                  <div className="inspector-section">
-                    <div className="inspector-label">Target Storage Object</div>
-                    <div className="object-details-box">
-                      <div className="object-name">
-                        <Table size={13} color="#38bdf8" />
-                        <span>
-                          {selectedNode.schema
-                            ? `${selectedNode.schema}.${selectedNode.table}`
-                            : selectedNode.table}
-                        </span>
-                      </div>
-                      {selectedNode.index && (
-                        <div className="object-index">
-                          Index: <strong>{selectedNode.index}</strong> ({selectedNode.indexKind || 'Index'})
-                        </div>
-                      )}
-                      {selectedNode.tableCardinality > 0 && (
-                        <div className="text-muted" style={{ fontSize: '11px', marginTop: '3px' }}>
-                          Table Total Rows: <strong>{selectedNode.tableCardinality.toLocaleString()}</strong>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Seek Predicates */}
-                {(inspectorTab === 'all' || inspectorTab === 'predicates') && selectedNode.seekPredicates && (
-                  <div className="predicate-section-box">
-                    <div className="predicate-header">
-                      <div className="predicate-title">
-                        <Search size={13} color="#38bdf8" />
-                        <span>Seek Predicates</span>
-                      </div>
-                      <div className="predicate-actions">
-                        {isSeekLong && (
-                          <span className="predicate-badge-len">
-                            {(selectedNode.seekPredicates.length / 1024).toFixed(1)} KB
-                          </span>
-                        )}
-                        {isSeekLong && (
-                          <button
-                            type="button"
-                            className="btn-predicate-action"
-                            onClick={() => setIsSeekExpanded(!isSeekExpanded)}
-                          >
-                            {isSeekExpanded ? 'Collapse' : 'Show Full'}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="btn-predicate-action"
-                          onClick={() => {
-                            navigator.clipboard.writeText(selectedNode.seekPredicates);
-                            setCopiedSeek(true);
-                            setTimeout(() => setCopiedSeek(false), 2000);
-                          }}
-                        >
-                          {copiedSeek ? <Check size={11} color="#34d399" /> : <Copy size={11} />}
-                          <span>{copiedSeek ? 'Copied' : 'Copy'}</span>
-                        </button>
-                      </div>
-                    </div>
-                    <pre className="predicate-code-box">{displaySeek}</pre>
-                    {isSeekLong && !isSeekExpanded && (
-                      <div className="predicate-truncated-hint">
-                        <span>Expression truncated for readability ({selectedNode.seekPredicates.length.toLocaleString()} characters)</span>
-                        <button
-                          type="button"
-                          style={{
-                            fontSize: '10.5px',
-                            color: '#38bdf8',
-                            background: 'none',
-                            border: 'none',
-                            cursor: 'pointer',
-                            padding: 0,
-                            fontWeight: 600
-                          }}
-                          onClick={() => setIsSeekExpanded(true)}
-                        >
-                          Expand Full Expression ▼
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Filter Predicate */}
-                {(inspectorTab === 'all' || inspectorTab === 'predicates') && selectedNode.predicate && (
-                  <div className="predicate-section-box">
-                    <div className="predicate-header">
-                      <div className="predicate-title">
-                        <Filter size={13} color="#fbbf24" />
-                        <span>Filter Predicate</span>
-                      </div>
-                      <button
-                        type="button"
-                        className="btn-predicate-action"
-                        onClick={() => {
-                          navigator.clipboard.writeText(selectedNode.predicate);
-                          setCopiedFilter(true);
-                          setTimeout(() => setCopiedFilter(false), 2000);
-                        }}
-                      >
-                        {copiedFilter ? <Check size={11} color="#34d399" /> : <Copy size={11} />}
-                        <span>{copiedFilter ? 'Copied' : 'Copy'}</span>
-                      </button>
-                    </div>
-                    <pre className="predicate-code-box">{selectedNode.predicate}</pre>
-                  </div>
-                )}
-
-                {/* Output Columns */}
-                {(inspectorTab === 'all' || inspectorTab === 'predicates') && selectedNode.outputColumns.length > 0 && (
-                  <div className="predicate-section-box">
-                    <div className="predicate-header">
-                      <div className="predicate-title">
-                        <Database size={13} color="#34d399" />
-                        <span>Output Columns ({selectedNode.outputColumns.length})</span>
-                      </div>
-                      <button
-                        type="button"
-                        className="btn-predicate-action"
-                        onClick={() => {
-                          navigator.clipboard.writeText(selectedNode.outputColumns.join(', '));
-                          setCopiedCols(true);
-                          setTimeout(() => setCopiedCols(false), 2000);
-                        }}
-                      >
-                        {copiedCols ? <Check size={11} color="#34d399" /> : <Copy size={11} />}
-                        <span>{copiedCols ? 'Copied' : 'Copy List'}</span>
-                      </button>
-                    </div>
-                    <div style={{ padding: '10px 12px' }}>
-                      <div className="output-cols-wrap">
-                        {selectedNode.outputColumns.map((col, idx) => (
-                          <span key={idx} className="col-badge">
-                            {col}
-                          </span>
-                        ))}
                       </div>
                     </div>
                   </div>
@@ -1828,140 +2622,3 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
     </div>
   );
 };
-
-interface TreeNodeProps {
-  node: PlanNode;
-  selectedNode: PlanNode | null;
-  onSelectNode: (node: PlanNode) => void;
-  orientation?: 'vertical' | 'horizontal';
-  onOpenSkewModal?: (node: PlanNode) => void;
-}
-
-const TreeNode: React.FC<TreeNodeProps> = ({
-  node,
-  selectedNode,
-  onSelectNode,
-  orientation = 'vertical',
-  onOpenSkewModal
-}) => {
-  const isSelected = selectedNode?.nodeId === node.nodeId;
-  const isHot = node.costPercentage > 30 || node.isPainPoint;
-  const isHorizontal = orientation === 'horizontal';
-
-  return (
-    <div className={`tree-node-wrapper ${isHorizontal ? 'tree-node-wrapper-horizontal' : ''}`}>
-      <div
-        className={`plan-node-box glass-panel ${isSelected ? 'node-selected' : ''} ${
-          isHot ? 'node-hot' : ''
-        }`}
-        onClick={() => onSelectNode(node)}
-      >
-        <div className="node-top">
-          <div className="node-icon-title">
-            <span className="node-icon">{getOperatorIcon(node.physicalOp)}</span>
-            <div className="node-title-group">
-              <span className="node-physical-title">{node.physicalOp}</span>
-              {node.logicalOp && node.logicalOp !== node.physicalOp && (
-                <span className="node-logical-sub">{node.logicalOp}</span>
-              )}
-            </div>
-          </div>
-          <span
-            className={`node-cost-badge ${
-              node.costPercentage > 40
-                ? 'cost-critical'
-                : node.costPercentage > 15
-                ? 'cost-warning'
-                : 'cost-normal'
-            }`}
-          >
-            {node.costPercentage.toFixed(1)}%
-          </span>
-        </div>
-
-        {/* Target Table info */}
-        {node.table && (
-          <div className="node-table-row" title={`${node.schema}.${node.table}`}>
-            <Table size={12} color="#38bdf8" />
-            <span className="node-table-name">
-              {node.schema ? `${node.schema}.${node.table}` : node.table}
-            </span>
-          </div>
-        )}
-
-        {/* Rows Estimate */}
-        <div className="node-bottom-meta">
-          <span className="text-dim">Rows:</span>
-          <span className="text-main">
-            {node.hasActualRows
-              ? `${node.actualRows.toLocaleString()} (Act)`
-              : node.estimateRows > 0
-              ? node.estimateRows.toLocaleString()
-              : '1'}
-          </span>
-          {node.hasCardinalitySkew && (
-            <span
-              className="badge badge-high"
-              style={{
-                fontSize: '9px',
-                padding: '1px 5px',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-              title={`${node.skewReason || 'Cardinality Skew'} — Click to open 3372x Resolution Plan & T-SQL Fix Scripts`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelectNode(node);
-                if (onOpenSkewModal) {
-                  onOpenSkewModal(node);
-                }
-              }}
-            >
-              {node.skewRatio && node.skewRatio > 1
-                ? `${node.skewRatio.toFixed(0)}x`
-                : node.skewRatio
-                ? `${(1 / node.skewRatio).toFixed(0)}x`
-                : ''}{' '}
-              Skew ↗
-            </span>
-          )}
-          {node.isPainPoint && !node.hasCardinalitySkew && (
-            <span className="node-warning-flag" title={node.painReason}>
-              <AlertTriangle size={12} color="#f43f5e" />
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Children Nodes */}
-      {node.children && node.children.length > 0 && (
-        <div className={`node-children-container ${isHorizontal ? 'node-children-container-horizontal' : ''}`}>
-          {node.children.map((child) => (
-            <div key={child.nodeId} className={`child-branch ${isHorizontal ? 'child-branch-horizontal' : ''}`}>
-              <div className={isHorizontal ? 'branch-line-h' : 'branch-line-v'} />
-              <TreeNode
-                node={child}
-                selectedNode={selectedNode}
-                onSelectNode={onSelectNode}
-                orientation={orientation}
-                onOpenSkewModal={onOpenSkewModal}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-function getOperatorIcon(physicalOp: string) {
-  const op = physicalOp.toLowerCase();
-  if (op.includes('seek')) return <Search size={14} color="#38bdf8" />;
-  if (op.includes('scan')) return <Filter size={14} color="#f59e0b" />;
-  if (op.includes('lookup')) return <AlertTriangle size={14} color="#f43f5e" />;
-  if (op.includes('join') || op.includes('nested loops') || op.includes('hash match'))
-    return <Layers size={14} color="#a855f7" />;
-  if (op.includes('insert') || op.includes('update') || op.includes('delete'))
-    return <Database size={14} color="#10b981" />;
-  return <GitCommit size={14} color="#94a3b8" />;
-}

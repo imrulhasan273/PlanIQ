@@ -54,21 +54,45 @@ type ActiveSession struct {
 
 // QueryStoreEntry represents a top-resource query harvested from sys.query_store_runtime_stats
 type QueryStoreEntry struct {
-	QueryID            int64   `json:"queryId"`
-	PlanID             int64   `json:"planId"`
-	QueryText          string  `json:"queryText"`
-	ExecutionCount     int64   `json:"executionCount"`
-	TotalCPUMs         float64 `json:"totalCpuMs"`
-	AvgCPUMs           float64 `json:"avgCpuMs"`
-	TotalDurationMs    float64 `json:"totalDurationMs"`
-	AvgDurationMs      float64 `json:"avgDurationMs"`
-	TotalLogicalReads  int64   `json:"totalLogicalReads"`
-	AvgLogicalReads    float64 `json:"avgLogicalReads"`
-	TotalPhysicalReads int64   `json:"totalPhysicalReads"`
-	AvgPhysicalReads   float64 `json:"avgPhysicalReads"`
-	TotalSpillsMB      float64 `json:"totalSpillsMb"`
-	LastExecutionTime  string  `json:"lastExecutionTime"`
-	PlanXML            string  `json:"planXml,omitempty"`
+	QueryID            int64              `json:"queryId"`
+	PlanID             int64              `json:"planId"`
+	QueryHash          string             `json:"queryHash,omitempty"`
+	PlanHash           string             `json:"planHash,omitempty"`
+	ModuleName         string             `json:"moduleName,omitempty"`
+	QueryText          string             `json:"queryText"`
+	ExecutionCount     int64              `json:"executionCount"`
+	TotalCPUMs         float64            `json:"totalCpuMs"`
+	AvgCPUMs           float64            `json:"avgCpuMs"`
+	TotalDurationMs    float64            `json:"totalDurationMs"`
+	AvgDurationMs      float64            `json:"avgDurationMs"`
+	TotalLogicalReads  int64              `json:"totalLogicalReads"`
+	AvgLogicalReads    float64            `json:"avgLogicalReads"`
+	TotalPhysicalReads int64              `json:"totalPhysicalReads"`
+	AvgPhysicalReads   float64            `json:"avgPhysicalReads"`
+	TotalWrites        int64              `json:"totalWrites,omitempty"`
+	AvgWrites          float64            `json:"avgWrites,omitempty"`
+	TotalMemoryMB      float64            `json:"totalMemoryMb,omitempty"`
+	AvgMemoryMB        float64            `json:"avgMemoryMb,omitempty"`
+	TotalSpillsMB      float64            `json:"totalSpillsMb"`
+	LastExecutionTime  string             `json:"lastExecutionTime"`
+	ExecutionType      string             `json:"executionType,omitempty"`
+	WaitProfile        map[string]float64 `json:"waitProfile,omitempty"`
+	PlanXML            string             `json:"planXml,omitempty"`
+}
+
+// QueryStoreDiagnostic captures the result of probing what data is available for the Query Store view
+type QueryStoreDiagnostic struct {
+	CurrentDB          string `json:"currentDb"`
+	IsQueryStoreOn     bool   `json:"isQueryStoreOn"`
+	QSDesiredState     string `json:"qsDesiredState"`
+	QSActualState      string `json:"qsActualState"`
+	QSRuntimeStatsRows int64  `json:"qsRuntimeStatsRows"`  // total rows in query_store_runtime_stats
+	QSWindowRows       int64  `json:"qsWindowRows"`         // rows in selected time window
+	DMVPlanCacheRows   int64  `json:"dmvPlanCacheRows"`     // rows in dm_exec_query_stats
+	DMVWindowRows      int64  `json:"dmvWindowRows"`        // rows with last_execution_time filter
+	QSError            string `json:"qsError,omitempty"`
+	DMVError           string `json:"dmvError,omitempty"`
+	SQLServerVersion   string `json:"sqlServerVersion"`
 }
 
 // LiveDeadlockReport represents a deadlock event pulled from the system_health XEL ring buffer
@@ -210,6 +234,17 @@ type WaitTimeHistoryPoint struct {
 	AnomalyReason  string  `json:"anomalyReason,omitempty"`
 }
 
+// SevenDaySyncResult represents the outcome of harvesting 7 days of telemetry into local SQLite
+type SevenDaySyncResult struct {
+	ServerName      string `json:"serverName"`
+	DatabaseName    string `json:"databaseName"`
+	IsQueryStoreOn  bool   `json:"isQueryStoreOn"`
+	IntervalsSynced int    `json:"intervalsSynced"`
+	DeadlocksSynced int    `json:"deadlocksSynced"`
+	Message         string `json:"message"`
+	SyncedAt        string `json:"syncedAt"`
+}
+
 // BufferPoolConsumer represents tables and indexes caching data pages in SQL Server RAM (sys.dm_os_buffer_descriptors)
 type BufferPoolConsumer struct {
 	DatabaseName       string  `json:"databaseName"`
@@ -334,4 +369,86 @@ type DPAPerspectiveItem struct {
 	Writes       int64   `json:"writes"`
 	Percentage   float64 `json:"percentage"`
 }
+
+// PLEReport provides complete server and per-NUMA Page Life Expectancy diagnostics
+type PLEReport struct {
+	OverallPLE                 float64               `json:"overallPle"`                 // Total instance PLE in seconds
+	TargetPLE                  float64               `json:"targetPle"`                  // Calculated baseline: (RAM_GB / 4) * 300
+	TotalMemoryGB              float64               `json:"totalMemoryGb"`              // Total Server RAM in GB
+	Status                     string                `json:"status"`                     // "HEALTHY", "WARNING", "CRITICAL"
+	Summary                    string                `json:"summary"`
+	IsNUMA                     bool                  `json:"isNuma"`
+	NodeCount                  int                   `json:"nodeCount"`
+	NUMANodes                  []NUMAPLENode         `json:"numaNodes"`                  // Per-NUMA node PLE
+	CulpritQueries             []PLECulpritQuery     `json:"culpritQueries"`             // Top queries flushing buffer pool
+	LastEvaluatedAt            string                `json:"lastEvaluatedAt"`
+	// Deep Memory Pressure & Burn Rate Insights
+	LazyWritesPerSec           float64               `json:"lazyWritesPerSec"`           // Lazy writer flush rate (>20 = memory starvation)
+	FreeListStallsPerSec       float64               `json:"freeListStallsPerSec"`       // Worker threads halted waiting for free page
+	PageReadsPerSec            float64               `json:"pageReadsPerSec"`            // Cold page reads from disk
+	PageWritesPerSec           float64               `json:"pageWritesPerSec"`           // Dirty page writes to disk
+	PageReadsMBPerSec          float64               `json:"pageReadsMbPerSec"`          // Cold I/O read throughput
+	BufferCacheHitRatio        float64               `json:"bufferCacheHitRatio"`        // BCHR % (debunked against PLE)
+	PLEBurnRateSecondsPerMin   float64               `json:"pleBurnRateSecondsPerMin"`   // Rate of fall (seconds lost per minute)
+	PLEBurnVerdict             string                `json:"pleBurnVerdict"`             // e.g. "Rapid Drain (-180s/min)"
+	MaxServerMemoryMB          float64               `json:"maxServerMemoryMb"`          // sp_configure max server memory
+	TargetServerMemoryMB       float64               `json:"targetServerMemoryMb"`       // Committed target memory
+	TotalServerMemoryMB        float64               `json:"totalServerMemoryMb"`        // Current SQL Server memory usage
+	MemoryGrantsPendingCount   int                   `json:"memoryGrantsPendingCount"`   // Queries waiting on RESOURCE_SEMAPHORE
+	TableEvictionImpacts       []TableEvictionImpact `json:"tableEvictionImpacts"`       // Tables forced out of RAM
+	DoctorInsights             []PLEDoctorInsight    `json:"doctorInsights"`             // Automated AI prescriptions & T-SQL fixes
+}
+
+// TableEvictionImpact tracks which resident tables/indexes are being displaced from the buffer pool
+type TableEvictionImpact struct {
+	TableName          string  `json:"tableName"`
+	SchemaName         string  `json:"schemaName"`
+	DatabaseName       string  `json:"databaseName"`
+	IndexName          string  `json:"indexName"`
+	CurrentCachedMB    float64 `json:"currentCachedMb"`
+	BufferPoolPercent  float64 `json:"bufferPoolPercent"`
+	EvictionRisk       string  `json:"evictionRisk"`       // "CRITICAL", "HIGH", "MODERATE"
+	PushedOutByQuery   string  `json:"pushedOutByQuery"`   // Culprit query pushing out this table
+	EstimatedEvictedMB float64 `json:"estimatedEvictedMb"` // Estimated megabytes displaced
+	DisplacementReason string  `json:"displacementReason"`
+}
+
+// PLEDoctorInsight provides automated root cause diagnosis, prescriptions, and ready-to-execute T-SQL
+type PLEDoctorInsight struct {
+	Category         string `json:"category"`         // "Max Server Memory", "Missing Index", "Memory Workspace Steal", "LPIM / OS Paging"
+	Severity         string `json:"severity"`         // "CRITICAL", "WARNING", "HEALTHY"
+	Title            string `json:"title"`
+	Diagnosis        string `json:"diagnosis"`
+	ActionableRemedy string `json:"actionableRemedy"`
+	SuggestedTSQL    string `json:"suggestedTsql"`    // Executable T-SQL snippet
+}
+
+// NUMAPLENode represents Page Life Expectancy and memory pressure for a single NUMA node
+type NUMAPLENode struct {
+	NodeID            int     `json:"nodeId"`
+	NodeName          string  `json:"nodeName"`
+	PLESeconds        float64 `json:"pleSeconds"`
+	TargetPLE         float64 `json:"targetPle"`
+	Status            string  `json:"status"` // "HEALTHY", "DEGRADED", "CRITICAL"
+	ForeignPageRatio  float64 `json:"foreignPageRatio"`
+	MemoryAllocatedMB float64 `json:"memoryAllocatedMb"`
+}
+
+// PLECulpritQuery represents a query causing severe physical disk reads and buffer pool churn
+type PLECulpritQuery struct {
+	QueryID              int64   `json:"queryId"`
+	PlanID               int64   `json:"planId"`
+	QueryHash            string  `json:"queryHash"`
+	QueryText            string  `json:"queryText"`
+	ExecutionCount       int64   `json:"executionCount"`
+	AvgPhysicalReadsMB   float64 `json:"avgPhysicalReadsMb"`
+	TotalPhysicalReadsMB float64 `json:"totalPhysicalReadsMb"`
+	AvgLogicalReadsMB    float64 `json:"avgLogicalReadsMb"`
+	AvgDurationMS        float64 `json:"avgDurationMs"`
+	AvgCPUMS             float64 `json:"avgCpuMs"`
+	ImpactSeverity       string  `json:"impactSeverity"` // "HIGH", "CRITICAL"
+	BufferPoolFlushRisk  string  `json:"bufferPoolFlushRisk"`
+	LastExecutionTime    string  `json:"lastExecutionTime"`
+}
+
 
