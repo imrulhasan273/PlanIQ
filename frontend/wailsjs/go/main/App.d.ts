@@ -16,6 +16,8 @@ export function DisconnectLiveDB():Promise<void>;
 
 export function GetAIAdvice(arg1:advisor.AIRequest):Promise<advisor.AIResponse>;
 
+export function GetActiveEngine():Promise<string>;
+
 export function GetAppTheme():Promise<string>;
 
 export function GetCurrentWindowsUser():Promise<main.WindowsUserInfo>;
@@ -74,9 +76,13 @@ export function OpenFileAndParse():Promise<sqlplan.PlanAnalysis>;
 
 export function OpenFilePicker():Promise<main.SelectedPlanFile>;
 
+export function OpenFilePickerForEngine(arg1:string):Promise<main.SelectedPlanFile>;
+
 export function ParsePlan(arg1:string,arg2:string):Promise<sqlplan.PlanAnalysis>;
 
 export function SaveDBConnection(arg1:configdb.DBConnectionProfile):Promise<configdb.DBConnectionProfile>;
+
+export function SetActiveEngine(arg1:string):Promise<void>;
 
 export function SetAppTheme(arg1:string):Promise<void>;
 

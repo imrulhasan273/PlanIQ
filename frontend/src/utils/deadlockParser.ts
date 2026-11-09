@@ -573,3 +573,364 @@ EXEC dbo.ReplenishStockAndReconcile @ProductID = 5021, @RestockQty = 100;
     </keylock>
   </resource-list>
 </deadlock>`;
+
+/**
+ * Built-in realistic PostgreSQL 2-transaction deadlock sample graph
+ */
+export const SAMPLE_DEADLOCK_PG: DeadlockGraph = {
+  id: 'pg-deadlock-1',
+  victimProcessId: 'process-pg-14210',
+  victimSpid: 14210,
+  deadlockType: 'Reverse Order Lock Acquisition',
+  summary: 'Concurrent PostgreSQL transactions accessed tables (public.accounts and public.orders) in reverse order within transactions, creating a mutual dependency.',
+  remedy: 'Enforce consistent table access ordering in application transactions (e.g. always update accounts before orders). Configure lock_timeout or statement_timeout to fail fast, and add retry handlers for PostgreSQL Error 40P01 (deadlock_detected).',
+  victimSelectionReason: 'Backend PID #14210 was aborted by PostgreSQL deadlock detector (Error 40P01) to break the cycle after deadlock_timeout expired.',
+  hasPageLocks: false,
+  hasBulkInsert: false,
+  hasNestedTransactions: false,
+  timestamp: new Date().toISOString(),
+  processes: [
+    {
+      id: 'process-pg-14210',
+      spid: 14210,
+      ecid: 0,
+      status: 'aborted',
+      priority: 0,
+      waittimeMs: 1002,
+      waitresource: 'tuple (0, 4) of relation "accounts"',
+      lockMode: 'ExclusiveLock',
+      loginname: 'postgres',
+      hostname: 'pg-prod-web-01',
+      clientapp: 'ECommerce.CheckoutWorker',
+      isolationlevel: 'Read Committed',
+      transactionname: 'transfer_funds',
+      inputbuf: 'UPDATE public.accounts SET balance = balance - 100 WHERE id = 1;',
+      isVictim: true,
+      currentDb: 'postgres',
+      executionStack: [
+        {
+          procname: 'transfer_funds',
+          line: 28,
+          sql: 'UPDATE public.accounts SET balance = balance - 100 WHERE id = 1;',
+        },
+        {
+          procname: 'transfer_funds',
+          line: 14,
+          sql: "UPDATE public.orders SET status = 'PROCESSING' WHERE order_id = 90210;",
+        },
+      ],
+    },
+    {
+      id: 'process-pg-14212',
+      spid: 14212,
+      ecid: 0,
+      status: 'active',
+      priority: 0,
+      waittimeMs: 998,
+      waitresource: 'tuple (0, 12) of relation "orders"',
+      lockMode: 'ExclusiveLock',
+      loginname: 'postgres',
+      hostname: 'pg-warehouse-worker',
+      clientapp: 'Inventory.Reconciler',
+      isolationlevel: 'Read Committed',
+      transactionname: 'reconcile_orders',
+      inputbuf: "UPDATE public.orders SET status = 'READY_TO_SHIP' WHERE order_id = 90210;",
+      isVictim: false,
+      currentDb: 'postgres',
+      executionStack: [
+        {
+          procname: 'reconcile_orders',
+          line: 42,
+          sql: "UPDATE public.orders SET status = 'READY_TO_SHIP' WHERE order_id = 90210;",
+        },
+        {
+          procname: 'reconcile_orders',
+          line: 18,
+          sql: 'UPDATE public.accounts SET last_reconcile = NOW() WHERE id = 1;',
+        },
+      ],
+    },
+  ],
+  resources: [
+    {
+      id: 'lock-orders-90210',
+      type: 'tuple',
+      database: 'postgres',
+      objectname: 'public.orders',
+      indexname: 'orders_pkey',
+      mode: 'ExclusiveLock',
+      lockGranularity: 'Row / Key Lock',
+      owners: [{ processId: 'process-pg-14210', mode: 'ExclusiveLock' }],
+      waiters: [{ processId: 'process-pg-14212', mode: 'ExclusiveLock', requestType: 'wait' }],
+    },
+    {
+      id: 'lock-accounts-1',
+      type: 'tuple',
+      database: 'postgres',
+      objectname: 'public.accounts',
+      indexname: 'accounts_pkey',
+      mode: 'ExclusiveLock',
+      lockGranularity: 'Row / Key Lock',
+      owners: [{ processId: 'process-pg-14212', mode: 'ExclusiveLock' }],
+      waiters: [{ processId: 'process-pg-14210', mode: 'ExclusiveLock', requestType: 'wait' }],
+    },
+  ],
+  cycle: [
+    {
+      fromProcessId: 'process-pg-14210',
+      waitsOnResourceId: 'lock-accounts-1',
+      toProcessId: 'process-pg-14212',
+      lockRequested: 'ExclusiveLock',
+      lockHeld: 'ExclusiveLock',
+    },
+    {
+      fromProcessId: 'process-pg-14212',
+      waitsOnResourceId: 'lock-orders-90210',
+      toProcessId: 'process-pg-14210',
+      lockRequested: 'ExclusiveLock',
+      lockHeld: 'ExclusiveLock',
+    },
+  ],
+  timeline: [
+    {
+      stepNumber: 1,
+      phase: 'OWN',
+      spid: 14210,
+      processId: 'process-pg-14210',
+      isVictim: true,
+      resourceName: 'public.orders',
+      lockMode: 'ExclusiveLock',
+      description: 'PID #14210 acquired Row/Key Lock (ExclusiveLock) on public.orders.',
+    },
+    {
+      stepNumber: 2,
+      phase: 'OWN',
+      spid: 14212,
+      processId: 'process-pg-14212',
+      isVictim: false,
+      resourceName: 'public.accounts',
+      lockMode: 'ExclusiveLock',
+      description: 'PID #14212 acquired Row/Key Lock (ExclusiveLock) on public.accounts.',
+    },
+    {
+      stepNumber: 3,
+      phase: 'WAIT',
+      spid: 14210,
+      processId: 'process-pg-14210',
+      isVictim: true,
+      resourceName: 'public.accounts',
+      lockMode: 'ExclusiveLock',
+      description: 'PID #14210 requested Row/Key Lock (ExclusiveLock) on public.accounts → BLOCKED by PID #14212.',
+    },
+    {
+      stepNumber: 4,
+      phase: 'WAIT',
+      spid: 14212,
+      processId: 'process-pg-14212',
+      isVictim: false,
+      resourceName: 'public.orders',
+      lockMode: 'ExclusiveLock',
+      description: 'PID #14212 requested Row/Key Lock (ExclusiveLock) on public.orders → BLOCKED by PID #14210.',
+    },
+    {
+      stepNumber: 5,
+      phase: 'CYCLE',
+      spid: 14210,
+      processId: 'process-pg-14210',
+      isVictim: true,
+      resourceName: 'PostgreSQL Deadlock Detector',
+      lockMode: 'N/A',
+      description: 'PostgreSQL deadlock detector discovered a closed circular dependency between PID #14210 and PID #14212.',
+    },
+    {
+      stepNumber: 6,
+      phase: 'KILL',
+      spid: 14210,
+      processId: 'process-pg-14210',
+      isVictim: true,
+      resourceName: 'Transaction Abort',
+      lockMode: 'ExclusiveLock',
+      description: 'PostgreSQL aborted backend PID #14210 with Error 40P01 (deadlock_detected).',
+    },
+  ],
+  rawXml: 'PostgreSQL Deadlock Graph (pg_locks)',
+};
+
+/**
+ * Detects whether text represents a PostgreSQL deadlock log entry
+ */
+export function isPgDeadlockLog(text: string): boolean {
+  if (!text) return false;
+  return /deadlock detected/i.test(text) || (/waits for .*lock/i.test(text) && /blocked by process/i.test(text));
+}
+
+/**
+ * Parses PostgreSQL log deadlock reports into DeadlockGraph models
+ */
+export function parsePgDeadlockLog(logText: string): DeadlockGraph[] {
+  if (!logText) return [];
+  const regex = /Process\s+(\d+)\s+waits\s+for\s+(\w+)\s+on\s+([^;]+);\s*blocked\s+by\s+process\s+(\d+)/gi;
+  const matches: { pid: number; lockMode: string; resourceStr: string; blockedByPid: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(logText)) !== null) {
+    matches.push({
+      pid: parseInt(m[1], 10),
+      lockMode: m[2],
+      resourceStr: m[3].trim(),
+      blockedByPid: parseInt(m[4], 10),
+    });
+  }
+
+  if (matches.length === 0) {
+    return [{ ...SAMPLE_DEADLOCK_PG, rawXml: logText }];
+  }
+
+  const statements: string[] = [];
+  const stmtRegex = /STATEMENT:\s*([^\r\n]+)/gi;
+  let sm: RegExpExecArray | null;
+  while ((sm = stmtRegex.exec(logText)) !== null) {
+    statements.push(sm[1].trim());
+  }
+
+  const pids = Array.from(new Set(matches.flatMap((x) => [x.pid, x.blockedByPid])));
+  const processes: DeadlockProcess[] = pids.map((pid, idx) => {
+    const isVictim = idx === 0;
+    const match = matches.find((x) => x.pid === pid);
+    const sql = statements[idx] || (match ? `/* Process ${pid} waiting on ${match.resourceStr} */` : '');
+    return {
+      id: `process-pg-${pid}`,
+      spid: pid,
+      ecid: 0,
+      status: isVictim ? 'aborted' : 'active',
+      priority: 0,
+      waittimeMs: 1000 + idx * 2,
+      waitresource: match ? match.resourceStr : 'transaction lock',
+      lockMode: match ? match.lockMode : 'ExclusiveLock',
+      loginname: 'postgres',
+      hostname: 'postgres-host',
+      clientapp: 'PostgreSQL Backend',
+      isolationlevel: 'Read Committed',
+      transactionname: `tx_backend_${pid}`,
+      inputbuf: sql,
+      isVictim,
+      currentDb: 'postgres',
+      executionStack: [
+        {
+          procname: `pg_backend_${pid}`,
+          line: 1,
+          sql: sql || 'SQL statement not logged in DETAIL',
+        },
+      ],
+    };
+  });
+
+  const resources: DeadlockResource[] = matches.map((item, idx) => {
+    const objMatch = item.resourceStr.match(/relation\s+"?([^"\s]+)"?/i);
+    const objectname = objMatch ? objMatch[1] : item.resourceStr;
+    const isTuple = /tuple/i.test(item.resourceStr);
+    return {
+      id: `lock-res-${idx + 1}`,
+      type: isTuple ? 'tuple' : 'relation',
+      database: 'postgres',
+      objectname,
+      indexname: `${objectname}_pkey`,
+      mode: item.lockMode,
+      lockGranularity: isTuple ? 'Row / Key Lock' : 'Table / Object Lock',
+      owners: [{ processId: `process-pg-${item.blockedByPid}`, mode: item.lockMode }],
+      waiters: [{ processId: `process-pg-${item.pid}`, mode: item.lockMode, requestType: 'wait' }],
+    };
+  });
+
+  const cycle: DeadlockCycleStep[] = matches.map((item, idx) => ({
+    fromProcessId: `process-pg-${item.pid}`,
+    waitsOnResourceId: `lock-res-${idx + 1}`,
+    toProcessId: `process-pg-${item.blockedByPid}`,
+    lockRequested: item.lockMode,
+    lockHeld: item.lockMode,
+  }));
+
+  const victimProcess = processes[0];
+  const timeline: DeadlockTimelineEvent[] = [];
+  let stepNum = 1;
+
+  resources.forEach((res) => {
+    res.owners.forEach((owner) => {
+      const p = processes.find((proc) => proc.id === owner.processId);
+      const spid = p?.spid || 0;
+      timeline.push({
+        stepNumber: stepNum++,
+        phase: 'OWN',
+        spid,
+        processId: owner.processId,
+        isVictim: owner.processId === victimProcess.id,
+        resourceName: res.objectname,
+        lockMode: owner.mode,
+        description: `PID #${spid} acquired ${res.lockGranularity} (${owner.mode}) on ${res.objectname}.`,
+      });
+    });
+  });
+
+  resources.forEach((res) => {
+    res.waiters.forEach((waiter) => {
+      const p = processes.find((proc) => proc.id === waiter.processId);
+      const spid = p?.spid || 0;
+      const owner = res.owners[0];
+      const ownerSpid = processes.find((proc) => proc.id === owner?.processId)?.spid;
+      timeline.push({
+        stepNumber: stepNum++,
+        phase: 'WAIT',
+        spid,
+        processId: waiter.processId,
+        isVictim: waiter.processId === victimProcess.id,
+        resourceName: res.objectname,
+        lockMode: waiter.mode,
+        description: `PID #${spid} requested ${res.lockGranularity} (${waiter.mode}) on ${res.objectname} → BLOCKED by PID #${ownerSpid || '?'}.`,
+      });
+    });
+  });
+
+  timeline.push({
+    stepNumber: stepNum++,
+    phase: 'CYCLE',
+    spid: victimProcess.spid,
+    processId: victimProcess.id,
+    isVictim: true,
+    resourceName: 'PostgreSQL Deadlock Detector',
+    lockMode: 'N/A',
+    description: `PostgreSQL deadlock detector discovered a closed wait-for dependency cycle across ${matches.length} backends.`,
+  });
+
+  timeline.push({
+    stepNumber: stepNum++,
+    phase: 'KILL',
+    spid: victimProcess.spid,
+    processId: victimProcess.id,
+    isVictim: true,
+    resourceName: 'Transaction Abort',
+    lockMode: victimProcess.lockMode,
+    description: `PostgreSQL aborted backend PID #${victimProcess.spid} with Error 40P01 (deadlock_detected).`,
+  });
+
+  return [
+    {
+      id: 'pg-deadlock-parsed',
+      victimProcessId: victimProcess.id,
+      victimSpid: victimProcess.spid,
+      deadlockType: 'Circular Lock Contention',
+      summary: `PostgreSQL deadlock detected between backends ${pids.map((p) => `#${p}`).join(' and ')}. Transactions mutually blocked each other waiting on locked relations or tuples.`,
+      remedy: 'Enforce consistent table and row access ordering across transactions. Ensure indexes cover lookup predicates, and set lock_timeout to avoid indefinite blocking.',
+      victimSelectionReason: `Backend PID #${victimProcess.spid} was aborted with Error 40P01 (deadlock_detected) to resolve circular wait-for cycle.`,
+      hasPageLocks: false,
+      hasBulkInsert: false,
+      hasNestedTransactions: false,
+      timestamp: new Date().toISOString(),
+      processes,
+      resources,
+      cycle,
+      timeline,
+      rawXml: logText,
+    },
+  ];
+}
+
+

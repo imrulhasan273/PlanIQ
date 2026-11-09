@@ -87,6 +87,7 @@ import { formatAdvisorMetricString } from '../utils/durationFormatter';
 
 interface LiveRadarTabProps {
   status: ConnectionStatus | null;
+  engine?: 'sqlserver' | 'postgresql';
   onOpenConnectModal: () => void;
   onLoadPlanXML: (xml: string, name: string) => void;
   onLoadDeadlockXML: (xml: string) => void;
@@ -169,12 +170,66 @@ const BENCHMARK_ADVISORS: PerformanceAdvisor[] = [
   }
 ];
 
+const BENCHMARK_ADVISORS_PG: PerformanceAdvisor[] = [
+  {
+    id: 'adv-pg-seqscan-104829',
+    severity: 'critical',
+    category: 'CPU/Memory',
+    title: 'Query #104829 accounted for severe I/O (Sequential Scan on large relation "customer_orders")',
+    description: 'Cumulative wait time reached 1,420.5 minutes in 24 hours. Query spends 92.4% waiting in "IO:DataFileRead" performing Seq Scan over 12,450,000 tuples without matching index on (tenant_id, order_date).',
+    queryId: 104829,
+    queryText: 'SELECT order_id, customer_id, total_amount, order_status FROM customer_orders WHERE tenant_id = $1 AND order_date >= $2 ORDER BY order_date DESC LIMIT 50',
+    metricValue: '184.2 min Peak Wait (820,410 Executions)',
+    timestamp: 'Today 10:00 AM',
+    recommendation: 'CREATE INDEX CONCURRENTLY idx_customer_orders_tenant_date ON customer_orders (tenant_id, order_date DESC) INCLUDE (total_amount, order_status); Run ANALYZE customer_orders to update planner statistics.'
+  },
+  {
+    id: 'adv-pg-spill-209381',
+    severity: 'critical',
+    category: 'Disk Spills',
+    title: 'Query #209381 spilled 4.8 GB into temporary disk files (pgsql_tmp) due to work_mem constraint',
+    description: 'External Sort and HashAggregate exceeded 4MB work_mem limit, writing temporary files to pgsql_tmp. Observed elevated IO:BufFileWrite and IO:BufFileRead wait events.',
+    queryId: 209381,
+    queryText: 'SELECT department_id, COUNT(*), AVG(salary), json_agg(employee_id) FROM employees GROUP BY department_id, project_id ORDER BY AVG(salary) DESC',
+    metricValue: '4.8 GB Spill (3,420 Executions)',
+    timestamp: 'Today 09:30 AM',
+    recommendation: 'Increase work_mem for reporting roles (e.g., SET LOCAL work_mem = "64MB") or tune hash_mem_multiplier in postgresql.conf.'
+  },
+  {
+    id: 'adv-pg-lock-304918',
+    severity: 'warning',
+    category: 'Locking',
+    title: 'Substantial RowExclusiveLock / ExclusiveLock contention on "inventory_items"',
+    description: 'Multiple concurrent transactions queued behind RowShareLock on inventory table during batch stock replenishment. Cumulative Lock:transactionid wait time: 48.6 minutes.',
+    queryId: 304918,
+    queryText: 'UPDATE inventory_items SET stock_qty = stock_qty - $1, updated_at = NOW() WHERE item_id = $2',
+    metricValue: '48.6 min Wait (45,200 Executions)',
+    timestamp: 'Today 09:00 AM',
+    recommendation: 'Order updates consistently by item_id in batch transactions or adopt SELECT ... FOR UPDATE SKIP LOCKED for worker queue consumers.'
+  },
+  {
+    id: 'adv-pg-vacuum-410294',
+    severity: 'warning',
+    category: 'Autovacuum',
+    title: 'Table "audit_log" approaching autovacuum_freeze_max_age (Wraparound Risk)',
+    description: 'RelFrozenXID age is 142,000,000 transactions. Autovacuum is throttled by aggressive client transactions holding long-lived snapshots.',
+    queryId: 410294,
+    queryText: 'VACUUM FREEZE ANALYZE audit_log',
+    metricValue: '142M XIDs Age (High Bloat)',
+    timestamp: 'Today 08:30 AM',
+    recommendation: 'Investigate idle-in-transaction backends blocking vacuum cleanup. Run VACUUM (VERBOSE, ANALYZE) audit_log during low traffic window.'
+  }
+];
+
 export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
   status,
+  engine = 'sqlserver',
   onOpenConnectModal,
   onLoadPlanXML,
   onLoadDeadlockXML,
 }) => {
+  const isPg = engine === 'postgresql' || status?.serverType === 'postgresql';
+  const isConnected = !!(status && status.connected);
   const [activeSubTab, setActiveSubTab] = useState<SubTabType>('sessions');
   const [radarCategory, setRadarCategory] = useState<'all' | 'activity' | 'waits' | 'engine'>('all');
 
@@ -190,7 +245,13 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
   const [idleSessions, setIdleSessions] = useState<IdleSession[]>([]);
 
   // Enterprise Observability States (SolarWinds DPA Engine)
-  const [advisors, setAdvisors] = useState<PerformanceAdvisor[]>(BENCHMARK_ADVISORS);
+  const [advisors, setAdvisors] = useState<PerformanceAdvisor[]>(() => (isPg ? BENCHMARK_ADVISORS_PG : BENCHMARK_ADVISORS));
+
+  useEffect(() => {
+    if (!isConnected) {
+      setAdvisors(isPg ? BENCHMARK_ADVISORS_PG : BENCHMARK_ADVISORS);
+    }
+  }, [isPg, isConnected]);
   const [advisorFilter, setAdvisorFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all');
   const [advisorCategoryFilter, setAdvisorCategoryFilter] = useState<string>('all');
   const [advisorViewMode, setAdvisorViewMode] = useState<'hourly' | 'daily'>('hourly');
@@ -476,7 +537,6 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
   }, [waitHistory, waitGranularity]);
 
   const timerRef = useRef<any>(null);
-  const isConnected = status && status.connected;
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -888,11 +948,11 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
       ]);
     } else if (preset === 'locks') {
       setSessionFilters([
-        { id: `f-${Date.now()}`, columnId: 'waitType', operator: 'contains', value: 'LCK_' }
+        { id: `f-${Date.now()}`, columnId: 'waitType', operator: 'contains', value: isPg ? 'Lock:' : 'LCK_' }
       ]);
     } else if (preset === 'pageio') {
       setSessionFilters([
-        { id: `f-${Date.now()}`, columnId: 'waitType', operator: 'contains', value: 'PAGEIO' }
+        { id: `f-${Date.now()}`, columnId: 'waitType', operator: 'contains', value: isPg ? 'IO:' : 'PAGEIO' }
       ]);
     }
   };
@@ -1103,17 +1163,18 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             <Zap size={28} color="#38bdf8" />
           </div>
           <h2 style={{ fontSize: '20px', fontWeight: 800, margin: '0 0 8px', color: '#f8fafc' }}>
-            Live SQL Server Radar Disconnected
+            {isPg ? 'Live PostgreSQL Radar Disconnected' : 'Live SQL Server Radar Disconnected'}
           </h2>
           <p style={{ color: '#94a3b8', fontSize: '13px', lineHeight: '1.5', margin: '0 0 24px' }}>
-            Connect to Microsoft SQL Server with strict read-only safety to monitor active queries in real-time,
-            diagnose blocking cascades, analyze instance wait stats, inspect Query Store bottlenecks, and stream deadlocks.
+            {isPg
+              ? 'Connect to PostgreSQL with strict read-only safety to monitor active backends in real-time (pg_stat_activity), inspect lock contention (pg_locks), analyze wait events, review pg_stat_statements bottlenecks, and track shared_buffers memory.'
+              : 'Connect to Microsoft SQL Server with strict read-only safety to monitor active queries in real-time, diagnose blocking cascades, analyze instance wait stats, inspect Query Store bottlenecks, and stream deadlocks.'}
           </p>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
             <button type="button" className="btn btn-primary" onClick={onOpenConnectModal}>
               <Zap size={14} />
-              <span>Connect to SQL Server</span>
+              <span>{isPg ? 'Connect to PostgreSQL' : 'Connect to SQL Server'}</span>
             </button>
           </div>
         </div>
@@ -1140,7 +1201,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {renderPagePollingToggle('sessions')}
           {/* Row Limit Control for Active Sessions */}
-          <div className="radar-limit-ctrl" title="Configure maximum active sessions fetched from SQL Server (Default: 200)">
+          <div className="radar-limit-ctrl" title={isPg ? "Configure maximum active backends fetched from PostgreSQL (Default: 200)" : "Configure maximum active sessions fetched from SQL Server (Default: 200)"}>
             <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
             <input
               type="number"
@@ -1235,7 +1296,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                       }
                       style={{ cursor: 'pointer', accentColor: '#38bdf8' }}
                     />
-                    <span>{col.label}</span>
+                    <span>{col.id === 'spid' ? (isPg ? 'PID' : 'SPID') : col.label}</span>
                   </label>
                 ))}
               </div>
@@ -1270,7 +1331,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                 <optgroup label="Available Columns">
                   {SESSION_COLUMNS.filter((c) => !usedCols.has(c.id) || c.id === filter.columnId).map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.label}
+                      {c.id === 'spid' ? (isPg ? 'PID' : 'SPID') : c.label}
                     </option>
                   ))}
                 </optgroup>
@@ -1278,7 +1339,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                   <optgroup label="Already Filtered">
                     {SESSION_COLUMNS.filter((c) => usedCols.has(c.id)).map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.label} (in use)
+                        {c.id === 'spid' ? (isPg ? 'PID' : 'SPID') : c.label} (in use)
                       </option>
                     ))}
                   </optgroup>
@@ -1327,6 +1388,9 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     <option value="suspended" />
                     <option value="sleeping" />
                     <option value="blocked" />
+                    <option value="active" />
+                    <option value="idle" />
+                    <option value="idle in transaction" />
                   </datalist>
                 </div>
               ) : filter.columnId === 'waitType' ? (
@@ -1334,19 +1398,34 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                   <input
                     type="text"
                     className="radar-filter-input"
-                    placeholder="e.g. PAGEIO, LCK, CX..."
+                    placeholder={isPg ? "e.g. IO, Lock, LWLock..." : "e.g. PAGEIO, LCK, CX..."}
                     value={filter.value}
                     onChange={(e) => updateSessionFilter(filter.id, { value: e.target.value })}
                     list={`list-wait-${filter.id}`}
                   />
                   <datalist id={`list-wait-${filter.id}`}>
-                    <option value="PAGEIOLATCH_SH" />
-                    <option value="LCK_M_X" />
-                    <option value="LCK_M_S" />
-                    <option value="CXPACKET" />
-                    <option value="SOS_SCHEDULER_YIELD" />
-                    <option value="ASYNC_NETWORK_IO" />
-                    <option value="WRITELOG" />
+                    {isPg ? (
+                      <>
+                        <option value="IO:DataFileRead" />
+                        <option value="IO:DataFileWrite" />
+                        <option value="IO:WALWrite" />
+                        <option value="Lock:relation" />
+                        <option value="Lock:transactionid" />
+                        <option value="LWLock:buffer_content" />
+                        <option value="Client:ClientRead" />
+                        <option value="IPC:MessageQueue" />
+                      </>
+                    ) : (
+                      <>
+                        <option value="PAGEIOLATCH_SH" />
+                        <option value="LCK_M_X" />
+                        <option value="LCK_M_S" />
+                        <option value="CXPACKET" />
+                        <option value="SOS_SCHEDULER_YIELD" />
+                        <option value="ASYNC_NETWORK_IO" />
+                        <option value="WRITELOG" />
+                      </>
+                    )}
                   </datalist>
                 </div>
               ) : filter.columnId === 'command' ? (
@@ -1364,6 +1443,9 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     <option value="UPDATE" />
                     <option value="INSERT" />
                     <option value="DELETE" />
+                    <option value="VACUUM" />
+                    <option value="ANALYZE" />
+                    <option value="COPY" />
                     <option value="BACKUP DATABASE" />
                     <option value="ALTER INDEX" />
                   </datalist>
@@ -1446,7 +1528,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           onClick={() => applyQuickPreset('locks')}
         >
           <ShieldAlert size={10} color="#f43f5e" />
-          <span>Lock Waits (LCK_*)</span>
+          <span>{isPg ? 'Lock Waits (Lock:*)' : 'Lock Waits (LCK_*)'}</span>
         </button>
         <button
           type="button"
@@ -1454,7 +1536,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           onClick={() => applyQuickPreset('pageio')}
         >
           <HardDrive size={10} color="#a78bfa" />
-          <span>Disk I/O (PAGEIO*)</span>
+          <span>{isPg ? 'Disk I/O (IO:*)' : 'Disk I/O (PAGEIO*)'}</span>
         </button>
         {sessionFilters.length > 0 && (
           <button
@@ -1490,7 +1572,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           <div className="sleeping-sessions-warning" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <AlertTriangle size={16} color="#fbbf24" />
             <span style={{ fontSize: '12px', color: '#fef3c7' }}>
-              <strong>High Severity Warning:</strong> {idleSessions.filter((s) => (s.openTransactions ?? 0) > 0).length} sleeping connection(s) have uncommitted open transactions! These hold exclusive locks on data pages, block other queries, and prevent transaction log truncation.
+              <strong>High Severity Warning:</strong> {idleSessions.filter((s) => (s.openTransactions ?? 0) > 0).length}{' '}
+              {isPg
+                ? 'idle-in-transaction backend(s) detected! These hold locks on catalog and table rows, block autovacuum cleanup, and increase transaction ID wraparound risk.'
+                : 'sleeping connection(s) have uncommitted open transactions! These hold exclusive locks on data pages, block other queries, and prevent transaction log truncation.'}
             </span>
           </div>
           <button
@@ -1503,7 +1588,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             }
             style={{ fontSize: '11px', borderColor: 'rgba(245, 158, 11, 0.4)', color: '#fbbf24' }}
           >
-            Isolate Open Transactions
+            {isPg ? 'Isolate Idle in Transaction' : 'Isolate Open Transactions'}
           </button>
         </div>
       )}
@@ -1514,7 +1599,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Moon size={13} color="#818cf8" />
             <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#f1f5f9' }}>
-              Sleeping & Idle Connections (sys.dm_exec_sessions):
+              {isPg ? 'Idle in Transaction & Dormant Backends (pg_stat_activity):' : 'Sleeping & Idle Connections (sys.dm_exec_sessions):'}
             </span>
             <span style={{ fontSize: '11px', color: '#94a3b8' }}>
               Showing <strong style={{ color: '#818cf8' }}>{filteredIdleSessions.length}</strong> of {idleSessions.length} (Limit: {idleLimit})
@@ -1524,7 +1609,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {renderPagePollingToggle('sleeping')}
             {/* Limit Control for Sleeping Sessions */}
-            <div className="radar-limit-ctrl" title="Configure maximum sleeping connections fetched from SQL Server (Default: 500)">
+            <div className="radar-limit-ctrl" title={isPg ? "Configure maximum idle connections fetched from PostgreSQL (Default: 500)" : "Configure maximum sleeping connections fetched from SQL Server (Default: 500)"}>
               <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
               <input
                 type="number"
@@ -1559,7 +1644,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               className="btn btn-secondary btn-sm radar-ctrl-btn"
               onClick={fetchData}
               disabled={isLoading}
-              title="Poll sleeping sessions from SQL Server"
+              title={isPg ? "Poll idle connections from PostgreSQL" : "Poll sleeping sessions from SQL Server"}
             >
               <RefreshCw size={11} className={isLoading ? 'spin' : ''} />
               <span>Refresh</span>
@@ -1695,7 +1780,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <TrendingUp size={14} color="#818cf8" />
           <span style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9' }}>
-            Query Store Bottlenecks (Last 24 Hours)
+            {isPg ? 'pg_stat_statements Bottlenecks (Top Queries)' : 'Query Store Bottlenecks (Last 24 Hours)'}
           </span>
           <span style={{ fontSize: '11px', color: '#94a3b8' }}>
             Showing {filteredQueryStore.length} of {queryStoreEntries.length} queries (Top {qsLimit})
@@ -1705,7 +1790,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {renderPagePollingToggle('querystore')}
           {/* Limit Control for Query Store */}
-          <div className="radar-limit-ctrl" title="Configure top queries fetched from Query Store (Default: 25)">
+          <div className="radar-limit-ctrl" title={isPg ? "Configure top queries fetched from pg_stat_statements (Default: 25)" : "Configure top queries fetched from Query Store (Default: 25)"}>
             <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
             <input
               type="number"
@@ -1794,14 +1879,16 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Clock size={14} color="#fbbf24" />
           <span style={{ fontSize: '12px', fontWeight: 700, color: '#f1f5f9' }}>
-            Instance-Wide Wait Statistics Breakdown (sys.dm_os_wait_stats)
+            {isPg
+              ? 'Instance-Wide Wait Event Statistics (pg_stat_database_conflicts & pg_stat_activity)'
+              : 'Instance-Wide Wait Statistics Breakdown (sys.dm_os_wait_stats)'}
           </span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {renderPagePollingToggle('waits')}
           {/* Limit Control for Wait Stats */}
-          <div className="radar-limit-ctrl" title="Configure top wait types fetched from sys.dm_os_wait_stats (Default: 50)">
+          <div className="radar-limit-ctrl" title={isPg ? "Configure top wait events fetched from pg_stat_activity" : "Configure top wait types fetched from sys.dm_os_wait_stats (Default: 50)"}>
             <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Limit:</span>
             <input
               type="number"
@@ -1832,7 +1919,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
 
           {/* Category Filter Pills */}
           <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-            {['all', 'Disk I/O', 'Locking', 'Parallelism', 'CPU Scheduler', 'Network', 'Memory'].map((cat) => (
+            {(isPg
+              ? ['all', 'IO', 'Lock', 'LWLock', 'Client', 'IPC', 'CPU', 'BufferPin']
+              : ['all', 'Disk I/O', 'Locking', 'Parallelism', 'CPU Scheduler', 'Network', 'Memory']
+            ).map((cat) => (
               <button
                 key={cat}
                 type="button"
@@ -1852,8 +1942,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
         <input
           type="text"
           className="radar-filter-input"
-          style={{ width: '240px' }}
-          placeholder="Search wait type (e.g. PAGEIO, CXPACKET, LCK)..."
+          style={{ width: '260px' }}
+          placeholder={isPg ? "Search wait event (e.g. IO:DataFileRead, Lock:relation)..." : "Search wait type (e.g. PAGEIO, CXPACKET, LCK)..."}
           value={waitSearch}
           onChange={(e) => setWaitSearch(e.target.value)}
         />
@@ -1869,10 +1959,12 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             <Database size={40} color="#38bdf8" />
           </div>
           <h2 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-main)', marginBottom: '8px' }}>
-            Connect to SQL Server for Live Telemetry
+            {isPg ? 'Connect to PostgreSQL for Live Telemetry' : 'Connect to SQL Server for Live Telemetry'}
           </h2>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.6', marginBottom: '22px' }}>
-            Live Radar streams real-time telemetry directly from SQL Server DMVs, Query Store, and waiting tasks. Connect to a live database instance to monitor active sessions, wait states, and engine health.
+            {isPg
+              ? 'Live Radar streams real-time telemetry directly from PostgreSQL pg_stat_activity, pg_stat_statements, pg_locks, and wait events. Connect to a live database instance to monitor active backends, wait states, and engine health.'
+              : 'Live Radar streams real-time telemetry directly from SQL Server DMVs, Query Store, and waiting tasks. Connect to a live database instance to monitor active sessions, wait states, and engine health.'}
           </p>
           <button
             type="button"
@@ -1881,7 +1973,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             style={{ margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
           >
             <Zap size={16} />
-            <span>Connect to SQL Server</span>
+            <span>{isPg ? 'Connect to PostgreSQL' : 'Connect to SQL Server'}</span>
           </button>
         </div>
       </div>
@@ -2044,10 +2136,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'advisors' ? 'active active-advisors' : ''}`}
                     onClick={() => setActiveSubTab('advisors')}
-                    title="Automated SolarWinds DPA Performance Advisors & Anomaly Alerts"
+                    title={isPg ? "Automated PostgreSQL Performance Advisors (pg_stat_statements & wait events)" : "Automated SolarWinds DPA Performance Advisors & Anomaly Alerts"}
                   >
                     <Sparkles size={12} className="radar-subnav-icon" color="#818cf8" />
-                    <span>Advisors</span>
+                    <span>{isPg ? 'PG Advisors' : 'Advisors'}</span>
                     {pagePollingConfig['advisors'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
                     {advisors.length > 0 && (
                       <span className="radar-count-pill" style={{ background: 'rgba(129, 140, 248, 0.25)', color: '#818cf8', fontWeight: 800 }}>
@@ -2063,10 +2155,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'sessions' ? 'active active-sessions' : ''}`}
                     onClick={() => setActiveSubTab('sessions')}
-                    title="Active executing SQL requests (sys.dm_exec_requests)"
+                    title={isPg ? "Active executing PostgreSQL backends (pg_stat_activity)" : "Active executing SQL requests (sys.dm_exec_requests)"}
                   >
                     <Activity size={12} className="radar-subnav-icon" />
-                    <span>{radarCategory === 'all' ? 'Active' : 'Active Sessions'}</span>
+                    <span>{isPg ? (radarCategory === 'all' ? 'Active' : 'Active Backends') : (radarCategory === 'all' ? 'Active' : 'Active Sessions')}</span>
                     {pagePollingConfig['sessions'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
                     <span className="radar-count-pill">{sessions.length}</span>
                     {blockedCount > 0 && (
@@ -2083,15 +2175,15 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'sleeping' ? 'active active-sleeping' : ''}`}
                     onClick={() => setActiveSubTab('sleeping')}
-                    title="Sleeping, connection-pool, and dormant sessions from sys.dm_exec_sessions"
+                    title={isPg ? "Idle and Idle in Transaction backends from pg_stat_activity" : "Sleeping, connection-pool, and dormant sessions from sys.dm_exec_sessions"}
                   >
                     <Moon size={12} className="radar-subnav-icon" />
-                    <span>{radarCategory === 'all' ? 'Idle' : 'Sleeping & Idle'}</span>
+                    <span>{isPg ? (radarCategory === 'all' ? 'Idle' : 'Idle in Transaction') : (radarCategory === 'all' ? 'Idle' : 'Sleeping & Idle')}</span>
                     {pagePollingConfig['sleeping'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
                     <span className="radar-count-pill">{idleSessions.length}</span>
                     {idleSessions.filter((s) => (s.openTransactions ?? 0) > 0).length > 0 && (
                       <span className="radar-blocked-pill" style={{ background: '#f59e0b' }}>
-                        {idleSessions.filter((s) => (s.openTransactions ?? 0) > 0).length} Open Xact
+                        {idleSessions.filter((s) => (s.openTransactions ?? 0) > 0).length} {isPg ? 'Idle in Xact' : 'Open Xact'}
                       </span>
                     )}
                   </button>
@@ -2103,11 +2195,11 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'waithistory' ? 'active' : ''}`}
                     onClick={() => setActiveSubTab('waithistory')}
-                    title="SolarWinds DPA Response Time Analysis (Timeslice & Top Waits)"
+                    title={isPg ? "PostgreSQL Wait Event Response Time Analysis" : "SolarWinds DPA Response Time Analysis (Timeslice & Top Waits)"}
                   >
                     <BarChart3 size={12} className="radar-subnav-icon" color="#10b981" />
-                    <span>DPA Response Time</span>
-                    <span className="badge badge-info" style={{ fontSize: '9px', padding: '1px 5px', marginLeft: '3px' }}>DPA</span>
+                    <span>{isPg ? 'PG Response Time' : 'DPA Response Time'}</span>
+                    <span className="badge badge-info" style={{ fontSize: '9px', padding: '1px 5px', marginLeft: '3px' }}>{isPg ? 'PG' : 'DPA'}</span>
                     {pagePollingConfig['waithistory'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
                   </button>
                 )}
@@ -2118,10 +2210,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'blocking' ? 'active active-blocking' : ''}`}
                     onClick={() => setActiveSubTab('blocking')}
-                    title="Head-blocker hierarchy and victim sessions (sys.dm_os_waiting_tasks)"
+                    title={isPg ? "Lock wait tree and blocker backends (pg_locks & pg_stat_activity)" : "Head-blocker hierarchy and victim sessions (sys.dm_os_waiting_tasks)"}
                   >
                     <GitCommit size={12} className="radar-subnav-icon" />
-                    <span>{radarCategory === 'all' ? 'Blocking' : 'Blocking Tree'}</span>
+                    <span>{isPg ? (radarCategory === 'all' ? 'Locks' : 'Lock Waiting Tree') : (radarCategory === 'all' ? 'Blocking' : 'Blocking Tree')}</span>
                     {pagePollingConfig['blocking'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
                     {blockedCount > 0 && (
                       <span className="radar-blocked-pill" style={{ background: '#ef4444' }}>
@@ -2137,10 +2229,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'waits' ? 'active active-waits' : ''}`}
                     onClick={() => setActiveSubTab('waits')}
-                    title="Cumulative SQL Server engine wait stats (sys.dm_os_wait_stats)"
+                    title={isPg ? "Cumulative PostgreSQL wait event statistics (pg_stat_database_conflicts & wait events)" : "Cumulative SQL Server engine wait stats (sys.dm_os_wait_stats)"}
                   >
                     <Clock size={12} className="radar-subnav-icon" />
-                    <span>Wait Stats</span>
+                    <span>{isPg ? 'PG Wait Events' : 'Wait Stats'}</span>
                     {pagePollingConfig['waits'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
                   </button>
                 )}
@@ -2151,10 +2243,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'querystore' ? 'active active-querystore' : ''}`}
                     onClick={() => setActiveSubTab('querystore')}
-                    title="Query Store top CPU/Duration/IO bottlenecks"
+                    title={isPg ? "pg_stat_statements top CPU, duration, and disk buffer bottlenecks" : "Query Store top CPU/Duration/IO bottlenecks"}
                   >
                     <TrendingUp size={12} className="radar-subnav-icon" />
-                    <span>{radarCategory === 'all' ? 'Query Store' : 'Query Store Top'}</span>
+                    <span>{isPg ? (radarCategory === 'all' ? 'Statements' : 'pg_stat_statements') : (radarCategory === 'all' ? 'Query Store' : 'Query Store Top')}</span>
                     {pagePollingConfig['querystore'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
                   </button>
                 )}
@@ -2165,10 +2257,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'bufferpool' ? 'active' : ''}`}
                     onClick={() => setActiveSubTab('bufferpool')}
-                    title="Buffer Pool RAM Inspector: tables and indexes caching RAM (sys.dm_os_buffer_descriptors)"
+                    title={isPg ? "shared_buffers Inspector: relations and indexes caching RAM (pg_buffercache)" : "Buffer Pool RAM Inspector: tables and indexes caching RAM (sys.dm_os_buffer_descriptors)"}
                   >
                     <Layers size={12} className="radar-subnav-icon" color="#38bdf8" />
-                    <span>Buffer Pool</span>
+                    <span>{isPg ? 'shared_buffers' : 'Buffer Pool'}</span>
                     {pagePollingConfig['bufferpool'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
                   </button>
                 )}
@@ -2179,10 +2271,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'indexes' ? 'active active-indexes' : ''}`}
                     onClick={() => setActiveSubTab('indexes')}
-                    title="Index Hygiene: Missing, Unused Waste, and Redundant Indexes"
+                    title={isPg ? "PostgreSQL Index Hygiene: Unused, Redundant, and Bloated Indexes (pg_stat_user_indexes)" : "Index Hygiene: Missing, Unused Waste, and Redundant Indexes"}
                   >
                     <FolderTree size={12} className="radar-subnav-icon" />
-                    <span>{radarCategory === 'all' ? 'Indexes' : 'Index Hygiene'}</span>
+                    <span>{isPg ? (radarCategory === 'all' ? 'Indexes' : 'PG Index Hygiene') : (radarCategory === 'all' ? 'Indexes' : 'Index Hygiene')}</span>
                     {pagePollingConfig['indexes'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
                     {unusedIndexes.length > 0 && (
                       <span className="radar-count-pill" style={{ background: 'rgba(244, 63, 94, 0.2)', color: '#f43f5e' }}>
@@ -2198,7 +2290,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'deadlocks' ? 'active active-deadlocks' : ''}`}
                     onClick={() => setActiveSubTab('deadlocks')}
-                    title="Recent deadlocks captured by system_health XE ring buffer"
+                    title={isPg ? "Recent deadlocks and lock conflicts from PostgreSQL log" : "Recent deadlocks captured by system_health XE ring buffer"}
                   >
                     <ShieldAlert size={12} className="radar-subnav-icon" />
                     <span>Deadlocks</span>
@@ -2212,10 +2304,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'tempdb' ? 'active active-tempdb' : ''}`}
                     onClick={() => setActiveSubTab('tempdb')}
-                    title="TempDB allocation per active session & internal spills"
+                    title={isPg ? "Temporary Files (pgsql_tmp) & work_mem spills per backend" : "TempDB allocation per active session & internal spills"}
                   >
                     <HardDrive size={12} className="radar-subnav-icon" />
-                    <span>{radarCategory === 'all' ? 'TempDB' : 'TempDB Usage'}</span>
+                    <span>{isPg ? (radarCategory === 'all' ? 'Temp Files' : 'Temp Files & work_mem') : (radarCategory === 'all' ? 'TempDB' : 'TempDB Usage')}</span>
                     {pagePollingConfig['tempdb'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
                   </button>
                 )}
@@ -2226,10 +2318,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     type="button"
                     className={`radar-subnav-btn ${activeSubTab === 'vitals' ? 'active active-vitals' : ''}`}
                     onClick={() => setActiveSubTab('vitals')}
-                    title="CPU queue, memory grants pending, and batch requests/sec"
+                    title={isPg ? "PostgreSQL Vitals: TPS, Active Backends, Cache Hit Ratio, Checkpoint activity" : "CPU queue, memory grants pending, and batch requests/sec"}
                   >
                     <Cpu size={12} className="radar-subnav-icon" />
-                    <span>{radarCategory === 'all' ? 'Vitals' : 'Server Vitals'}</span>
+                    <span>{isPg ? (radarCategory === 'all' ? 'PG Vitals' : 'PostgreSQL Vitals') : (radarCategory === 'all' ? 'Vitals' : 'Server Vitals')}</span>
                     {pagePollingConfig['vitals'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
                   </button>
                 )}
@@ -2536,8 +2628,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                                   <td colSpan={6} style={{ padding: '8px 14px 16px', background: 'transparent' }}>
                                     <DPAQueryWaitChart
                                       advisor={adv}
-                                      serverName={status?.serverName || 'DC-DBPROD1 (SQL Server)'}
-                                      dbName={status?.databaseName || 'DBPROD1'}
+                                      serverName={status?.serverName || (isPg ? 'postgres-prod (PostgreSQL)' : 'DC-DBPROD1 (SQL Server)')}
+                                      dbName={status?.databaseName || (isPg ? 'postgres' : 'DBPROD1')}
                                       onClose={() => setOpenWaitGraphAdvisorId(null)}
                                       onCopySQL={(sql) => handleCopy(sql, `adv-tbl-sql-${adv.id}`)}
                                       onAnalyzeAI={(sql) => {
@@ -2681,8 +2773,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                             {openWaitGraphAdvisorId === adv.id && (
                               <DPAQueryWaitChart
                                 advisor={adv}
-                                serverName={status?.serverName || 'DC-DBPROD1 (SQL Server)'}
-                                dbName={status?.databaseName || 'DBPROD1'}
+                                serverName={status?.serverName || (isPg ? 'postgres-prod (PostgreSQL)' : 'DC-DBPROD1 (SQL Server)')}
+                                dbName={status?.databaseName || (isPg ? 'postgres' : 'DBPROD1')}
                                 onClose={() => setOpenWaitGraphAdvisorId(null)}
                                 onCopySQL={(sql) => handleCopy(sql, `adv-card-sql-${adv.id}`)}
                                 onAnalyzeAI={(sql) => {
@@ -2809,7 +2901,9 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               </h3>
               <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>
                 {sessions.length === 0
-                  ? 'The SQL Server engine is idle. In-flight requests from client apps or background jobs will appear here.'
+                  ? isPg
+                    ? 'The PostgreSQL engine is idle. In-flight queries from client apps or background workers will appear here.'
+                    : 'The SQL Server engine is idle. In-flight requests from client apps or background jobs will appear here.'
                   : 'Try broadening your filter criteria or click "Clear All" above.'}
               </p>
             </div>
@@ -2819,7 +2913,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                 <thead>
                   <tr style={{ background: 'rgba(15, 23, 42, 0.95)', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
                     {visibleColumns.spid && (
-                      <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8', fontWeight: 600 }}>SPID</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8', fontWeight: 600 }}>{isPg ? 'PID' : 'SPID'}</th>
                     )}
                     {visibleColumns.status && (
                       <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8', fontWeight: 600 }}>Status</th>
@@ -3153,11 +3247,13 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             <div className="glass-panel" style={{ padding: '32px', textAlign: 'center', borderRadius: '10px' }}>
               <CheckCircle2 size={32} color="#34d399" style={{ margin: '0 auto 12px' }} />
               <h3 style={{ fontSize: '15px', color: '#e2e8f0', margin: '0 0 6px' }}>
-                {idleSessions.length === 0 ? 'Zero Sleeping Sessions' : 'No Sleeping Sessions Match Filters'}
+                {idleSessions.length === 0 ? (isPg ? 'Zero Idle / In-Transaction Backends' : 'Zero Sleeping Sessions') : (isPg ? 'No Idle Backends Match Filters' : 'No Sleeping Sessions Match Filters')}
               </h3>
               <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>
                 {idleSessions.length === 0
-                  ? 'All user connections are actively executing requests.'
+                  ? isPg
+                    ? 'All user connections are actively processing or disconnected.'
+                    : 'All user connections are actively executing requests.'
                   : 'Try adjusting your filter values or click "Clear Filters".'}
               </p>
             </div>
@@ -3166,7 +3262,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               <table className="radar-sticky-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                 <thead>
                   <tr style={{ background: 'rgba(15, 23, 42, 0.85)', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                    <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>SPID</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>{isPg ? 'PID' : 'SPID'}</th>
                     <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Status</th>
                     <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Open Xacts</th>
                     <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Idle Duration</th>
@@ -3202,7 +3298,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                               border: `1px solid ${hasOpenXact ? 'rgba(245, 158, 11, 0.4)' : 'rgba(255, 255, 255, 0.1)'}`
                             }}
                           >
-                            {hasOpenXact ? 'OPEN TRANSACTION' : s.status}
+                            {hasOpenXact ? (isPg ? 'IDLE IN TRANSACTION' : 'OPEN TRANSACTION') : (isPg && s.status === 'sleeping' ? 'IDLE' : s.status)}
                           </span>
                         </td>
                         <td style={{ padding: '10px 12px' }}>
@@ -3218,12 +3314,12 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                         </td>
                         <td style={{ padding: '10px 12px' }}>
                           <div style={{ color: '#e2e8f0', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.programName}>
-                            {s.programName || 'SQL Client'}
+                            {s.programName || (isPg ? 'PostgreSQL Client' : 'SQL Client')}
                           </div>
                         </td>
                         <td style={{ padding: '10px 12px' }}>
                           <span style={{ color: '#38bdf8', fontSize: '11px', fontWeight: 600 }}>
-                            {s.databaseName || 'master'}
+                            {s.databaseName || (isPg ? 'postgres' : 'master')}
                           </span>
                         </td>
                         <td style={{ padding: '10px 12px' }}>
@@ -3244,7 +3340,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                             title="Click to view details"
                             onClick={() => setInspectSession(s)}
                           >
-                            {s.lastQueryText || 'Last statement not cached in DMV'}
+                            {s.lastQueryText || (isPg ? 'Last query not captured in pg_stat_activity' : 'Last statement not cached in DMV')}
                           </div>
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right' }}>
@@ -3261,12 +3357,12 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                             <button
                               type="button"
                               className="btn btn-secondary btn-sm"
-                              onClick={() => handleCopy(`KILL ${s.spid};`, `kill-${s.spid}`)}
+                              onClick={() => handleCopy(isPg ? `SELECT pg_terminate_backend(${s.spid});` : `KILL ${s.spid};`, `kill-${s.spid}`)}
                               style={{ fontSize: '11px', borderColor: hasOpenXact ? 'rgba(239, 68, 68, 0.4)' : undefined, color: hasOpenXact ? '#f87171' : undefined }}
-                              title="Copy KILL statement to clipboard"
+                              title={isPg ? "Copy SELECT pg_terminate_backend statement" : "Copy KILL statement to clipboard"}
                             >
                               {copiedKey === `kill-${s.spid}` ? <Check size={11} /> : <Terminal size={11} />}
-                              <span>KILL</span>
+                              <span>{isPg ? 'TERMINATE' : 'KILL'}</span>
                             </button>
                           </div>
                         </td>
@@ -3365,10 +3461,10 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                               boxShadow: '0 0 10px rgba(239, 68, 68, 0.4)'
                             }}
                           >
-                            ROOT BLOCKER SPID #{rootSpid}
+                            {isPg ? `ROOT BLOCKER PID #${rootSpid}` : `ROOT BLOCKER SPID #${rootSpid}`}
                           </span>
                           <span className="blocking-root-meta" style={{ fontSize: '11.5px', color: '#cbd5e1' }}>
-                            Status: <strong className="blocking-status-val" style={{ color: '#f1f5f9' }}>{first.rootBlockerStatus}</strong> • App: <strong className="blocking-app-val">{first.rootBlockerProgram || 'SQL Client'}</strong> • User: <span className="blocking-user-val">{first.rootBlockerLogin || 'System'}</span>
+                            Status: <strong className="blocking-status-val" style={{ color: '#f1f5f9' }}>{first.rootBlockerStatus}</strong> • App: <strong className="blocking-app-val">{first.rootBlockerProgram || (isPg ? 'PostgreSQL Client' : 'SQL Client')}</strong> • User: <span className="blocking-user-val">{first.rootBlockerLogin || 'System'}</span>
                           </span>
                           <span
                             className="blocking-lock-badge"
@@ -3390,12 +3486,12 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm"
-                            onClick={() => handleCopy(`KILL ${rootSpid};`, `kill-${rootSpid}`)}
+                            onClick={() => handleCopy(isPg ? `SELECT pg_terminate_backend(${rootSpid});` : `KILL ${rootSpid};`, `kill-${rootSpid}`)}
                             style={{ fontSize: '11px', borderColor: 'rgba(239, 68, 68, 0.5)', color: '#f87171' }}
-                            title="Copy KILL statement for root blocker"
+                            title={isPg ? "Copy SELECT pg_terminate_backend statement for root blocker" : "Copy KILL statement for root blocker"}
                           >
                             {copiedKey === `kill-${rootSpid}` ? <Check size={11} /> : <Terminal size={11} />}
-                            <span>KILL #{rootSpid}</span>
+                            <span>{isPg ? `TERMINATE #${rootSpid}` : `KILL #${rootSpid}`}</span>
                           </button>
                         </div>
                       </div>
@@ -3403,7 +3499,12 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                       {hasOpenXact && (
                         <div className="blocking-rollback-alert" style={{ background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.35)', padding: '6px 12px', borderRadius: '4px', margin: '8px 0', fontSize: '11.5px', color: '#fef3c7', display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <AlertTriangle size={13} color="#fbbf24" />
-                          <span><strong>Rollback Alert:</strong> This session has uncommitted open transactions. If killed, SQL Server will roll back all in-flight row modifications.</span>
+                          <span>
+                            <strong>Rollback Alert:</strong> This backend has uncommitted open transactions.{' '}
+                            {isPg
+                              ? 'If terminated, PostgreSQL will roll back all in-flight changes.'
+                              : 'If killed, SQL Server will roll back all in-flight row modifications.'}
+                          </span>
                         </div>
                       )}
 
@@ -3423,7 +3524,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '8px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <span className="blocking-victim-badge" style={{ fontSize: '11.5px', fontWeight: 700, color: '#fbbf24' }}>
-                                  Victim SPID #{vic.blockedSpid}
+                                  {isPg ? `Victim PID #${vic.blockedSpid}` : `Victim SPID #${vic.blockedSpid}`}
                                 </span>
                                 <span className="blocking-victim-wait" style={{ fontSize: '11px', color: '#94a3b8' }}>
                                   Waiting <strong style={{ color: '#f43f5e' }}>{((vic.blockedWaitTimeMs || 0) / 1000).toFixed(1)}s</strong> on <code>{vic.blockedWaitType}</code>
@@ -3436,11 +3537,12 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                               <button
                                 type="button"
                                 className="btn btn-secondary btn-sm"
-                                onClick={() => handleCopy(`KILL ${vic.blockedSpid};`, `kill-${vic.blockedSpid}`)}
+                                onClick={() => handleCopy(isPg ? `SELECT pg_cancel_backend(${vic.blockedSpid});` : `KILL ${vic.blockedSpid};`, `kill-${vic.blockedSpid}`)}
                                 style={{ fontSize: '10px', padding: '2px 6px' }}
+                                title={isPg ? "Copy SELECT pg_cancel_backend statement" : "Copy KILL statement"}
                               >
                                 {copiedKey === `kill-${vic.blockedSpid}` ? <Check size={10} /> : <Terminal size={10} />}
-                                <span>KILL #{vic.blockedSpid}</span>
+                                <span>{isPg ? `CANCEL #${vic.blockedSpid}` : `KILL #${vic.blockedSpid}`}</span>
                               </button>
                             </div>
 
@@ -4506,7 +4608,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                       </span>
                     </div>
                     <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#94a3b8' }}>
-                      Automated root-cause analysis detecting configuration bottlenecks, workspace starvation, and delivering 1-click executable T-SQL fixes.
+                      Automated root-cause analysis detecting configuration bottlenecks, workspace starvation, and delivering 1-click executable {isPg ? 'remediation scripts' : 'T-SQL fixes'}.
                     </p>
                   </div>
                   <div style={{ fontSize: '11px', color: '#64748b' }}>
@@ -4582,7 +4684,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
                                 <span style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
                                   <Terminal size={12} color="#38bdf8" />
-                                  <span>Prescribed T-SQL Remediation:</span>
+                                  <span>{isPg ? 'Prescribed PostgreSQL Remediation:' : 'Prescribed T-SQL Remediation:'}</span>
                                 </span>
                               </div>
                               <div style={{
@@ -4638,7 +4740,9 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                   <div>
                     <strong style={{ color: '#f87171' }}>Buffer Pool Query Error:</strong> {bufferPoolError}
                     <div style={{ marginTop: '4px', color: '#cbd5e1', fontSize: '11px' }}>
-                      Note: Inspecting <code>sys.dm_os_buffer_descriptors</code> requires <code>VIEW SERVER STATE</code> (SQL Server 2019 and earlier) or <code>VIEW SERVER PERFORMANCE STATE</code> (SQL Server 2022) permission for this login.
+                      {isPg
+                        ? 'Note: Inspecting pg_buffercache requires the pg_buffercache extension installed in PostgreSQL.'
+                        : <>Note: Inspecting <code>sys.dm_os_buffer_descriptors</code> requires <code>VIEW SERVER STATE</code> (SQL Server 2019 and earlier) or <code>VIEW SERVER PERFORMANCE STATE</code> (SQL Server 2022) permission for this login.</>}
                     </div>
                   </div>
                 </div>
@@ -4663,12 +4767,19 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                           {isLoading ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
                               <RefreshCw size={22} className="spin" style={{ color: '#38bdf8' }} />
-                              <span style={{ fontSize: '13px', color: '#e2e8f0', fontWeight: 600 }}>Scanning SQL Server RAM buffer descriptors...</span>
-                              <span style={{ fontSize: '11px', color: '#64748b' }}>Inspecting in-memory cache allocation units (typically takes 15–25s on large production servers)</span>
+                              <span style={{ fontSize: '13px', color: '#e2e8f0', fontWeight: 600 }}>
+                                {isPg ? 'Scanning pg_buffercache RAM descriptors...' : 'Scanning SQL Server RAM buffer descriptors...'}
+                              </span>
+                              <span style={{ fontSize: '11px', color: '#64748b' }}>
+                                {isPg
+                                  ? 'Inspecting shared_buffers resident relations (typically takes 5–15s)'
+                                  : 'Inspecting in-memory cache allocation units (typically takes 15–25s on large production servers)'}
+                              </span>
                             </div>
                           ) : bufferPoolError ? (
                             <div style={{ color: '#fca5a5' }}>
-                              Unable to retrieve buffer pool metrics. Please verify SQL Server permissions above.
+                              Unable to retrieve buffer pool metrics. Please verify{' '}
+                              {isPg ? 'pg_buffercache extension is installed' : 'SQL Server permissions above'}.
                             </div>
                           ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
@@ -5029,10 +5140,14 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
             <div>
               <h3 style={{ fontSize: '14px', fontWeight: 700, margin: '0 0 2px', color: '#f1f5f9' }}>
-                TempDB Space Allocation per Active Request
+                {isPg ? 'PostgreSQL Temporary Files & work_mem Usage' : 'TempDB Space Allocation per Active Request'}
               </h3>
               <p style={{ margin: 0, fontSize: '11.5px', color: '#94a3b8' }}>
-                Harvested from <code>sys.dm_db_task_space_usage</code>. Shows user temporary tables (#tables) and internal hash/sort spill workspace.
+                {isPg ? (
+                  <>Harvested from <code>pg_stat_database</code> temp bytes and <code>pgsql_tmp</code>. Shows temporary relations and hash/sort work_mem spills.</>
+                ) : (
+                  <>Harvested from <code>sys.dm_db_task_space_usage</code>. Shows user temporary tables (#tables) and internal hash/sort spill workspace.</>
+                )}
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -5067,7 +5182,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               </div>
               <button type="button" className="btn btn-secondary btn-sm radar-ctrl-btn" onClick={fetchData} disabled={isLoading}>
                 <RefreshCw size={11} className={isLoading ? 'spin' : ''} />
-                <span>Poll TempDB</span>
+                <span>{isPg ? 'Poll Temp Files' : 'Poll TempDB'}</span>
               </button>
             </div>
           </div>
@@ -5076,9 +5191,9 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             <table className="radar-sticky-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <thead>
                 <tr style={{ background: 'rgba(15, 23, 42, 0.95)', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>SPID</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>User #Temp Alloc (MB)</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Internal Spill Alloc (MB)</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>{isPg ? 'PID' : 'SPID'}</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>{isPg ? 'Temp Tables Alloc (MB)' : 'User #Temp Alloc (MB)'}</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>{isPg ? 'pgsql_tmp Spill (MB)' : 'Internal Spill Alloc (MB)'}</th>
                   <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>User / Program</th>
                   <th style={{ padding: '8px 12px', textAlign: 'left', color: '#94a3b8' }}>Active Statement</th>
                 </tr>
@@ -5253,13 +5368,13 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                 <div className="glass-panel" style={{ padding: '16px', borderRadius: '10px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#94a3b8', fontSize: '12px' }}>
                     <TrendingUp size={16} color="#34d399" />
-                    <span>Batch Requests / Sec</span>
+                    <span>{isPg ? 'Transactions / Sec (TPS)' : 'Batch Requests / Sec'}</span>
                   </div>
                   <div style={{ fontSize: '24px', fontWeight: 800, color: '#34d399' }}>
                     {(vitals?.batchRequestsPerSec ?? 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                   </div>
                   <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#64748b' }}>
-                    Instantaneous SQL Server throughput rate across all active connections.
+                    {isPg ? 'Instantaneous PostgreSQL transaction throughput rate across all active backends.' : 'Instantaneous SQL Server throughput rate across all active connections.'}
                   </p>
                 </div>
               </div>
@@ -5271,7 +5386,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Gauge size={18} color="#c084fc" />
                       <span style={{ fontSize: '13px', fontWeight: 700, color: '#f1f5f9' }}>
-                        Darling Engine Telemetry Snapshot
+                        {isPg ? 'PostgreSQL Backend Telemetry Snapshot' : 'Darling Engine Telemetry Snapshot'}
                       </span>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
@@ -5289,7 +5404,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                         onClick={() => setVitalsSubTab('attribution')}
                         style={{ fontSize: '11px', padding: '3px 8px', color: '#38bdf8' }}
                       >
-                        SPID Attribution ({engineInternals.activeTasks?.length || 0}) →
+                        {isPg ? 'PID Attribution' : 'SPID Attribution'} ({engineInternals.activeTasks?.length || 0}) →
                       </button>
                       <button
                         type="button"
@@ -5699,7 +5814,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                         <thead>
                           <tr>
                             <th style={{ width: '130px' }}>Scheduler & Core</th>
-                            <th style={{ width: '80px' }}>SPID</th>
+                            <th style={{ width: '80px' }}>{isPg ? 'PID' : 'SPID'}</th>
                             <th style={{ width: '100px' }}>Task State</th>
                             <th style={{ width: '100px' }}>CPU Burn</th>
                             <th style={{ width: '90px' }}>Elapsed</th>
@@ -6146,7 +6261,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <Activity size={18} color="#38bdf8" />
                 <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#f1f5f9' }}>
-                  Live Session Diagnostic Inspector: SPID #{inspectSession.spid}
+                  Live Session Diagnostic Inspector: {isPg ? 'PID #' : 'SPID #'}{inspectSession.spid}
                 </h3>
               </div>
               <button
@@ -6193,7 +6308,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                   </div>
                 </div>
                 <div style={{ background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '6px' }}>
-                  <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Blocking SPID</div>
+                  <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>{isPg ? 'Blocking PID' : 'Blocking SPID'}</div>
                   <div style={{ fontSize: '13px', fontWeight: 700, color: (inspectSession.blockingSpid ?? 0) > 0 ? '#f43f5e' : '#34d399' }}>
                     {(inspectSession.blockingSpid ?? 0) > 0 ? `Blocked by #${inspectSession.blockingSpid}` : 'None (Not Blocked)'}
                   </div>
@@ -6213,7 +6328,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               {/* Query Text */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#f1f5f9' }}>Active T-SQL Query Text:</span>
+                  <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#f1f5f9' }}>{isPg ? 'Active PostgreSQL Query Text:' : 'Active T-SQL Query Text:'}</span>
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
@@ -6259,11 +6374,11 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  onClick={() => handleCopy(`KILL ${inspectSession.spid};`, 'kill-modal')}
+                  onClick={() => handleCopy(isPg ? `SELECT pg_terminate_backend(${inspectSession.spid});` : `KILL ${inspectSession.spid};`, 'kill-modal')}
                   style={{ borderColor: 'rgba(239, 68, 68, 0.4)', color: '#f87171' }}
                 >
                   {copiedKey === 'kill-modal' ? <Check size={11} /> : <Terminal size={11} />}
-                  <span>Copy KILL {inspectSession.spid};</span>
+                  <span>{isPg ? `Copy pg_terminate_backend(${inspectSession.spid});` : `Copy KILL ${inspectSession.spid};`}</span>
                 </button>
 
                 <div style={{ display: 'flex', gap: '8px' }}>

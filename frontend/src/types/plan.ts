@@ -320,7 +320,112 @@ export interface PLERiskAssessment {
   mitigationAction: string;
 }
 
-export type PlanAnalysis = sqlplan.PlanAnalysis & {
+export type PlanEngine = 'sqlserver' | 'postgresql';
+
+/** One displayable PostgreSQL node property (shown in the node inspector). */
+export interface PgNodeProp {
+  name: string;
+  value: string;
+  highlight?: 'skew' | 'cost' | 'normal' | 'warn' | 'good';
+}
+
+/** Small coloured chip rendered on a plan-tree node (e.g. "Spill 25 MB"). */
+export interface PgNodeBadge {
+  label: string;
+  tone: 'info' | 'warn' | 'bad' | 'good';
+  title?: string;
+}
+
+export interface PgBufferCounters {
+  sharedHit: number;
+  sharedRead: number;
+  sharedDirtied: number;
+  sharedWritten: number;
+  localHit: number;
+  localRead: number;
+  localDirtied: number;
+  localWritten: number;
+  tempRead: number;
+  tempWritten: number;
+}
+
+/** Structured PostgreSQL facts for a plan node (inclusive of children unless noted). */
+export interface PgNodeInfo {
+  nodeType: string;
+  strategy?: string;
+  partialMode?: string;
+  joinType?: string;
+  parallelAware: boolean;
+  parentRelationship?: string;
+  subplanName?: string;
+  relation?: string;
+  schema?: string;
+  alias?: string;
+  indexName?: string;
+  scanDirection?: string;
+  loops: number;
+  neverExecuted: boolean;
+  hasTiming: boolean;
+  startupCost: number;
+  totalCost: number;
+  planRows: number;
+  planWidth: number;
+  rowsPerLoop?: number;
+  actualStartupMs?: number;
+  actualTotalMs?: number;
+  rowsRemovedByFilter?: number;
+  rowsRemovedByIndexRecheck?: number;
+  rowsRemovedByJoinFilter?: number;
+  heapFetches?: number;
+  exactHeapBlocks?: number;
+  lossyHeapBlocks?: number;
+  sortMethod?: string;
+  sortSpaceKb?: number;
+  sortSpaceType?: string;
+  hashBuckets?: number;
+  hashBatches?: number;
+  originalHashBatches?: number;
+  peakMemoryKb?: number;
+  workersPlanned?: number;
+  workersLaunched?: number;
+  filter?: string;
+  indexCond?: string;
+  recheckCond?: string;
+  hashCond?: string;
+  mergeCond?: string;
+  joinFilter?: string;
+  buffers: PgBufferCounters;
+  selfBuffers: PgBufferCounters;
+  ioReadMs: number;
+  ioWriteMs: number;
+  hasBuffers: boolean;
+}
+
+export interface PgStatementInfo {
+  planningMs?: number;
+  executionMs?: number;
+  hasAnalyze: boolean;
+  hasBuffers: boolean;
+  jit?: {
+    functions?: number;
+    options?: string;
+    totalMs?: number;
+    generationMs?: number;
+    inliningMs?: number;
+    optimizationMs?: number;
+    emissionMs?: number;
+  };
+  triggers: Array<{ name: string; relation?: string; timeMs: number; calls: number }>;
+  settings?: Record<string, string>;
+  queryId?: string;
+  planningBuffers?: Partial<PgBufferCounters>;
+  totalBuffers: PgBufferCounters;
+  queryTextProvided: boolean;
+}
+
+export type PlanAnalysis = Omit<sqlplan.PlanAnalysis, 'statements'> & {
+  engine?: PlanEngine;
+  statements: StatementAnalysis[];
   executiveVerdict?: ExecutiveVerdict;
   waitStats?: WaitStat[];
   diagnostics?: AdvancedDiagnostics;
@@ -338,6 +443,7 @@ export type StatementAnalysis = sqlplan.StatementAnalysis & {
   hasActualMetrics?: boolean;
   executionClassification?: 'IO_BOUND' | 'CPU_BOUND' | 'WAIT_BOUND' | 'BALANCED' | string;
   executionClassificationReason?: string;
+  pg?: PgStatementInfo;
 };
 
 export type PlanNode = sqlplan.PlanNode & {
@@ -350,6 +456,9 @@ export type PlanNode = sqlplan.PlanNode & {
   selfElapsedPercent?: number;
   heatIntensity?: number;
   actualExecutionMode?: string;
+  pg?: PgNodeInfo;
+  pgProps?: PgNodeProp[];
+  pgBadges?: PgNodeBadge[];
   perThreadStats?: Array<{
     threadId: number;
     actualRows: number;

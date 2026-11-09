@@ -21,6 +21,7 @@ export interface ConnectionStatus {
   isReadOnly: boolean;
   isDemo: boolean;
   errorMessage?: string;
+  serverType?: string;
 }
 
 export interface ActiveSession {
@@ -336,6 +337,7 @@ export interface DBConnectionProfile {
   applicationIntent: string;
   timeoutSeconds: number;
   isDefault: boolean;
+  engine?: string;
   createdAt?: string;
   updatedAt?: string;
 }

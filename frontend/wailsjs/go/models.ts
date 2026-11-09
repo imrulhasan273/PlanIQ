@@ -158,6 +158,7 @@ export namespace configdb {
 	    applicationIntent: string;
 	    timeoutSeconds: number;
 	    isDefault: boolean;
+	    engine: string;
 	    createdAt: string;
 	    updatedAt: string;
 	
@@ -180,6 +181,7 @@ export namespace configdb {
 	        this.applicationIntent = source["applicationIntent"];
 	        this.timeoutSeconds = source["timeoutSeconds"];
 	        this.isDefault = source["isDefault"];
+	        this.engine = source["engine"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	    }
@@ -389,6 +391,7 @@ export namespace livedb {
 	    isReadOnly: boolean;
 	    isDemo: boolean;
 	    errorMessage?: string;
+	    serverType?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnectionStatus(source);
@@ -405,6 +408,7 @@ export namespace livedb {
 	        this.isReadOnly = source["isReadOnly"];
 	        this.isDemo = source["isDemo"];
 	        this.errorMessage = source["errorMessage"];
+	        this.serverType = source["serverType"];
 	    }
 	}
 	export class DPAPerspectiveItem {

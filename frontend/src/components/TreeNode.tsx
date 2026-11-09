@@ -21,13 +21,16 @@ export interface TreeNodeProps {
 
 export function getOperatorIcon(physicalOp: string) {
   const op = (physicalOp || '').toLowerCase();
-  if (op.includes('seek')) return <Search size={14} color="#38bdf8" />;
+  if (op.includes('seek') || op.includes('index scan') || op.includes('index only'))
+    return <Search size={14} color="#38bdf8" />;
   if (op.includes('scan')) return <Filter size={14} color="#f59e0b" />;
   if (op.includes('lookup')) return <AlertTriangle size={14} color="#f43f5e" />;
-  if (op.includes('join') || op.includes('nested loops') || op.includes('hash match'))
+  if (op.includes('join') || op.includes('nested loops') || op.includes('hash match') || op.includes('merge join'))
     return <Layers size={14} color="#a855f7" />;
-  if (op.includes('insert') || op.includes('update') || op.includes('delete'))
+  if (op.includes('insert') || op.includes('update') || op.includes('delete') || op.includes('modify'))
     return <Database size={14} color="#10b981" />;
+  if (op.includes('sort') || op.includes('gather') || op.includes('materialize') || op.includes('aggregate') || op.includes('hash'))
+    return <Layers size={14} color="#60a5fa" />;
   return <GitCommit size={14} color="#94a3b8" />;
 }
 
@@ -207,6 +210,20 @@ export const TreeNode: React.FC<TreeNodeProps> = ({
             <span className="node-warning-flag" title={node.painReason}>
               <AlertTriangle size={12} color="#f43f5e" />
             </span>
+          )}
+          {node.pgBadges && node.pgBadges.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '2px' }}>
+              {node.pgBadges.map((b, bi) => (
+                <span
+                  key={bi}
+                  className={`badge ${b.tone === 'bad' ? 'badge-critical' : b.tone === 'warn' ? 'badge-high' : 'badge-info'}`}
+                  style={{ fontSize: '9px', padding: '1px 5px', lineHeight: 1.2 }}
+                  title={b.title || b.label}
+                >
+                  {b.label}
+                </span>
+              ))}
+            </div>
           )}
         </div>
 

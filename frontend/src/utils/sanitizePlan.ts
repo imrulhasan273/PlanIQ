@@ -9,6 +9,7 @@ import { applyFindingsAndWaitInsights } from './planFindings';
  */
 export function sanitizePlan(plan: PlanAnalysis): PlanAnalysis {
   if (!plan) return plan;
+  plan.engine = plan.engine || 'sqlserver';
   applyFindingsAndWaitInsights(plan);
 
   plan.statements = Array.isArray(plan.statements) ? plan.statements : [];

@@ -5,18 +5,22 @@ interface PasteModalProps {
   isOpen: boolean;
   onClose: () => void;
   onParse: (xmlContent: string, planName: string) => void;
+  engine?: 'sqlserver' | 'postgresql';
 }
 
-export const PasteModal: React.FC<PasteModalProps> = ({ isOpen, onClose, onParse }) => {
+export const PasteModal: React.FC<PasteModalProps> = ({ isOpen, onClose, onParse, engine = 'sqlserver' }) => {
+  const isPg = engine === 'postgresql';
   const [content, setContent] = useState<string>('');
-  const [planName, setPlanName] = useState<string>('Pasted Execution Plan');
+  const [planName, setPlanName] = useState<string>(() =>
+    isPg ? 'Pasted PostgreSQL Plan' : 'Pasted Execution Plan'
+  );
 
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
-    onParse(content, planName || 'Pasted Execution Plan');
+    onParse(content, planName || (isPg ? 'Pasted PostgreSQL Plan' : 'Pasted Execution Plan'));
     onClose();
   };
 
@@ -26,7 +30,11 @@ export const PasteModal: React.FC<PasteModalProps> = ({ isOpen, onClose, onParse
         <div className="modal-header">
           <div className="modal-title-row">
             <Upload size={18} color="#38bdf8" />
-            <h3 className="modal-title">Paste SQL Server ShowPlan XML</h3>
+            <h3 className="modal-title">
+              {isPg
+                ? 'Paste PostgreSQL Execution Plan (JSON)'
+                : 'Paste Execution Plan (SQL Server XML or PostgreSQL JSON)'}
+            </h3>
           </div>
           <button className="btn-icon" onClick={onClose}>
             <X size={16} />
@@ -41,16 +49,28 @@ export const PasteModal: React.FC<PasteModalProps> = ({ isOpen, onClose, onParse
               className="form-input"
               value={planName}
               onChange={(e) => setPlanName(e.target.value)}
-              placeholder="e.g. Orders Report (Actual Plan)"
+              placeholder={
+                isPg
+                  ? 'e.g. Analytics Query (EXPLAIN ANALYZE)'
+                  : 'e.g. Orders Report (Actual Plan)'
+              }
             />
           </div>
 
           <div className="form-group">
-            <label className="form-label">ShowPlan XML Content</label>
+            <label className="form-label">
+              {isPg
+                ? 'PostgreSQL EXPLAIN (JSON) Output'
+                : 'Plan Content (ShowPlan XML or PostgreSQL EXPLAIN JSON)'}
+            </label>
             <textarea
               className="form-textarea"
               rows={12}
-              placeholder="Paste <ShowPlanXML xmlns=...> content here..."
+              placeholder={
+                isPg
+                  ? 'Paste PostgreSQL EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) output or DBeaver / pgAdmin export here...'
+                  : 'Paste SQL Server <ShowPlanXML...> or PostgreSQL EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) here...'
+              }
               value={content}
               onChange={(e) => setContent(e.target.value)}
               required
@@ -63,7 +83,7 @@ export const PasteModal: React.FC<PasteModalProps> = ({ isOpen, onClose, onParse
             </button>
             <button type="submit" className="btn btn-primary" disabled={!content.trim()}>
               <FileText size={14} />
-              <span>Parse & Visualize Plan</span>
+              <span>{isPg ? 'Parse & Visualize PostgreSQL Plan' : 'Parse & Visualize Plan'}</span>
             </button>
           </div>
         </form>

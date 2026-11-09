@@ -14,6 +14,12 @@ import { ConnectionsTab } from './components/ConnectionsTab';
 import { LiveConnectionModal } from './components/LiveConnectionModal';
 import { PasteModal } from './components/PasteModal';
 import { AISettingsModal } from './components/AISettingsModal';
+import { PgOverviewTab } from './components/pg/PgOverviewTab';
+import { PgWaitStatsTab } from './components/pg/PgWaitStatsTab';
+import { PgBatchFlowTab } from './components/pg/PgBatchFlowTab';
+import { PgIndexAdvisorTab } from './components/pg/PgIndexAdvisorTab';
+import { PgAIAdvisorTab } from './components/pg/PgAIAdvisorTab';
+import { PgTuningPlaybookTab } from './components/pg/PgTuningPlaybookTab';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PlanAnalysis, StatementAnalysis } from './types/plan';
 import { DeadlockGraph } from './types/deadlock';
@@ -31,11 +37,13 @@ import {
 } from '../wailsjs/go/main/App';
 import { exportDiagnosticReportHTML } from './utils/reportExporter';
 import { parseShowPlanXMLClient } from './utils/clientPlanParser';
+import { isPgExplainJson, parsePgExplainJson } from './utils/pgPlanParser';
 import { sanitizePlan } from './utils/sanitizePlan';
-import { Loader2, Database, Upload, FileCode2, ShieldAlert, Zap } from 'lucide-react';
+import { Loader2, Database, Upload, FileCode2, ShieldAlert, Zap, Code2 } from 'lucide-react';
 import './App.css';
 
 import samplePlanData from './sample_plan.json';
+import samplePgPlanData from './sample_pg_plan.json';
 
 export type TabType =
   | 'overview'
@@ -64,6 +72,45 @@ export function App() {
   const [liveStatus, setLiveStatus] = useState<ConnectionStatus | null>(null);
   const [deadlockGraphs, setDeadlockGraphs] = useState<DeadlockGraph[]>([]);
   const [windowsUser, setWindowsUser] = useState<WindowsUserInfo | null>(null);
+  const [selectedEngine, setSelectedEngine] = useState<'sqlserver' | 'postgresql'>(() => {
+    const saved = localStorage.getItem('planiq_engine');
+    return saved === 'postgresql' ? 'postgresql' : 'sqlserver';
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).go?.main?.App?.SetActiveEngine) {
+      (window as any).go.main.App.SetActiveEngine(selectedEngine).catch(() => {});
+    }
+  }, [selectedEngine]);
+
+  useEffect(() => {
+    const isPg = selectedEngine === 'postgresql' || plan?.engine === 'postgresql';
+    const title = isPg
+      ? 'PlanIQ — PostgreSQL Execution Plan Visualizer & AI Advisor'
+      : 'PlanIQ — SQL Server Execution Plan Visualizer & AI Advisor';
+    document.title = title;
+    if (typeof window !== 'undefined' && (window as any).runtime?.WindowSetTitle) {
+      (window as any).runtime.WindowSetTitle(title);
+    }
+  }, [selectedEngine, plan?.engine]);
+
+  const handleResetPlan = () => {
+    setPlan(null);
+    setSelectedStatement(null);
+    setActiveTab('overview');
+  };
+
+  const handleSelectEngine = (engine: 'sqlserver' | 'postgresql') => {
+    setSelectedEngine(engine);
+    localStorage.setItem('planiq_engine', engine);
+    if (typeof window !== 'undefined' && (window as any).go?.main?.App?.SetActiveEngine) {
+      (window as any).go.main.App.SetActiveEngine(engine).catch(() => {});
+    }
+    // Cleanly reset current plan to return to initial screen
+    if (plan) {
+      handleResetPlan();
+    }
+  };
 
   // Theme: default dark, persist to SQLite and localStorage
   const [isDark, setIsDark] = useState<boolean>(() => {
@@ -203,6 +250,11 @@ export function App() {
       }
       const sanitized = sanitizePlan(data);
       setPlan(sanitized);
+      setSelectedEngine('sqlserver');
+      localStorage.setItem('planiq_engine', 'sqlserver');
+      if (typeof window !== 'undefined' && (window as any).go?.main?.App?.SetActiveEngine) {
+        (window as any).go.main.App.SetActiveEngine('sqlserver').catch(() => {});
+      }
       if (sanitized.statements && sanitized.statements.length > 0) {
         setSelectedStatement(sanitized.statements[0]); // top cost statement
       }
@@ -211,6 +263,8 @@ export function App() {
       console.warn('Wails backend LoadSamplePlan not reached, using bundled fallback:', err);
       const fallbackData = sanitizePlan(samplePlanData as unknown as PlanAnalysis);
       setPlan(fallbackData);
+      setSelectedEngine('sqlserver');
+      localStorage.setItem('planiq_engine', 'sqlserver');
       if (fallbackData.statements && fallbackData.statements.length > 0) {
         setSelectedStatement(fallbackData.statements[0]);
       }
@@ -220,11 +274,48 @@ export function App() {
     }
   };
 
-  const parsePlanSafely = async (xmlContent: string, planName: string): Promise<PlanAnalysis> => {
-    if (typeof window !== 'undefined' && (window as any).go?.main?.App?.ParsePlan) {
-      return await ParsePlan(xmlContent, planName);
+  const parsePlanSafely = async (content: string, planName: string): Promise<PlanAnalysis> => {
+    const isJson = planName.toLowerCase().endsWith('.json') || isPgExplainJson(content);
+    if (isJson || selectedEngine === 'postgresql') {
+      try {
+        return parsePgExplainJson(content, planName);
+      } catch (err) {
+        if (isJson || selectedEngine === 'postgresql') {
+          throw err;
+        }
+      }
     }
-    return parseShowPlanXMLClient(xmlContent, planName);
+    if (typeof window !== 'undefined' && (window as any).go?.main?.App?.ParsePlan) {
+      return await ParsePlan(content, planName);
+    }
+    return parseShowPlanXMLClient(content, planName);
+  };
+
+  const handleLoadPgSample = () => {
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      const data = parsePgExplainJson(
+        JSON.stringify(samplePgPlanData),
+        'PostgreSQL Analytics Query (Orders Join Customers)'
+      );
+      const sanitized = sanitizePlan(data);
+      setPlan(sanitized);
+      setSelectedEngine('postgresql');
+      localStorage.setItem('planiq_engine', 'postgresql');
+      if (typeof window !== 'undefined' && (window as any).go?.main?.App?.SetActiveEngine) {
+        (window as any).go.main.App.SetActiveEngine('postgresql').catch(() => {});
+      }
+      if (sanitized.statements && sanitized.statements.length > 0) {
+        setSelectedStatement(sanitized.statements[0]);
+      }
+      setActiveTab('overview');
+    } catch (err: any) {
+      console.error('Failed to load sample PG plan:', err);
+      setErrorMessage(err?.message || 'Failed to load PostgreSQL sample plan');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleOpenFile = async () => {
@@ -241,6 +332,13 @@ export function App() {
         if (rawData) {
           const data = sanitizePlan(rawData);
           setPlan(data);
+          if (data.engine) {
+            setSelectedEngine(data.engine);
+            localStorage.setItem('planiq_engine', data.engine);
+            if (typeof window !== 'undefined' && (window as any).go?.main?.App?.SetActiveEngine) {
+              (window as any).go.main.App.SetActiveEngine(data.engine).catch(() => {});
+            }
+          }
           if (data.statements && data.statements.length > 0) {
             setSelectedStatement(data.statements[0]);
           }
@@ -250,7 +348,7 @@ export function App() {
         // Fallback for standard browser tab
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.sqlplan,.xml,.xdl';
+        input.accept = '.sqlplan,.xml,.xdl,.json';
         input.onchange = async (e: any) => {
           const file = e.target.files?.[0];
           if (!file) return;
@@ -315,6 +413,13 @@ export function App() {
       const rawData = await parsePlanSafely(xmlContent, planName);
       const data = sanitizePlan(rawData);
       setPlan(data);
+      if (data.engine) {
+        setSelectedEngine(data.engine);
+        localStorage.setItem('planiq_engine', data.engine);
+        if (typeof window !== 'undefined' && (window as any).go?.main?.App?.SetActiveEngine) {
+          (window as any).go.main.App.SetActiveEngine(data.engine).catch(() => {});
+        }
+      }
       if (data.statements && data.statements.length > 0) {
         setSelectedStatement(data.statements[0]);
       }
@@ -345,12 +450,14 @@ export function App() {
     >
       {isDragging && (
         <div className="drag-drop-overlay">
-          <Upload size={54} color="#38bdf8" />
+          <Upload size={54} color={selectedEngine === 'postgresql' ? '#38bdf8' : '#818cf8'} />
           <span style={{ fontSize: '18px', fontWeight: 600, marginTop: '14px', color: '#f8fafc' }}>
-            Drop .sqlplan or .xml file to analyze
+            {selectedEngine === 'postgresql'
+              ? 'Drop PostgreSQL .json file to analyze'
+              : 'Drop .sqlplan or .xml file to analyze'}
           </span>
           <span style={{ fontSize: '13px', color: '#94a3b8', marginTop: '6px' }}>
-            Instant parsing and health diagnostics
+            Instant parsing, visual tree, and root cause diagnostics
           </span>
         </div>
       )}
@@ -359,9 +466,13 @@ export function App() {
         plan={plan}
         activeTab={activeTab}
         setActiveTab={(t: string) => setActiveTab(t as any)}
+        selectedEngine={selectedEngine}
+        onSelectEngine={handleSelectEngine}
+        onResetPlan={handleResetPlan}
         onOpenFile={handleOpenFile}
         onOpenPasteModal={() => setIsPasteOpen(true)}
         onLoadSample={handleLoadSample}
+        onLoadPgSample={handleLoadPgSample}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenLiveModal={() => setIsLiveConnOpen(true)}
         liveStatus={liveStatus}
@@ -397,6 +508,8 @@ export function App() {
             <ConnectionsTab
               liveStatus={liveStatus}
               windowsUser={windowsUser}
+              engine={selectedEngine}
+              onEngineChange={(eng) => handleSelectEngine(eng)}
               onConnectSuccess={(status) => {
                 setLiveStatus(status);
                 setActiveTab('liveradar');
@@ -408,6 +521,7 @@ export function App() {
           <ErrorBoundary onReset={() => setActiveTab('overview')}>
             <LiveRadarTab
               status={liveStatus}
+              engine={selectedEngine}
               onOpenConnectModal={() => setIsLiveConnOpen(true)}
               onLoadPlanXML={(xml, name) => handleParseManual(xml, name)}
               onLoadDeadlockXML={(xml) => {
@@ -422,27 +536,47 @@ export function App() {
           <ErrorBoundary onReset={() => setActiveTab('overview')}>
             <DeadlockTab
               initialDeadlocks={deadlockGraphs}
+              engine={selectedEngine}
               onOpenXdlFile={handleOpenFile}
+              onNavigateToLiveRadar={() => setActiveTab('liveradar')}
             />
           </ErrorBoundary>
         ) : activeTab === 'playbook' ? (
           <ErrorBoundary onReset={() => setActiveTab('overview')}>
-            <TuningPlaybookTab
-              plan={plan}
-              onNavigateToStatement={(stmt) => {
-                setSelectedStatement(stmt);
-                setActiveTab('visualizer');
-              }}
-            />
+            {selectedEngine === 'postgresql' || plan?.engine === 'postgresql' ? (
+              <PgTuningPlaybookTab
+                plan={plan}
+                onNavigateToStatement={(stmt) => {
+                  setSelectedStatement(stmt);
+                  setActiveTab('visualizer');
+                }}
+              />
+            ) : (
+              <TuningPlaybookTab
+                plan={plan}
+                onNavigateToStatement={(stmt) => {
+                  setSelectedStatement(stmt);
+                  setActiveTab('visualizer');
+                }}
+              />
+            )}
           </ErrorBoundary>
         ) : plan ? (
           <ErrorBoundary onReset={() => setActiveTab('overview')}>
             {activeTab === 'overview' && (
-              <OverviewTab
-                plan={plan}
-                onSelectStatement={handleSelectStatementFromOverview}
-                onNavigateTab={(t: any) => setActiveTab(t)}
-              />
+              plan.engine === 'postgresql' ? (
+                <PgOverviewTab
+                  plan={plan}
+                  onSelectStatement={handleSelectStatementFromOverview}
+                  onNavigateTab={(t: any) => setActiveTab(t)}
+                />
+              ) : (
+                <OverviewTab
+                  plan={plan}
+                  onSelectStatement={handleSelectStatementFromOverview}
+                  onNavigateTab={(t: any) => setActiveTab(t)}
+                />
+              )
             )}
 
             {activeTab === 'visualizer' && (
@@ -454,73 +588,179 @@ export function App() {
             )}
 
             {activeTab === 'batchflow' && (
-              <BatchFlowTab
-                plan={plan}
-                onSelectStatement={(s, targetTab) => {
-                  setSelectedStatement(s);
-                  setActiveTab(targetTab);
-                }}
-              />
+              plan.engine === 'postgresql' ? (
+                <PgBatchFlowTab
+                  plan={plan}
+                  onSelectStatement={(s, targetTab) => {
+                    setSelectedStatement(s);
+                    setActiveTab(targetTab);
+                  }}
+                />
+              ) : (
+                <BatchFlowTab
+                  plan={plan}
+                  onSelectStatement={(s, targetTab) => {
+                    setSelectedStatement(s);
+                    setActiveTab(targetTab);
+                  }}
+                />
+              )
             )}
 
             {activeTab === 'waitstats' && (
-              <WaitStatsTab
-                plan={plan}
-                onNavigateTab={(t: any) => setActiveTab(t)}
-              />
+              plan.engine === 'postgresql' ? (
+                <PgWaitStatsTab
+                  plan={plan}
+                  onNavigateTab={(t: any) => setActiveTab(t)}
+                />
+              ) : (
+                <WaitStatsTab
+                  plan={plan}
+                  onNavigateTab={(t: any) => setActiveTab(t)}
+                />
+              )
             )}
 
-            {activeTab === 'indexes' && <MissingIndexesTab plan={plan} />}
+            {activeTab === 'indexes' && (
+              plan.engine === 'postgresql' ? (
+                <PgIndexAdvisorTab plan={plan} />
+              ) : (
+                <MissingIndexesTab plan={plan} />
+              )
+            )}
 
             {activeTab === 'advisor' && (
-              <AIAdvisorTab
-                plan={plan}
-                selectedStatement={selectedStatement || plan.statements[0]}
-                onSelectStatement={(s) => setSelectedStatement(s)}
-                aiConfig={aiConfig}
-                onOpenSettings={() => setIsSettingsOpen(true)}
-              />
+              plan.engine === 'postgresql' ? (
+                <PgAIAdvisorTab
+                  plan={plan}
+                  selectedStatement={selectedStatement || plan.statements[0]}
+                  onSelectStatement={(s) => setSelectedStatement(s)}
+                  aiConfig={aiConfig}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
+                />
+              ) : (
+                <AIAdvisorTab
+                  plan={plan}
+                  selectedStatement={selectedStatement || plan.statements[0]}
+                  onSelectStatement={(s) => setSelectedStatement(s)}
+                  aiConfig={aiConfig}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
+                />
+              )
             )}
 
-            {activeTab === 'comparator' && <PlanComparatorTab currentPlan={plan} />}
+            {activeTab === 'comparator' && (
+              <PlanComparatorTab currentPlan={plan} engine={selectedEngine} />
+            )}
           </ErrorBoundary>
         ) : (
-          /* Blank state when no plan is loaded */
+          /* Blank state when no plan is loaded - Dynamically filtered by selectedEngine */
           <div className="welcome-state-container">
             <div className="welcome-box glass-panel">
               <div className="welcome-icon">
-                <Database size={48} color="#38bdf8" />
+                <Database size={48} color={selectedEngine === 'postgresql' ? '#38bdf8' : '#818cf8'} />
               </div>
-              <h1 className="welcome-title">SQL Server Execution Plan Visualizer & AI Advisor</h1>
-              <p className="welcome-desc">
-                High-performance ShowPlan XML analyzer built with Go & React. Instant bottleneck detection,
-                missing index DDL generation, and AI-powered query rewrites.
-              </p>
 
-              <div className="welcome-buttons-row">
-                <button className="btn btn-primary btn-lg" onClick={handleOpenFile}>
-                  <Upload size={18} />
-                  <span>Open .sqlplan File</span>
-                </button>
+              {selectedEngine === 'postgresql' ? (
+                <>
+                  <h1 className="welcome-title">PostgreSQL Execution Plan Visualizer & AI Advisor</h1>
+                  <p className="welcome-desc">
+                    High-performance PostgreSQL EXPLAIN (JSON) execution plan visualizer and AI performance advisor. Instant bottleneck detection, interactive plan tree, shared_buffers / temp spill I/O diagnostics, and AI-powered query rewrites.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h1 className="welcome-title">SQL Server Execution Plan Visualizer & AI Advisor</h1>
+                  <p className="welcome-desc">
+                    High-performance ShowPlan XML analyzer built with Go & React. Instant bottleneck detection, missing index DDL generation, buffer pool & PLE threat evaluation, and AI-powered query rewrites.
+                  </p>
+                </>
+              )}
 
-                <button
-                  className="btn btn-secondary btn-lg"
-                  onClick={() => setIsLiveConnOpen(true)}
-                  style={{ borderColor: 'rgba(56, 189, 248, 0.4)' }}
-                >
-                  <Zap size={18} color="#38bdf8" />
-                  <span>Connect to SQL Server</span>
-                </button>
-
-                <button
-                  className="btn btn-secondary btn-lg"
-                  onClick={() => setActiveTab('deadlock')}
-                  style={{ borderColor: 'rgba(244, 63, 94, 0.4)' }}
-                >
-                  <ShieldAlert size={18} color="#f43f5e" />
-                  <span>Deadlock Graph Viewer (.xdl)</span>
-                </button>
+              <div className="welcome-engine-toggle-row">
+                <span className="welcome-engine-label">Target Database Engine:</span>
+                <div className="engine-switch-pills">
+                  <button
+                    type="button"
+                    className={`engine-pill-btn ${selectedEngine === 'sqlserver' ? 'active' : ''}`}
+                    onClick={() => handleSelectEngine('sqlserver')}
+                  >
+                    <Database size={13} color={selectedEngine === 'sqlserver' ? '#818cf8' : '#64748b'} />
+                    <span>SQL Server</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`engine-pill-btn ${selectedEngine === 'postgresql' ? 'active' : ''}`}
+                    onClick={() => handleSelectEngine('postgresql')}
+                  >
+                    <Database size={13} color={selectedEngine === 'postgresql' ? '#38bdf8' : '#64748b'} />
+                    <span>PostgreSQL</span>
+                  </button>
+                </div>
               </div>
+
+              {selectedEngine === 'postgresql' ? (
+                /* PostgreSQL Action Buttons */
+                <div className="welcome-buttons-row">
+                  <button className="btn btn-primary btn-lg" onClick={handleOpenFile}>
+                    <Upload size={18} />
+                    <span>Open PostgreSQL Plan (.json)</span>
+                  </button>
+
+                  <button
+                    className="btn btn-secondary btn-lg"
+                    onClick={handleLoadPgSample}
+                    style={{ borderColor: 'rgba(56, 189, 248, 0.5)' }}
+                  >
+                    <Database size={18} color="#38bdf8" />
+                    <span>Try PostgreSQL Sample Plan</span>
+                  </button>
+
+                  <button
+                    className="btn btn-secondary btn-lg"
+                    onClick={() => setIsPasteOpen(true)}
+                    style={{ borderColor: 'rgba(56, 189, 248, 0.4)' }}
+                  >
+                    <Code2 size={18} color="#38bdf8" />
+                    <span>Paste EXPLAIN (JSON)</span>
+                  </button>
+                </div>
+              ) : (
+                /* SQL Server Action Buttons */
+                <div className="welcome-buttons-row">
+                  <button className="btn btn-primary btn-lg" onClick={handleOpenFile}>
+                    <Upload size={18} />
+                    <span>Open .sqlplan File</span>
+                  </button>
+
+                  <button
+                    className="btn btn-secondary btn-lg"
+                    onClick={handleLoadSample}
+                    style={{ borderColor: 'rgba(129, 140, 248, 0.5)' }}
+                  >
+                    <Database size={18} color="#818cf8" />
+                    <span>Try SQL Server Sample Plan</span>
+                  </button>
+
+                  <button
+                    className="btn btn-secondary btn-lg"
+                    onClick={() => setIsLiveConnOpen(true)}
+                    style={{ borderColor: 'rgba(56, 189, 248, 0.4)' }}
+                  >
+                    <Zap size={18} color="#38bdf8" />
+                    <span>Connect to SQL Server</span>
+                  </button>
+
+                  <button
+                    className="btn btn-secondary btn-lg"
+                    onClick={() => setActiveTab('deadlock')}
+                    style={{ borderColor: 'rgba(244, 63, 94, 0.4)' }}
+                  >
+                    <ShieldAlert size={18} color="#f43f5e" />
+                    <span>Deadlock Graph Viewer (.xdl)</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -531,6 +771,7 @@ export function App() {
         isOpen={isPasteOpen}
         onClose={() => setIsPasteOpen(false)}
         onParse={handleParseManual}
+        engine={selectedEngine}
       />
 
       <AISettingsModal
@@ -544,6 +785,7 @@ export function App() {
         isOpen={isLiveConnOpen}
         onClose={() => setIsLiveConnOpen(false)}
         status={liveStatus}
+        engine={selectedEngine}
         onStatusChange={(st) => setLiveStatus(st)}
         defaultUsername={windowsUser?.username}
         onOpenConnectionsTab={() => setActiveTab('connections')}

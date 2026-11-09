@@ -29,6 +29,7 @@ import {
   Plus,
   Moon,
   Sun,
+  RotateCcw,
 } from 'lucide-react';
 import { PlanAnalysis } from '../types/plan';
 import { ConnectionStatus, WindowsUserInfo, DBConnectionProfile } from '../types/livedb';
@@ -38,9 +39,13 @@ interface NavbarProps {
   plan: PlanAnalysis | null;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  selectedEngine: 'sqlserver' | 'postgresql';
+  onSelectEngine: (engine: 'sqlserver' | 'postgresql') => void;
+  onResetPlan: () => void;
   onOpenFile: () => void;
   onOpenPasteModal: () => void;
   onLoadSample?: () => void;
+  onLoadPgSample?: () => void;
   onOpenSettings: () => void;
   onOpenLiveModal: () => void;
   liveStatus: ConnectionStatus | null;
@@ -55,9 +60,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   plan,
   activeTab,
   setActiveTab,
+  selectedEngine,
+  onSelectEngine,
+  onResetPlan,
   onOpenFile,
   onOpenPasteModal,
   onLoadSample,
+  onLoadPgSample,
   onOpenSettings,
   onOpenLiveModal,
   liveStatus,
@@ -69,11 +78,15 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const [openMenu, setOpenMenu] = useState<'diagnostics' | 'optimization' | null>(null);
   const [isConnDropdownOpen, setIsConnDropdownOpen] = useState<boolean>(false);
+  const [isEngineDropdownOpen, setIsEngineDropdownOpen] = useState<boolean>(false);
+  const [isTopEngineDropdownOpen, setIsTopEngineDropdownOpen] = useState<boolean>(false);
   const [savedProfiles, setSavedProfiles] = useState<DBConnectionProfile[]>([]);
   const timerRef = useRef<any>(null);
   const diagRef = useRef<HTMLDivElement>(null);
   const optRef = useRef<HTMLDivElement>(null);
   const connDropdownRef = useRef<HTMLDivElement>(null);
+  const engineDropdownRef = useRef<HTMLDivElement>(null);
+  const topEngineDropdownRef = useRef<HTMLDivElement>(null);
 
   const refreshSavedProfiles = async () => {
     try {
@@ -95,10 +108,18 @@ export const Navbar: React.FC<NavbarProps> = ({
   const handleQuickConnect = async (p: DBConnectionProfile) => {
     setIsConnDropdownOpen(false);
     try {
+      const profEngine =
+        p.engine === 'postgresql' || p.port === 5432 || p.database?.toLowerCase() === 'postgres'
+          ? 'postgresql'
+          : 'sqlserver';
+      if (onSelectEngine) {
+        onSelectEngine(profEngine);
+      }
       if (typeof window !== 'undefined' && (window as any).go?.main?.App?.ConnectLiveDB) {
         await ConnectLiveDB({
+          engine: profEngine,
           server: p.server,
-          port: Number(p.port) || 1433,
+          port: Number(p.port) || (profEngine === 'postgresql' ? 5432 : 1433),
           database: p.database,
           authType: p.authType,
           username: p.username,
@@ -127,6 +148,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     activeTab === 'comparator';
   const isPlaybookActive = activeTab === 'playbook';
   const isDeadlockActive = activeTab === 'deadlock';
+  const isPg = selectedEngine === 'postgresql' || plan?.engine === 'postgresql';
 
   const formatMaxDop = (reason?: string) => {
     if (!reason) return null;
@@ -164,8 +186,12 @@ export const Navbar: React.FC<NavbarProps> = ({
       if (diagRef.current && diagRef.current.contains(target)) return;
       if (optRef.current && optRef.current.contains(target)) return;
       if (connDropdownRef.current && connDropdownRef.current.contains(target)) return;
+      if (engineDropdownRef.current && engineDropdownRef.current.contains(target)) return;
+      if (topEngineDropdownRef.current && topEngineDropdownRef.current.contains(target)) return;
       setOpenMenu(null);
       setIsConnDropdownOpen(false);
+      setIsEngineDropdownOpen(false);
+      setIsTopEngineDropdownOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -177,13 +203,99 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="navbar-top-tier">
         {/* Left: Brand Identity */}
         <div className="brand-section">
-          <div className="logo-badge" title="PlanIQ - High-Performance SQL Server Execution Plan Analyzer">
+          <div
+            className="logo-badge"
+            title={
+              selectedEngine === 'postgresql'
+                ? 'PlanIQ - High-Performance PostgreSQL Execution Plan Analyzer'
+                : 'PlanIQ - High-Performance SQL Server Execution Plan Analyzer'
+            }
+          >
             <Database size={16} color="#38bdf8" />
           </div>
           <div className="brand-info-wrap">
             <div className="brand-title-row">
               <span className="brand-title">PlanIQ</span>
               <span className="brand-version-pill">v2.0 Desktop</span>
+
+              <div className="nav-engine-dropdown-wrap" ref={topEngineDropdownRef}>
+                <button
+                  type="button"
+                  className={`btn-engine-switch-badge ${selectedEngine === 'postgresql' ? 'engine-pg' : 'engine-mssql'}`}
+                  onClick={() => setIsTopEngineDropdownOpen(!isTopEngineDropdownOpen)}
+                  title="Switch Target Database Engine"
+                >
+                  <Database size={10} color={selectedEngine === 'postgresql' ? '#38bdf8' : '#818cf8'} />
+                  <span>{selectedEngine === 'postgresql' ? 'POSTGRESQL' : 'SQL SERVER'}</span>
+                  <ChevronDown size={10} className={`conn-dropdown-chevron ${isTopEngineDropdownOpen ? 'open' : ''}`} />
+                </button>
+
+                {isTopEngineDropdownOpen && (
+                  <div className="nav-conn-flyout glass-panel nav-engine-flyout">
+                    <div className="nav-conn-flyout-header">
+                      <div className="nav-conn-flyout-title">
+                        <Database size={13} color="#38bdf8" />
+                        <span>Database Engine</span>
+                      </div>
+                      <span className="nav-conn-count-pill" style={{ textTransform: 'capitalize' }}>
+                        {selectedEngine === 'postgresql' ? 'PostgreSQL' : 'SQL Server'}
+                      </span>
+                    </div>
+
+                    <div className="nav-conn-flyout-list">
+                      <div
+                        className={`nav-conn-flyout-item ${selectedEngine === 'sqlserver' ? 'is-active-item' : ''}`}
+                        onClick={() => {
+                          setIsTopEngineDropdownOpen(false);
+                          onSelectEngine('sqlserver');
+                        }}
+                      >
+                        <div className="nav-conn-item-main">
+                          <div className="nav-conn-item-server" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Database size={13} color="#818cf8" />
+                            <span>Microsoft SQL Server</span>
+                            {selectedEngine === 'sqlserver' && <Check size={13} color="#34d399" />}
+                          </div>
+                          <div className="nav-conn-item-sub">.sqlplan, .xml • ShowPlan XML & Deadlocks</div>
+                        </div>
+                      </div>
+
+                      <div
+                        className={`nav-conn-flyout-item ${selectedEngine === 'postgresql' ? 'is-active-item' : ''}`}
+                        onClick={() => {
+                          setIsTopEngineDropdownOpen(false);
+                          onSelectEngine('postgresql');
+                        }}
+                      >
+                        <div className="nav-conn-item-main">
+                          <div className="nav-conn-item-server" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Database size={13} color="#38bdf8" />
+                            <span>PostgreSQL</span>
+                            {selectedEngine === 'postgresql' && <Check size={13} color="#34d399" />}
+                          </div>
+                          <div className="nav-conn-item-sub">.json • EXPLAIN (ANALYZE, BUFFERS, JSON)</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {plan && (
+                      <div className="nav-engine-flyout-actions">
+                        <button
+                          type="button"
+                          className="nav-engine-action-btn btn-reset-view"
+                          onClick={() => {
+                            setIsTopEngineDropdownOpen(false);
+                            onResetPlan();
+                          }}
+                        >
+                          <RotateCcw size={12} color="#f59e0b" />
+                          <span>Reset to First (Start Screen)</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
               {windowsUser?.username && (
                 <div
                   className="brand-user-pill"
@@ -205,7 +317,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="btn btn-primary btn-sm top-action-btn"
               onClick={onOpenFile}
               disabled={isLoading}
-              title="Open .sqlplan or .xml from disk"
+              title={selectedEngine === 'postgresql' ? 'Open PostgreSQL execution plan (.json)' : 'Open .sqlplan or .xml from disk'}
             >
               <Upload size={12} />
               <span>Open File</span>
@@ -216,10 +328,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="btn btn-secondary btn-sm top-action-btn"
               onClick={onOpenPasteModal}
               disabled={isLoading}
-              title="Paste ShowPlan XML or Deadlock XML"
+              title={selectedEngine === 'postgresql' ? 'Paste PostgreSQL EXPLAIN (JSON) plan' : 'Paste ShowPlan XML or Deadlock XML'}
             >
               <Code2 size={12} />
-              <span>Paste XML</span>
+              <span>{selectedEngine === 'postgresql' ? 'Paste JSON' : 'Paste XML'}</span>
             </button>
           </div>
 
@@ -262,7 +374,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                     setIsConnDropdownOpen(!isConnDropdownOpen);
                     refreshSavedProfiles();
                   }}
-                  title="Connect to SQL Server or select saved connection"
+                  title={
+                    selectedEngine === 'postgresql'
+                      ? 'Connect to PostgreSQL or select saved connection'
+                      : 'Connect to SQL Server or select saved connection'
+                  }
                 >
                   <Zap size={12} color="#38bdf8" />
                   <span>Connect DB</span>
@@ -275,7 +391,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="nav-conn-flyout-header">
                     <div className="nav-conn-flyout-title">
                       <HardDrive size={13} color="#34d399" />
-                      <span>Saved SQL Connections</span>
+                      <span>{selectedEngine === 'postgresql' ? 'Saved PostgreSQL Connections' : 'Saved SQL Connections'}</span>
                       <span className="nav-conn-count-pill">{savedProfiles.length}</span>
                     </div>
                     <button
@@ -309,6 +425,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                     ) : (
                       savedProfiles.map((p) => {
+                        const profEngine =
+                          p.engine === 'postgresql' || p.port === 5432 || p.database?.toLowerCase() === 'postgres'
+                            ? 'postgresql'
+                            : 'sqlserver';
                         const isActive =
                           liveStatus?.connected &&
                           (liveStatus.serverName.toLowerCase().includes(p.server.toLowerCase()) ||
@@ -324,11 +444,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                             <div className="nav-conn-item-left">
                               <div className="nav-conn-item-title-row">
                                 <span className="nav-conn-item-name">{p.name}</span>
+                                <span
+                                  style={{
+                                    fontSize: '9.5px',
+                                    padding: '1px 5px',
+                                    borderRadius: '4px',
+                                    background:
+                                      profEngine === 'postgresql'
+                                        ? 'rgba(56, 189, 248, 0.15)'
+                                        : 'rgba(129, 140, 248, 0.15)',
+                                    color: profEngine === 'postgresql' ? '#38bdf8' : '#818cf8',
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  {profEngine === 'postgresql' ? '🐘 PG' : '🗄️ SQL'}
+                                </span>
                                 {p.isDefault && <Star size={10} fill="#f59e0b" color="#f59e0b" />}
                                 {isActive && <span className="nav-conn-active-badge">ACTIVE</span>}
                               </div>
                               <span className="nav-conn-item-sub">
-                                {p.server}:{p.port || 1433} / {p.database}
+                                {p.server}:{p.port || (profEngine === 'postgresql' ? 5432 : 1433)} / {p.database}
                               </span>
                             </div>
 
@@ -406,6 +541,129 @@ export const Navbar: React.FC<NavbarProps> = ({
       {plan && (
         <div className="navbar-plan-context-tier">
           <div className="plan-context-left">
+            {/* Red Mark Area: Interactive Engine Switcher Dropdown */}
+            <div className="nav-engine-dropdown-wrap" ref={engineDropdownRef}>
+              <button
+                type="button"
+                className={`btn-engine-switch-badge ${plan.engine === 'postgresql' ? 'engine-pg' : 'engine-mssql'}`}
+                onClick={() => setIsEngineDropdownOpen(!isEngineDropdownOpen)}
+                title="Click to switch database engine or reset view"
+              >
+                <Database size={10} color={plan.engine === 'postgresql' ? '#38bdf8' : '#818cf8'} />
+                <span>{plan.engine === 'postgresql' ? 'POSTGRESQL' : 'SQL SERVER'}</span>
+                <ChevronDown size={10} className={`conn-dropdown-chevron ${isEngineDropdownOpen ? 'open' : ''}`} />
+              </button>
+
+              {isEngineDropdownOpen && (
+                <div className="nav-conn-flyout glass-panel nav-engine-flyout">
+                  <div className="nav-conn-flyout-header">
+                    <div className="nav-conn-flyout-title">
+                      <Database size={13} color="#38bdf8" />
+                      <span>Database Engine</span>
+                    </div>
+                    <span className="nav-conn-count-pill">
+                      Active: {plan.engine === 'postgresql' ? 'PostgreSQL' : 'SQL Server'}
+                    </span>
+                  </div>
+
+                  <div className="nav-conn-flyout-list">
+                    {/* Switch to SQL Server */}
+                    <div
+                      className={`nav-conn-flyout-item ${plan.engine !== 'postgresql' ? 'is-active-item' : ''}`}
+                      onClick={() => {
+                        setIsEngineDropdownOpen(false);
+                        onSelectEngine('sqlserver');
+                      }}
+                      title="Switch active engine to SQL Server and reset to first screen"
+                    >
+                      <div className="nav-conn-item-main">
+                        <div className="nav-conn-item-server" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Database size={13} color="#818cf8" />
+                          <span>Microsoft SQL Server</span>
+                          {plan.engine !== 'postgresql' && <Check size={13} color="#34d399" />}
+                        </div>
+                        <div className="nav-conn-item-sub">.sqlplan, .xml • ShowPlan XML & Deadlocks</div>
+                      </div>
+                    </div>
+
+                    {/* Switch to PostgreSQL */}
+                    <div
+                      className={`nav-conn-flyout-item ${plan.engine === 'postgresql' ? 'is-active-item' : ''}`}
+                      onClick={() => {
+                        setIsEngineDropdownOpen(false);
+                        onSelectEngine('postgresql');
+                      }}
+                      title="Switch active engine to PostgreSQL and reset to first screen"
+                    >
+                      <div className="nav-conn-item-main">
+                        <div className="nav-conn-item-server" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Database size={13} color="#38bdf8" />
+                          <span>PostgreSQL</span>
+                          {plan.engine === 'postgresql' && <Check size={13} color="#34d399" />}
+                        </div>
+                        <div className="nav-conn-item-sub">.json • EXPLAIN (ANALYZE, BUFFERS, JSON)</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="nav-engine-flyout-actions">
+                    <button
+                      type="button"
+                      className="nav-engine-action-btn btn-reset-view"
+                      onClick={() => {
+                        setIsEngineDropdownOpen(false);
+                        onResetPlan();
+                      }}
+                      title="Close current plan and return to initial first screen"
+                    >
+                      <RotateCcw size={12} color="#f59e0b" />
+                      <span>Reset to First (Start Screen)</span>
+                    </button>
+
+                    {onLoadSample && (
+                      <button
+                        type="button"
+                        className="nav-engine-action-btn"
+                        onClick={() => {
+                          setIsEngineDropdownOpen(false);
+                          onLoadSample();
+                        }}
+                        title="Load SQL Server Sample Plan"
+                      >
+                        <Sparkles size={12} color="#818cf8" />
+                        <span>Load SQL Server Sample</span>
+                      </button>
+                    )}
+
+                    {onLoadPgSample && (
+                      <button
+                        type="button"
+                        className="nav-engine-action-btn"
+                        onClick={() => {
+                          setIsEngineDropdownOpen(false);
+                          onLoadPgSample();
+                        }}
+                        title="Load PostgreSQL Sample Plan"
+                      >
+                        <Sparkles size={12} color="#38bdf8" />
+                        <span>Load PostgreSQL Sample</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Quick Reset Pill Button right beside it */}
+            <button
+              type="button"
+              className="plan-meta-pill reset-plan-pill"
+              onClick={onResetPlan}
+              title="Reset and close current plan (return to initial screen)"
+            >
+              <RotateCcw size={10} color="#94a3b8" />
+              <span>Reset</span>
+            </button>
             <span className="plan-meta-pill plan-name-pill" title={`File: ${plan.planName}`}>
               <FileCode2 size={11} color="#38bdf8" />
               <span className="plan-name">{plan.planName}</span>
@@ -485,8 +743,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     : activeTab === 'visualizer'
                     ? 'Plan Tree'
                     : activeTab === 'batchflow'
-                    ? 'Batch Flow'
-                    : 'Wait Stats'}
+                    ? (isPg ? 'Pipeline' : 'Batch Flow')
+                    : (isPg ? 'Wait Events' : 'Wait Stats')}
                 </span>
               )}
               <ChevronDown size={13} className={`chevron-icon ${openMenu === 'diagnostics' ? 'open' : ''}`} />
@@ -515,10 +773,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="flyout-item-text">
                     <div className="flyout-item-headline">
                       <span className="flyout-title">Overview & Diagnostics</span>
-                      <span className="flyout-badge cyan-badge">13 Detectors</span>
+                      <span className="flyout-badge cyan-badge">{isPg ? '10 Detectors' : '13 Detectors'}</span>
                     </div>
                     <span className="flyout-desc">
-                      10-Second root cause verdict, wait statistics, and engine health scorecard
+                      {isPg
+                        ? 'PostgreSQL root cause verdict, shared_buffers analysis, and engine health scorecard'
+                        : '10-Second root cause verdict, wait statistics, and engine health scorecard'}
                     </span>
                   </div>
                   {activeTab === 'overview' && <Check size={14} color="#38bdf8" className="flyout-check" />}
@@ -554,11 +814,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                   <div className="flyout-item-text">
                     <div className="flyout-item-headline">
-                      <span className="flyout-title">Batch Flow & TempDB</span>
-                      <span className="flyout-badge sky-badge">Timeline</span>
+                      <span className="flyout-title">{isPg ? 'Pipeline & work_mem' : 'Batch Flow & TempDB'}</span>
+                      <span className="flyout-badge sky-badge">{isPg ? 'Memory & Spills' : 'Timeline'}</span>
                     </div>
                     <span className="flyout-desc">
-                      Sequential statement execution waterfall, cumulative subtree cost progression, and TempDB physical usage
+                      {isPg
+                        ? 'PostgreSQL execution pipeline waterfall, work_mem allocation, disk spills & worker distribution'
+                        : 'Sequential statement execution waterfall, cumulative subtree cost progression, and TempDB physical usage'}
                     </span>
                   </div>
                   {activeTab === 'batchflow' && <Check size={14} color="#38bdf8" className="flyout-check" />}
@@ -574,13 +836,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                   <div className="flyout-item-text">
                     <div className="flyout-item-headline">
-                      <span className="flyout-title">Wait Statistics</span>
+                      <span className="flyout-title">{isPg ? 'Wait Events & Latency' : 'Wait Statistics'}</span>
                       <span className="flyout-badge amber-badge">
-                        {plan && (plan.waitStats || []).length > 0 ? `${(plan.waitStats || []).length} Waits` : 'Deep-Dive'}
+                        {isPg ? 'Deep-Dive' : plan && (plan.waitStats || []).length > 0 ? `${(plan.waitStats || []).length} Waits` : 'Deep-Dive'}
                       </span>
                     </div>
                     <span className="flyout-desc">
-                      Physical engine wait events (Disk I/O, Parallelism, Memory Grants, Schedulers) and DBA remedies
+                      {isPg
+                        ? 'PostgreSQL physical wait events (IO:DataFileRead, Lock, LWLock, IPC), JIT & planning latency'
+                        : 'Physical engine wait events (Disk I/O, Parallelism, Memory Grants, Schedulers) and DBA remedies'}
                     </span>
                   </div>
                   {activeTab === 'waitstats' && <Check size={14} color="#fbbf24" className="flyout-check" />}
@@ -612,7 +876,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="category-title">Optimization & Tuning</span>
               {isOptimizationActive && (
                 <span className="category-active-hint">
-                  {activeTab === 'indexes' ? 'Indexes' : activeTab === 'advisor' ? 'AI Doctor' : 'Comparator'}
+                  {activeTab === 'indexes' ? 'Indexes' : activeTab === 'advisor' ? (isPg ? 'PG Doctor' : 'AI Doctor') : 'Comparator'}
                 </span>
               )}
               <ChevronDown size={13} className={`chevron-icon ${openMenu === 'optimization' ? 'open' : ''}`} />
@@ -640,13 +904,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                   <div className="flyout-item-text">
                     <div className="flyout-item-headline">
-                      <span className="flyout-title">Missing Indexes</span>
+                      <span className="flyout-title">{isPg ? 'PostgreSQL Index Advisor' : 'Missing Indexes'}</span>
                       <span className="flyout-badge emerald-badge">
                         {plan ? `${(plan.allMissingIndexes || []).length} Suggestions` : 'Suggestions'}
                       </span>
                     </div>
                     <span className="flyout-desc">
-                      Smart consolidated composite indexes to eliminate write penalties & raw hints
+                      {isPg
+                        ? 'PostgreSQL CREATE INDEX CONCURRENTLY, partial & covering index suggestions'
+                        : 'Smart consolidated composite indexes to eliminate write penalties & raw hints'}
                     </span>
                   </div>
                   {activeTab === 'indexes' && <Check size={14} color="#34d399" className="flyout-check" />}
@@ -662,11 +928,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                   <div className="flyout-item-text">
                     <div className="flyout-item-headline">
-                      <span className="flyout-title">AI Performance Doctor</span>
+                      <span className="flyout-title">{isPg ? 'PostgreSQL AI Advisor' : 'AI Performance Doctor'}</span>
                       <span className="flyout-badge purple-badge">AI Copilot</span>
                     </div>
                     <span className="flyout-desc">
-                      Automated T-SQL rewrites, Monaco side-by-side diff editor & hint advisor
+                      {isPg
+                        ? 'Automated PostgreSQL query rewrites, work_mem tuning & Monaco side-by-side diff'
+                        : 'Automated T-SQL rewrites, Monaco side-by-side diff editor & hint advisor'}
                     </span>
                   </div>
                   {activeTab === 'advisor' && <Check size={14} color="#c084fc" className="flyout-check" />}
@@ -732,10 +1000,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="button"
               className={`nav-category-btn ${isPlaybookActive ? 'active' : ''}`}
               onClick={(e) => handleSelectTab('playbook', e)}
-              title="Comprehensive DBA Anti-Pattern Guide, Relational Join Physics & T-SQL Rewrites"
+              title={isPg ? 'PostgreSQL Performance Playbook, work_mem & Indexing Anti-Patterns' : 'Comprehensive DBA Anti-Pattern Guide, Relational Join Physics & T-SQL Rewrites'}
             >
               <BookOpen size={14} color={isPlaybookActive ? '#c084fc' : '#94a3b8'} />
-              <span className="category-title">Tuning Playbook</span>
+              <span className="category-title">{isPg ? 'PG Playbook' : 'Tuning Playbook'}</span>
               {isPlaybookActive && <span className="category-active-hint">Playbook</span>}
             </button>
           </div>
@@ -754,17 +1022,22 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </div>
 
-          {/* Category 5: Deadlocks (.xdl) (Direct tab button in new row!) */}
+          {/* Category 5: Deadlocks */}
           <div className="nav-dropdown-item-wrap">
             <button
               type="button"
               className={`nav-category-btn nav-category-deadlock ${isDeadlockActive ? 'active active-deadlock' : ''}`}
               onClick={(e) => handleSelectTab('deadlock', e)}
-              title="Interactive Deadlock Graph (.xdl) Cycle Visualizer with Lock Attribution"
+              title={isPg ? 'PostgreSQL Deadlock & Lock Conflict Analyzer with pg_locks attribution' : 'Interactive Deadlock Graph (.xdl) Cycle Visualizer with Lock Attribution'}
             >
-              <ShieldAlert size={14} color={isDeadlockActive ? '#f43f5e' : '#94a3b8'} />
-              <span className="category-title">Deadlocks (.xdl)</span>
-              <span className="category-offline-pill">100% Offline</span>
+              <ShieldAlert size={14} color={isDeadlockActive ? (isPg ? '#38bdf8' : '#f43f5e') : '#94a3b8'} />
+              <span className="category-title">{isPg ? 'PG Deadlocks' : 'Deadlocks (.xdl)'}</span>
+              <span
+                className="category-offline-pill"
+                style={isPg ? { background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' } : undefined}
+              >
+                {isPg ? 'pg_locks' : '100% Offline'}
+              </span>
             </button>
           </div>
 

@@ -14,9 +14,25 @@ function sqlLiteral(type: string, value: string): string {
   return `${prefix}'${unquoted.replace(/'/g, "''")}'`;
 }
 
-/** Runnable T-SQL: declares the sniffed parameters (runtime value when present, else compiled) and runs the statement. */
+/** Runnable script: declares sniffed parameters for SQL Server or EXPLAIN (ANALYZE, BUFFERS) for PostgreSQL. */
 export function buildReproScript(stmt: StatementAnalysis): string {
   const s = stmt as any;
+  if (stmt.pg || s.engine === 'postgresql') {
+    const lines: string[] = [];
+    lines.push(`-- PostgreSQL Repro Script for Statement #${stmt.statementId}`);
+    lines.push('-- Generated from execution plan: EXPLAIN (ANALYZE, BUFFERS, SETTINGS, VERBOSE)');
+    if (stmt.pg?.settings) {
+      Object.entries(stmt.pg.settings).forEach(([k, v]) => {
+        lines.push(`-- Session setting: ${k} = '${v}'`);
+      });
+    }
+    lines.push('BEGIN;');
+    lines.push('EXPLAIN (ANALYZE, BUFFERS, SETTINGS, VERBOSE)');
+    lines.push((stmt.statementText || '').trim().replace(/;?\s*$/, ';'));
+    lines.push('ROLLBACK;');
+    return lines.join('\n');
+  }
+
   const lines: string[] = [];
   lines.push(`-- Repro script for statement #${stmt.statementId} (${stmt.statementType})`);
   lines.push('-- Generated from the execution plan: parameter values come from the plan (runtime value if captured, otherwise compiled value).');

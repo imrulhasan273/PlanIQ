@@ -2021,6 +2021,76 @@ html, body {
   color: #0284c7 !important;
 }
 
+/* ── Light Mode Engine Switcher & Reset ── */
+.light-theme .btn-engine-switch-badge.engine-mssql {
+  background: #ede9fe !important;
+  color: #6366f1 !important;
+  border-color: #c7d2fe !important;
+}
+.light-theme .btn-engine-switch-badge.engine-mssql:hover {
+  background: #e0e7ff !important;
+  border-color: #818cf8 !important;
+}
+.light-theme .btn-engine-switch-badge.engine-pg {
+  background: #e0f2fe !important;
+  color: #0284c7 !important;
+  border-color: #bae6fd !important;
+}
+.light-theme .btn-engine-switch-badge.engine-pg:hover {
+  background: #bae6fd !important;
+  border-color: #38bdf8 !important;
+}
+.light-theme .nav-engine-flyout-actions {
+  background: #f8fafc !important;
+  border-top: 1px solid #e2e8f0 !important;
+}
+.light-theme .nav-engine-action-btn {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  color: #334155 !important;
+}
+.light-theme .nav-engine-action-btn:hover {
+  background: #f0f9ff !important;
+  border-color: #bae6fd !important;
+  color: #0284c7 !important;
+}
+.light-theme .nav-engine-action-btn.btn-reset-view {
+  background: #fffbeb !important;
+  border-color: #fde68a !important;
+  color: #b45309 !important;
+}
+.light-theme .nav-engine-action-btn.btn-reset-view:hover {
+  background: #fef3c7 !important;
+  border-color: #f59e0b !important;
+  color: #92400e !important;
+}
+.light-theme .reset-plan-pill {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #64748b !important;
+}
+.light-theme .reset-plan-pill:hover {
+  background: #ffe4e6 !important;
+  border-color: #fda4af !important;
+  color: #e11d48 !important;
+}
+.light-theme .engine-switch-pills {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+.light-theme .engine-pill-btn {
+  color: #64748b !important;
+}
+.light-theme .engine-pill-btn:hover {
+  color: #1e293b !important;
+  background: #e2e8f0 !important;
+}
+.light-theme .engine-pill-btn.active {
+  background: #e0f2fe !important;
+  color: #0284c7 !important;
+  border-color: #38bdf8 !important;
+}
+
 /* ── Scrollbars in light mode ── */
 .light-theme ::-webkit-scrollbar-track {
   background: #f1f5f9 !important;

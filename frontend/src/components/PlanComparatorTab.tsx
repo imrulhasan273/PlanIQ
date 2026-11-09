@@ -35,6 +35,7 @@ import {
 import { PlanAnalysis, StatementAnalysis, PlanNode, PlanComparison, WaitStat, TableIOLeader } from '../types/plan';
 import { OpenFilePicker, ParsePlan } from '../../wailsjs/go/main/App';
 import { parseShowPlanXMLClient, comparePlansClient } from '../utils/clientPlanParser';
+import { isPgExplainJson, parsePgExplainJson } from '../utils/pgPlanParser';
 import { readFileAsDecodedText } from '../utils/deadlockParser';
 import { DiagnosticTooltip } from './DiagnosticTooltip';
 import { PlanEdges } from './PlanEdges';
@@ -52,11 +53,17 @@ import {
 
 interface PlanComparatorTabProps {
   currentPlan?: PlanAnalysis | null;
+  engine?: 'sqlserver' | 'postgresql';
 }
 
-export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPlan }) => {
+export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPlan, engine = 'sqlserver' }) => {
   const [planA, setPlanA] = useState<PlanAnalysis | null>(currentPlan || null);
   const [planB, setPlanB] = useState<PlanAnalysis | null>(null);
+  const isPg =
+    engine === 'postgresql' ||
+    currentPlan?.engine === 'postgresql' ||
+    planA?.engine === 'postgresql' ||
+    planB?.engine === 'postgresql';
   const [viewMode, setViewMode] = useState<'metrics' | 'waits' | 'memory' | 'io_tables' | 'visual' | 'statements' | 'warnings'>('metrics');
   const [visualSubView, setVisualSubView] = useState<'canvas' | 'table'>('canvas');
   const [compareZoom, setCompareZoom] = useState<number>(0.85);
@@ -91,6 +98,16 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
 
   // Unified parser helper: prefers high-speed Wails Go engine, falls back to client parser
   const parsePlanSafely = async (content: string, name: string): Promise<PlanAnalysis> => {
+    const isJson = name.toLowerCase().endsWith('.json') || isPgExplainJson(content);
+    if (isJson || currentPlan?.engine === 'postgresql') {
+      try {
+        return parsePgExplainJson(content, name);
+      } catch (err) {
+        if (isJson || currentPlan?.engine === 'postgresql') {
+          throw err;
+        }
+      }
+    }
     if (typeof window !== 'undefined' && (window as any).go?.main?.App?.ParsePlan) {
       try {
         const res = await (window as any).go.main.App.ParsePlan(content, name);
@@ -695,7 +712,9 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
             ) : (
               <div style={{ textAlign: 'center', padding: '16px 0', color: '#94a3b8' }}>
                 <Upload size={24} style={{ margin: '0 auto 8px', opacity: 0.6 }} />
-                <div style={{ fontSize: '12px', fontWeight: 600 }}>Drag &amp; Drop Plan A (.sqlplan / .xml)</div>
+                <div style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {isPg ? 'Drag & Drop Plan A (.json / .sqlplan)' : 'Drag & Drop Plan A (.sqlplan / .xml)'}
+                </div>
                 <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>or click the button below to browse</div>
               </div>
             )}
@@ -710,12 +729,18 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
               disabled={loadingA}
             >
               <Upload size={12} color="#38bdf8" />
-              <span>{planA ? 'Change Plan A (.sqlplan)' : 'Import Plan A (.sqlplan)'}</span>
+              <span>
+                {planA
+                  ? 'Change Plan A'
+                  : isPg
+                  ? 'Import Plan A (.json / .sqlplan)'
+                  : 'Import Plan A (.sqlplan)'}
+              </span>
             </button>
             <input
               ref={fileInputARef}
               type="file"
-              accept=".sqlplan,.xml"
+              accept=".json,.sqlplan,.xml"
               onChange={(e) => handleFileUpload(e, 'A')}
               style={{ display: 'none' }}
             />
@@ -766,7 +791,9 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
             ) : (
               <div style={{ textAlign: 'center', padding: '16px 0', color: '#94a3b8' }}>
                 <Upload size={24} style={{ margin: '0 auto 8px', opacity: 0.6 }} />
-                <div style={{ fontSize: '12px', fontWeight: 600 }}>Drag &amp; Drop Plan B (.sqlplan / .xml)</div>
+                <div style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {isPg ? 'Drag & Drop Plan B (.json / .sqlplan)' : 'Drag & Drop Plan B (.sqlplan / .xml)'}
+                </div>
                 <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>or click the button below to browse</div>
               </div>
             )}
@@ -781,12 +808,18 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
               disabled={loadingB}
             >
               <Upload size={12} color="#34d399" />
-              <span>{planB ? 'Change Plan B (.sqlplan)' : 'Import Plan B (.sqlplan)'}</span>
+              <span>
+                {planB
+                  ? 'Change Plan B'
+                  : isPg
+                  ? 'Import Plan B (.json / .sqlplan)'
+                  : 'Import Plan B (.sqlplan)'}
+              </span>
             </button>
             <input
               ref={fileInputBRef}
               type="file"
-              accept=".sqlplan,.xml"
+              accept=".json,.sqlplan,.xml"
               onChange={(e) => handleFileUpload(e, 'B')}
               style={{ display: 'none' }}
             />
@@ -1419,10 +1452,14 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
               <div>
                 <h4 style={{ fontSize: '15px', fontWeight: 800, color: '#fff', margin: 0 }}>
-                  SQL Server Wait Statistics &amp; Concurrency Bottlenecks Diff
+                  {isPg
+                    ? 'PostgreSQL Wait Events & Execution Latency Diff'
+                    : 'SQL Server Wait Statistics & Concurrency Bottlenecks Diff'}
                 </h4>
                 <p style={{ fontSize: '11.5px', color: '#94a3b8', margin: '4px 0 0' }}>
-                  Compares wait types recorded during query execution (such as PAGEIOLATCH for storage reads, CXPACKET for thread sync, and RESOURCE_SEMAPHORE for memory grants).
+                  {isPg
+                    ? 'Compares execution latency, planning duration, and wait events across both plans.'
+                    : 'Compares wait types recorded during query execution (such as PAGEIOLATCH for storage reads, CXPACKET for thread sync, and RESOURCE_SEMAPHORE for memory grants).'}
                 </p>
               </div>
 
@@ -1436,9 +1473,13 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
             {deltaMetrics.waitDiffs.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '36px 20px', background: '#090d16', borderRadius: '8px', border: '1px dashed #1e293b' }}>
                 <Clock size={32} color="#64748b" style={{ margin: '0 auto 10px', opacity: 0.6 }} />
-                <h5 style={{ color: '#e2e8f0', fontSize: '14px', margin: '0 0 6px' }}>No Wait Statistics Recorded in Plans</h5>
+                <h5 style={{ color: '#e2e8f0', fontSize: '14px', margin: '0 0 6px' }}>
+                  {isPg ? 'No Wait Events Recorded in Plans' : 'No Wait Statistics Recorded in Plans'}
+                </h5>
                 <p style={{ color: '#94a3b8', fontSize: '12px', maxWidth: '520px', margin: '0 auto' }}>
-                  SQL Server populates the <code>&lt;WaitStats&gt;</code> element in actual execution plans when runtime waiting occurs. Estimated plans do not record runtime waits.
+                  {isPg
+                    ? 'PostgreSQL records execution time, planning time, and buffer cache hits/reads during actual execution. Estimated plans do not record runtime metrics.'
+                    : 'SQL Server populates the <WaitStats> element in actual execution plans when runtime waiting occurs. Estimated plans do not record runtime waits.'}
                 </p>
               </div>
             ) : (

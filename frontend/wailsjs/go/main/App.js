@@ -22,6 +22,10 @@ export function GetAIAdvice(arg1) {
   return window['go']['main']['App']['GetAIAdvice'](arg1);
 }
 
+export function GetActiveEngine() {
+  return window['go']['main']['App']['GetActiveEngine']();
+}
+
 export function GetAppTheme() {
   return window['go']['main']['App']['GetAppTheme']();
 }
@@ -138,12 +142,20 @@ export function OpenFilePicker() {
   return window['go']['main']['App']['OpenFilePicker']();
 }
 
+export function OpenFilePickerForEngine(arg1) {
+  return window['go']['main']['App']['OpenFilePickerForEngine'](arg1);
+}
+
 export function ParsePlan(arg1, arg2) {
   return window['go']['main']['App']['ParsePlan'](arg1, arg2);
 }
 
 export function SaveDBConnection(arg1) {
   return window['go']['main']['App']['SaveDBConnection'](arg1);
+}
+
+export function SetActiveEngine(arg1) {
+  return window['go']['main']['App']['SetActiveEngine'](arg1);
 }
 
 export function SetAppTheme(arg1) {

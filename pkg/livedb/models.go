@@ -25,6 +25,7 @@ type ConnectionStatus struct {
 	IsReadOnly     bool   `json:"isReadOnly"`
 	IsDemo         bool   `json:"isDemo"`
 	ErrorMessage   string `json:"errorMessage,omitempty"`
+	ServerType     string `json:"serverType,omitempty"`
 }
 
 // ActiveSession represents a running or suspended process from sys.dm_exec_requests

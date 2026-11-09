@@ -81,8 +81,20 @@ const OPERATOR_DESCRIPTIONS: Record<string, string> = {
   'Segment': 'Group rows into segments based on partition columns for window calculation.',
   'Sequence Project': 'Compute running totals or rank expressions over sorted row segments.',
   'Concatenation': 'Union and concatenate rows from multiple input streams sequentially.',
-  'Constant Scan': 'Generate a static set of constant rows or evaluate parameter values without accessing storage tables.',
   'Adaptive Join': 'Dynamically switch between Nested Loops and Hash Match at runtime based on actual row counts.',
+  // PostgreSQL Native Operator Descriptions
+  'Seq Scan': 'Scan all relation blocks sequentially from start to finish without an index.',
+  'Bitmap Index Scan': 'Scan index matching the condition and construct a bitmap of matching heap page block numbers in memory.',
+  'Bitmap Heap Scan': 'Read relation pages referenced in the incoming bitmap, skipping non-matching table blocks.',
+  'Index Only Scan': 'Retrieve all required column data directly from the index tree without fetching heap tuples, verified using the visibility map.',
+  'Aggregate': 'Compute aggregate expressions (SUM, COUNT, AVG, MIN, MAX) over input rows using Plain, Sorted, or Hashed strategy.',
+  'Gather': 'Coordinate and merge rows from multiple parallel worker processes into the main backend process.',
+  'Gather Merge': 'Merge pre-sorted streams from multiple parallel worker processes while preserving sort order.',
+  'Materialize': 'Cache the output of an inner plan in memory or on disk to allow fast repeated scans in nested loop joins.',
+  'Hash': 'Construct an in-memory hash table of join keys for Hash Join probing.',
+  'Memoize': 'Cache results of parameterized inner scans to avoid re-evaluating the same outer join key.',
+  'Subquery Scan': 'Evaluate an unflattened subquery as a streaming relational input.',
+  'Result': 'Evaluate constant expressions or project scalar values without accessing storage relations.'
 };
 
 export type SsmsPropertyCategory =
@@ -163,14 +175,373 @@ export const CATEGORY_META: Record<
   }
 };
 
+function getPgProperties(
+  node: PlanNode,
+  statement: Partial<StatementAnalysis>
+): SsmsPropertyItem[] {
+  const pg = node.pg;
+  const isSkew = node.hasCardinalitySkew;
+  const statementCost = statement.statementSubTreeCost ?? 0;
+  const totalCost = pg?.totalCost ?? node.estimatedTotalSubtreeCost ?? 0;
+  const costPct =
+    statementCost > 0
+      ? (totalCost / statementCost) * 100
+      : node.costPercentage;
+
+  const items: SsmsPropertyItem[] = [
+    // 1. OPERATOR DETAILS
+    { name: 'Physical Operation', value: node.physicalOp, category: 'operator' },
+    { name: 'Logical Operation', value: node.logicalOp || node.physicalOp, category: 'operator' },
+    { name: 'Node ID', value: `Node #${node.nodeId}`, category: 'operator' },
+  ];
+
+  if (pg?.strategy) items.push({ name: 'Execution Strategy', value: pg.strategy, category: 'operator' });
+  if (pg?.parentRelationship) items.push({ name: 'Parent Relationship', value: pg.parentRelationship, category: 'operator' });
+  if (pg?.scanDirection) items.push({ name: 'Scan Direction', value: pg.scanDirection, category: 'operator' });
+  if (pg?.subplanName) items.push({ name: 'SubPlan Identifier', value: pg.subplanName, category: 'operator' });
+  items.push({ name: 'Execution Loops', value: `${pg?.loops ?? 1}`, category: 'operator' });
+
+  if (pg?.workersPlanned !== undefined) {
+    items.push({
+      name: 'Workers Planned / Launched',
+      value: `${pg.workersPlanned} planned / ${pg.workersLaunched ?? 0} launched`,
+      category: 'operator'
+    });
+  }
+
+  if (pg?.sortMethod) {
+    items.push({
+      name: 'Sort Method & Space',
+      value: `${pg.sortMethod} (${pg.sortSpaceKb ?? 0} KB ${pg.sortSpaceType || ''})`,
+      highlight: (pg.sortSpaceType || '').toLowerCase().includes('disk') ? 'warn' : 'normal',
+      category: 'operator'
+    });
+  }
+
+  if (pg?.hashBatches && pg.hashBatches > 1) {
+    items.push({
+      name: 'Hash Join Batches & Buckets',
+      value: `${pg.hashBatches} batches (Buckets: ${pg.hashBuckets ?? 1}, original: ${pg.originalHashBatches || 1})`,
+      highlight: 'warn',
+      category: 'operator'
+    });
+  }
+
+  // 2. ESTIMATED COSTS
+  items.push(
+    {
+      name: 'Total Cost',
+      value: `${totalCost.toFixed(2)} units`,
+      highlight: costPct > 40 ? 'cost' : 'normal',
+      category: 'cost'
+    },
+    {
+      name: 'Startup Cost',
+      value: `${(pg?.startupCost ?? 0).toFixed(2)} units`,
+      category: 'cost'
+    },
+    {
+      name: 'Operator Cost % of Query',
+      value: `${costPct.toFixed(1)}%`,
+      highlight: costPct > 20 ? 'cost' : 'normal',
+      category: 'cost'
+    },
+    {
+      name: 'Plan Width (Row Size)',
+      value: `${pg?.planWidth ?? Math.max(16, node.outputColumns.length * 28 || 64)} Bytes`,
+      category: 'cost'
+    }
+  );
+
+  // 3. ESTIMATED & ACTUAL ROWS
+  const planRows = pg?.planRows ?? node.estimateRows ?? 0;
+  const loops = pg?.loops ?? 1;
+  const actualRowsTotal = node.hasActualRows ? (pg?.rowsPerLoop !== undefined ? Math.round(pg.rowsPerLoop * loops) : node.actualRows) : 0;
+  const actualRowsPerLoop = node.hasActualRows ? (pg?.rowsPerLoop ?? (loops > 0 ? node.actualRows / loops : node.actualRows)) : 0;
+
+  items.push(
+    {
+      name: 'Plan Rows (Estimated)',
+      value: planRows.toLocaleString(),
+      highlight: isSkew ? 'skew' : 'normal',
+      category: 'rows'
+    },
+    {
+      name: 'Actual Rows (Total)',
+      value: node.hasActualRows ? actualRowsTotal.toLocaleString() : 'N/A (EXPLAIN without ANALYZE)',
+      highlight: isSkew ? 'skew' : node.hasActualRows ? 'good' : 'normal',
+      category: 'rows'
+    },
+    {
+      name: 'Actual Rows Per Loop',
+      value: node.hasActualRows ? actualRowsPerLoop.toLocaleString() : 'N/A',
+      category: 'rows'
+    },
+    {
+      name: 'Execution Loops',
+      value: `${loops}`,
+      category: 'rows'
+    },
+    {
+      name: 'Cardinality Skew Ratio',
+      value: isSkew
+        ? `${node.skewRatio ? node.skewRatio.toFixed(1) : '1.0'}x Error`
+        : 'Well Calibrated (1.0x)',
+      highlight: isSkew ? 'skew' : 'good',
+      category: 'rows'
+    }
+  );
+
+  if (pg?.rowsRemovedByFilter !== undefined && pg.rowsRemovedByFilter > 0) {
+    items.push({
+      name: 'Rows Removed by Filter',
+      value: pg.rowsRemovedByFilter.toLocaleString(),
+      highlight: 'warn',
+      category: 'rows'
+    });
+  }
+  if (pg?.rowsRemovedByIndexRecheck !== undefined && pg.rowsRemovedByIndexRecheck > 0) {
+    items.push({
+      name: 'Rows Removed by Index Recheck',
+      value: pg.rowsRemovedByIndexRecheck.toLocaleString(),
+      highlight: 'warn',
+      category: 'rows'
+    });
+  }
+
+  // 4. ACTUAL STATISTICS (BUFFERS & I/O)
+  if (pg?.hasBuffers && pg.buffers) {
+    const b = pg.buffers;
+    const totalShared = b.sharedHit + b.sharedRead;
+    const hitRatio = totalShared > 0 ? ((b.sharedHit / totalShared) * 100).toFixed(1) : '100.0';
+
+    items.push(
+      {
+        name: 'Shared Hit Blocks (RAM)',
+        value: `${b.sharedHit.toLocaleString()} blocks (~${((b.sharedHit * 8) / 1024).toFixed(2)} MB)`,
+        highlight: 'good',
+        category: 'actual_stats'
+      },
+      {
+        name: 'Shared Read Blocks (Disk)',
+        value: `${b.sharedRead.toLocaleString()} blocks (~${((b.sharedRead * 8) / 1024).toFixed(2)} MB)`,
+        highlight: b.sharedRead > 0 ? 'warn' : 'normal',
+        category: 'actual_stats'
+      },
+      {
+        name: 'Buffer Cache Hit Ratio',
+        value: `${hitRatio}%`,
+        highlight: b.sharedRead > 0 ? 'cost' : 'good',
+        category: 'actual_stats'
+      }
+    );
+
+    if (b.sharedDirtied > 0) {
+      items.push({
+        name: 'Shared Dirtied Blocks',
+        value: `${b.sharedDirtied.toLocaleString()} blocks (~${((b.sharedDirtied * 8) / 1024).toFixed(2)} MB)`,
+        category: 'actual_stats'
+      });
+    }
+    if (b.sharedWritten > 0) {
+      items.push({
+        name: 'Shared Written Blocks',
+        value: `${b.sharedWritten.toLocaleString()} blocks (~${((b.sharedWritten * 8) / 1024).toFixed(2)} MB)`,
+        category: 'actual_stats'
+      });
+    }
+    if (b.tempRead > 0 || b.tempWritten > 0) {
+      items.push({
+        name: 'Temp Blocks (Spill I/O)',
+        value: `Read: ${b.tempRead.toLocaleString()} blocks, Written: ${b.tempWritten.toLocaleString()} blocks (~${(((b.tempRead + b.tempWritten) * 8) / 1024).toFixed(2)} MB)`,
+        highlight: 'warn',
+        category: 'actual_stats'
+      });
+    }
+    if (pg.heapFetches !== undefined) {
+      items.push({
+        name: 'Heap Fetches (Index-Only Scan)',
+        value: pg.heapFetches.toLocaleString(),
+        highlight: pg.heapFetches > 500 ? 'warn' : 'normal',
+        category: 'actual_stats'
+      });
+    }
+    if (pg.lossyHeapBlocks !== undefined && pg.lossyHeapBlocks > 0) {
+      items.push({
+        name: 'Lossy Heap Blocks',
+        value: pg.lossyHeapBlocks.toLocaleString(),
+        highlight: 'warn',
+        category: 'actual_stats'
+      });
+    }
+    if (pg.exactHeapBlocks !== undefined && pg.exactHeapBlocks > 0) {
+      items.push({
+        name: 'Exact Heap Blocks',
+        value: pg.exactHeapBlocks.toLocaleString(),
+        category: 'actual_stats'
+      });
+    }
+  } else {
+    items.push(
+      {
+        name: 'Shared Hit Blocks (RAM)',
+        value: 'N/A (EXPLAIN without BUFFERS)',
+        category: 'actual_stats'
+      },
+      {
+        name: 'Shared Read Blocks (Disk)',
+        value: 'N/A (EXPLAIN without BUFFERS)',
+        category: 'actual_stats'
+      },
+      {
+        name: 'Buffer Cache Hit Ratio',
+        value: 'N/A',
+        category: 'actual_stats'
+      }
+    );
+  }
+
+  // 5. ACTUAL TIMING
+  const selfElapsed = node.selfElapsedMs ?? 0;
+  items.push(
+    {
+      name: 'Operator Self Elapsed Time',
+      value:
+        selfElapsed > 0
+          ? `${selfElapsed.toLocaleString()} ms (${(selfElapsed / 1000).toFixed(3)}s)${
+              (node.selfElapsedPercent || 0) > 0 ? ` • ${node.selfElapsedPercent?.toFixed(1)}% of query duration` : ''
+            }`
+          : '0 ms (0.000s)',
+      highlight:
+        selfElapsed >= 1000 || (node.selfElapsedPercent || 0) >= 25
+          ? 'cost'
+          : selfElapsed >= 100
+          ? 'warn'
+          : 'normal',
+      category: 'actual_timing'
+    },
+    {
+      name: 'Actual Startup Time',
+      value: `${(pg?.actualStartupMs ?? 0).toFixed(3)} ms`,
+      category: 'actual_timing'
+    },
+    {
+      name: 'Actual Total Time (Cumulative)',
+      value: `${(pg?.actualTotalMs ?? node.actualElapsedMs ?? 0).toFixed(3)} ms`,
+      category: 'actual_timing'
+    }
+  );
+
+  if ((pg?.ioReadMs ?? 0) > 0 || (pg?.ioWriteMs ?? 0) > 0) {
+    items.push({
+      name: 'I/O Read / Write Timing',
+      value: `Read: ${(pg?.ioReadMs ?? 0).toFixed(2)} ms, Write: ${(pg?.ioWriteMs ?? 0).toFixed(2)} ms`,
+      category: 'actual_timing'
+    });
+  }
+
+  // 6. TARGET OBJECT & STORAGE
+  items.push(
+    { name: 'Target Schema', value: node.schema || pg?.schema || 'public', category: 'storage' },
+    { name: 'Target Relation', value: node.table || pg?.relation || 'None', category: 'storage' },
+    { name: 'Relation Alias', value: pg?.alias || node.table || 'None', category: 'storage' },
+    {
+      name: 'Target Index',
+      value: node.index || pg?.indexName || 'None',
+      category: 'storage'
+    }
+  );
+  if (pg?.scanDirection) {
+    items.push({ name: 'Scan Direction', value: pg.scanDirection, category: 'storage' });
+  }
+
+  // 7. PREDICATES
+  if (pg?.filter || node.predicate) {
+    items.push({ name: 'Filter Predicate', value: pg?.filter || node.predicate || '', category: 'predicate' });
+  }
+  if (pg?.indexCond || node.seekPredicates) {
+    items.push({ name: 'Index Condition', value: pg?.indexCond || node.seekPredicates || '', category: 'predicate' });
+  }
+  if (pg?.hashCond) {
+    items.push({ name: 'Hash Join Condition', value: pg.hashCond, category: 'predicate' });
+  }
+  if (pg?.mergeCond) {
+    items.push({ name: 'Merge Join Condition', value: pg.mergeCond, category: 'predicate' });
+  }
+  if (pg?.joinFilter) {
+    items.push({ name: 'Join Filter Predicate', value: pg.joinFilter, category: 'predicate' });
+  }
+  if (pg?.recheckCond) {
+    items.push({ name: 'Recheck Condition', value: pg.recheckCond, category: 'predicate' });
+  }
+  if (!pg?.filter && !node.predicate && !pg?.indexCond && !node.seekPredicates && !pg?.hashCond && !pg?.mergeCond) {
+    items.push({ name: 'Predicate Status', value: 'Unfiltered Operation', category: 'predicate' });
+  }
+
+  // 8. OUTPUT COLUMNS
+  items.push(
+    {
+      name: 'Output Columns Count',
+      value: `${node.outputColumns.length} columns`,
+      category: 'output'
+    },
+    {
+      name: 'Output Column List',
+      value: node.outputColumns.length > 0 ? node.outputColumns.join(', ') : 'None',
+      category: 'output'
+    }
+  );
+
+  // 9. STATEMENT PROPERTIES
+  const stmtPg = statement.pg;
+  items.push(
+    { name: 'Statement ID', value: statement.statementId || '1', category: 'statement' },
+    { name: 'Statement Type', value: statement.statementType || 'SELECT', category: 'statement' },
+    {
+      name: 'Planning Time',
+      value: stmtPg?.planningMs !== undefined ? `${stmtPg.planningMs.toFixed(3)} ms` : 'N/A',
+      category: 'statement'
+    },
+    {
+      name: 'Execution Time',
+      value: stmtPg?.executionMs !== undefined ? `${stmtPg.executionMs.toFixed(3)} ms` : 'N/A',
+      category: 'statement'
+    }
+  );
+
+  if (stmtPg?.jit) {
+    items.push({
+      name: 'JIT Compilation',
+      value: `Functions: ${stmtPg.jit.functions ?? 0}, Inlining: ${(stmtPg.jit.inliningMs ?? 0).toFixed(1)} ms, Optimization: ${(stmtPg.jit.optimizationMs ?? 0).toFixed(1)} ms, Emission: ${(stmtPg.jit.emissionMs ?? 0).toFixed(1)} ms`,
+      category: 'statement'
+    });
+  }
+
+  items.push({
+    name: 'Statement SQL Snippet',
+    value:
+      (statement.statementText || '').slice(0, 160) +
+      ((statement.statementText || '').length > 160 ? '...' : ''),
+    category: 'statement'
+  });
+
+  return items;
+}
+
 function getSsmsProperties(
   node: PlanNode,
-  statementCostOrStatement: number | StatementAnalysis
+  statementCostOrStatement: number | StatementAnalysis,
+  isPgPlan: boolean = false
 ): SsmsPropertyItem[] {
   const statement: Partial<StatementAnalysis> =
     typeof statementCostOrStatement === 'number'
       ? { statementSubTreeCost: statementCostOrStatement }
       : statementCostOrStatement;
+
+  const isPg = isPgPlan || !!node.pg || !!statement.pg;
+  if (isPg) {
+    return getPgProperties(node, statement);
+  }
 
   const statementCost = statement.statementSubTreeCost ?? 0;
   const ownCost = node.estimateCpu + node.estimateIo;
@@ -628,8 +999,10 @@ export function getPropertyExplanation(
   prop: SsmsPropertyItem,
   node: PlanNode,
   statementCost: number,
-  statement?: StatementAnalysis
+  statement?: StatementAnalysis,
+  isPgProp: boolean = false
 ): PropertyExplanation {
+  const isPg = isPgProp || !!node.pg || !!statement?.pg;
   const ownCost = node.estimateCpu + node.estimateIo;
   const costPct = statementCost > 0 ? (node.estimatedTotalSubtreeCost / statementCost) * 100 : node.costPercentage;
   const name = prop.name.trim();
@@ -648,8 +1021,10 @@ export function getPropertyExplanation(
     case 'Physical Operation':
       return {
         title: 'Physical Operation',
-        category: 'Relational Engine Operator',
-        definition: 'The concrete internal C++ execution algorithm chosen by the Query Optimizer to process and transform data at this specific step.',
+        category: isPg ? 'PostgreSQL Execution Engine Operator' : 'Relational Engine Operator',
+        definition: isPg
+          ? 'The execution node chosen by the PostgreSQL query planner to process rows at this step (e.g. Seq Scan, Index Scan, Bitmap Heap Scan, Hash Join, Aggregate).'
+          : 'The concrete internal C++ execution algorithm chosen by the Query Optimizer to process and transform data at this specific step.',
         parts: [
           {
             label: 'Selected Algorithm',
@@ -664,18 +1039,24 @@ export function getPropertyExplanation(
           {
             label: 'Operator Node ID',
             value: `Node #${node.nodeId}`,
-            detail: `Step #${node.nodeId} in the ShowPlan iterator tree.`
+            detail: isPg ? `Step #${node.nodeId} in the PostgreSQL EXPLAIN plan tree.` : `Step #${node.nodeId} in the ShowPlan iterator tree.`
           }
         ],
-        impact: 'Physical operators directly control CPU instruction count, memory workspace grants, and I/O access patterns. Algorithms like Scans and Sorts consume orders of magnitude more resources than targeted Index Seeks.',
-        tuningTip: 'Look for high-cost operators like Clustered Index Scans or Spools and convert them into Index Seeks using supporting composite nonclustered indexes.'
+        impact: isPg
+          ? 'PostgreSQL operators determine disk read patterns (sequential vs random 8KB page fetches), worker parallelization, and memory workspace allocations.'
+          : 'Physical operators directly control CPU instruction count, memory workspace grants, and I/O access patterns. Algorithms like Scans and Sorts consume orders of magnitude more resources than targeted Index Seeks.',
+        tuningTip: isPg
+          ? 'Look for expensive Seq Scans or Sort spills and convert them to Index Scans or pre-sorted pipelines using supporting indexes.'
+          : 'Look for high-cost operators like Clustered Index Scans or Spools and convert them into Index Seeks using supporting composite nonclustered indexes.'
       };
 
     case 'Logical Operation':
       return {
         title: 'Logical Operation',
         category: 'Relational Algebra',
-        definition: 'The algebraic query operation required by T-SQL syntax and semantics (such as Inner Join, Left Outer Join, Aggregate, Filter, or Gather Streams).',
+        definition: isPg
+          ? 'The algebraic query operation required by SQL syntax and semantics (such as Inner Join, Left Join, Aggregate, Filter, or Gather).'
+          : 'The algebraic query operation required by T-SQL syntax and semantics (such as Inner Join, Left Outer Join, Aggregate, Filter, or Gather Streams).',
         parts: [
           {
             label: 'Logical Goal',
@@ -1301,6 +1682,405 @@ export function getPropertyExplanation(
         tuningTip: 'Keep statements parameterized to leverage compiled plan caching and avoid repeated optimization overhead.'
       };
 
+    // PostgreSQL Dedicated Property Explanations
+    case 'Execution Strategy':
+      return {
+        title: 'Execution Strategy',
+        category: 'PostgreSQL Aggregation & Grouping',
+        definition: 'The algorithm strategy chosen by the PostgreSQL query planner for this Aggregate node (Plain, Sorted, or Hashed).',
+        parts: [
+          {
+            label: 'Chosen Strategy',
+            value: prop.value,
+            detail: prop.value === 'Hashed'
+              ? 'Builds an in-memory hash table of distinct grouping keys, then aggregates streaming rows into matching buckets.'
+              : prop.value === 'Sorted'
+              ? 'Consumes input rows that are already sorted by grouping keys and computes running aggregates on the fly.'
+              : 'Aggregates all input rows into a single summary row without grouping.'
+          },
+          {
+            label: 'Memory Workspace',
+            value: prop.value === 'Hashed' ? 'work_mem RAM grant' : 'Minimal memory (streaming)',
+            detail: prop.value === 'Hashed'
+              ? 'Hash aggregation requires enough work_mem to hold all hash buckets in memory; spills to disk batches if exceeded.'
+              : 'Sorted aggregation uses streaming registers with minimal RAM footprint.'
+          }
+        ],
+        impact: 'Hashed aggregation provides high performance for unsorted inputs but requires sufficient work_mem. If the hash table exceeds work_mem, PostgreSQL spills to disk batches.',
+        tuningTip: prop.value === 'Hashed'
+          ? 'If hash aggregate causes temp file spills or high memory usage, increase work_mem or provide an index to allow GroupAggregate with Sorted strategy.'
+          : 'Sorted strategy is optimal when an existing index satisfies the GROUP BY ordering.'
+      };
+
+    case 'Parent Relationship':
+      return {
+        title: 'Parent Relationship',
+        category: 'PostgreSQL Tree Hierarchy',
+        definition: 'Role of this child node relative to its parent operator in the execution tree (e.g. Outer, Inner, SubPlan, InitPlan).',
+        parts: [
+          { label: 'Role in Plan Tree', value: prop.value, detail: `Feeds as the ${prop.value} input to the parent operator.` }
+        ],
+        impact: 'In join operators, the Outer input drives iteration or probing, while the Inner input is scanned or hashed.',
+        tuningTip: 'In Nested Loop joins, ensure the Inner relation is indexed on the join key to minimize loop evaluation cost.'
+      };
+
+    case 'SubPlan Identifier':
+      return {
+        title: 'SubPlan Identifier',
+        category: 'PostgreSQL Subquery Mechanics',
+        definition: 'Identifies an uncorrelated or correlated subquery (SubPlan or InitPlan) evaluated within the query pipeline.',
+        parts: [
+          { label: 'Subplan Name', value: prop.value, detail: `Internal reference identifier for this subplan tree.` }
+        ],
+        impact: 'InitPlans execute once and cache results for the main query. SubPlans execute repeatedly for each outer row, which can multiply execution time if unindexed.',
+        tuningTip: 'Correlated SubPlans can often be rewritten as LEFT JOINs or CTEs with window functions to execute as set-based operations.'
+      };
+
+    case 'Scan Direction':
+      return {
+        title: 'Scan Direction',
+        category: 'PostgreSQL Index Navigation',
+        definition: 'Direction in which PostgreSQL traverses the index B-Tree (Forward, Backward, or NoMovement).',
+        parts: [
+          { label: 'Traversal Direction', value: prop.value, detail: `B-Tree traversal order matching or reversing ORDER BY clauses.` }
+        ],
+        impact: 'Forward and backward index scans are both efficient in B-Trees, but backward scans cannot be used with certain index types (like BRIN or GiST).',
+        tuningTip: 'Ensure multi-column index sort directions (ASC/DESC and NULLS FIRST/LAST) match query ORDER BY clauses.'
+      };
+
+    case 'Execution Loops':
+      return {
+        title: 'Execution Loops',
+        category: 'PostgreSQL Execution Cardinality',
+        definition: 'The number of times this plan node was iterated by its parent node during query runtime.',
+        parts: [
+          {
+            label: 'Loop Count',
+            value: prop.value,
+            detail: 'All actual row counts and timing figures in EXPLAIN (ANALYZE) are reported as per-loop averages.'
+          },
+          {
+            label: 'Total Emitted Rows',
+            value: node.hasActualRows ? `${(node.actualRows * (node.pg?.loops || 1)).toLocaleString()} rows` : 'N/A',
+            detail: 'Calculated as Actual Rows per Loop multiplied by Execution Loops.'
+          }
+        ],
+        impact: 'In Nested Loop joins, the inner child runs once per outer loop. Even sub-millisecond inner queries cause significant latency when loop count is high.',
+        tuningTip: 'Ensure the inner relation of high-loop joins has a selective index on the join key, or allow the planner to consider Hash Join.'
+      };
+
+    case 'Workers Planned / Launched':
+      return {
+        title: 'Parallel Workers (Planned / Launched)',
+        category: 'PostgreSQL Parallel Execution',
+        definition: 'The count of background worker processes planned by the query optimizer and successfully launched by the PostgreSQL postmaster.',
+        parts: [
+          { label: 'Worker Processes', value: prop.value, detail: 'Planned worker threads vs actual worker processes launched at runtime.' },
+          { label: 'Parallel Coordination', value: node.physicalOp.includes('Gather') ? 'Gather Exchange' : 'Parallel Worker Branch', detail: 'Worker processes scan and process data in parallel before returning tuples.' }
+        ],
+        impact: 'Parallel workers divide large sequential scans and joins across CPU cores, dramatically reducing wall-clock elapsed time on multicore systems.',
+        tuningTip: 'If launched is fewer than planned, the server may have hit max_parallel_workers or max_worker_processes limits.'
+      };
+
+    case 'Sort Method & Space Used':
+    case 'Sort Method & Space':
+      return {
+        title: 'Sort Method & Space Used',
+        category: 'PostgreSQL Memory & Sorting',
+        definition: 'The sorting algorithm chosen by PostgreSQL (quicksort, top-N heapsort, or external merge) and workspace space consumed.',
+        parts: [
+          { label: 'Sort Algorithm', value: prop.value, detail: prop.value.toLowerCase().includes('disk') ? 'External merge sort spilled to disk because data volume exceeded work_mem.' : 'In-memory quicksort / top-N heapsort.' },
+          { label: 'Memory Allocation', value: `${node.pg?.sortSpaceKb ?? 0} KB`, detail: 'Workspace memory or temporary disk file space used during sort.' }
+        ],
+        impact: 'Spilling to disk (external merge) increases elapsed time by orders of magnitude due to temporary file I/O overhead.',
+        tuningTip: prop.value.toLowerCase().includes('disk')
+          ? 'Increase work_mem for this query (e.g. SET LOCAL work_mem = "64MB") or create an index matching the ORDER BY columns.'
+          : 'In-memory sort is fast, but if memory consumption is high across many concurrent connections, tune work_mem carefully.'
+      };
+
+    case 'Hash Join Batches & Buckets':
+    case 'Hash Join Batches (Spill)':
+      return {
+        title: 'Hash Join Batches & Buckets',
+        category: 'PostgreSQL Join Mechanics',
+        definition: 'Number of hash buckets and batches used for the in-memory hash table. Multiple batches indicate the hash table exceeded work_mem and spilled to disk.',
+        parts: [
+          { label: 'Batch Count', value: prop.value, detail: (node.pg?.hashBatches ?? 1) > 1 ? 'Multi-batch hash join: inner relation spilled to disk batches.' : 'Single batch: hash table fit entirely in work_mem.' },
+          { label: 'Hash Buckets', value: `${node.pg?.hashBuckets ?? 1024} buckets`, detail: 'Allocated power-of-two hash bucket slots for key distribution.' }
+        ],
+        impact: 'Multi-batch hash joins write partition chunks to temporary files on disk and read them back, multiplying I/O latency.',
+        tuningTip: 'Increase work_mem so the hash table fits into 1 batch in memory, or filter the build relation to reduce row counts.'
+      };
+
+    case 'Shared Hit Blocks (RAM)':
+      return {
+        title: 'Shared Hit Blocks (RAM Buffer Cache)',
+        category: 'PostgreSQL Buffers & I/O',
+        definition: 'The number of 8KB database blocks found directly in PostgreSQL shared_buffers cache in RAM without requiring filesystem or disk I/O.',
+        parts: [
+          { label: 'RAM Block Hits', value: prop.value, detail: 'Data pages accessed in sub-microsecond shared memory.' },
+          { label: 'Volume in RAM', value: `${(((node.pg?.buffers?.sharedHit ?? 0) * 8) / 1024).toFixed(2)} MB`, detail: 'Equivalent megabytes read from PostgreSQL buffer cache.' }
+        ],
+        impact: 'Shared buffer hits provide maximum possible read throughput and zero disk I/O wait latency.',
+        tuningTip: 'Aim for a buffer cache hit ratio > 99%. If hit ratio drops, increase shared_buffers or add selective indexes to reduce page churn.'
+      };
+
+    case 'Shared Read Blocks (Disk)':
+      return {
+        title: 'Shared Read Blocks (Disk / OS Read)',
+        category: 'PostgreSQL Buffers & I/O',
+        definition: 'The number of 8KB database blocks not found in shared_buffers that had to be requested from the OS page cache or physical storage.',
+        parts: [
+          { label: 'Disk / OS Block Reads', value: prop.value, detail: 'Blocks read from filesystem or storage hardware.' },
+          { label: 'Volume Read', value: `${(((node.pg?.buffers?.sharedRead ?? 0) * 8) / 1024).toFixed(2)} MB`, detail: 'Equivalent megabytes transferred into shared_buffers.' }
+        ],
+        impact: 'Shared reads cause I/O latency and buffer page evictions. On spinning disks or throttled cloud storage, high reads cause major query stalls.',
+        tuningTip: 'Inspect whether an index scan or index-only scan can replace sequential table scans to eliminate unneeded block reads.'
+      };
+
+    case 'Shared Dirtied Blocks':
+      return {
+        title: 'Shared Dirtied Blocks',
+        category: 'PostgreSQL Buffers & I/O',
+        definition: 'Number of 8KB shared buffer blocks modified by this operation, which must eventually be written to disk by the background writer or checkpointer.',
+        parts: [
+          { label: 'Dirtied Blocks', value: prop.value, detail: 'Pages modified in shared memory during query execution.' }
+        ],
+        impact: 'High dirty block counts increase checkpoint load and write I/O pressure.',
+        tuningTip: 'Batch large write operations and tune checkpoint_completion_target to smooth out write spikes.'
+      };
+
+    case 'Shared Written Blocks':
+      return {
+        title: 'Shared Written Blocks',
+        category: 'PostgreSQL Buffers & I/O',
+        definition: 'Number of 8KB shared blocks written directly to disk by this query backend (typically when dirty buffers must be evicted to make room for new reads).',
+        parts: [
+          { label: 'Written Blocks', value: prop.value, detail: 'Blocks synchronously flushed to storage by this backend process.' }
+        ],
+        impact: 'Backend writes cause synchronous latency stalls because the query process pauses to flush dirty pages instead of the background writer.',
+        tuningTip: 'Tune bgwriter_lru_maxpages and bgwriter_delay so the background writer cleans pages ahead of client backend demands.'
+      };
+
+    case 'Temp Blocks (Spill I/O)':
+      return {
+        title: 'Temp Blocks Read / Written (work_mem Spill)',
+        category: 'PostgreSQL Memory & Temp I/O',
+        definition: 'The number of temporary 8KB blocks written to and read from disk because an operation (Sort, Hash, or Materialize) exceeded work_mem.',
+        parts: [
+          { label: 'Spill Volume', value: prop.value, detail: 'Temporary disk space used for work_mem overflow in pgsql_tmp.' }
+        ],
+        impact: 'Temp file spills severely degrade query performance by turning sub-millisecond in-memory operations into disk read/write loops.',
+        tuningTip: 'Increase work_mem for this query session (e.g. SET LOCAL work_mem = "64MB") or optimize the query to sort/hash fewer columns.'
+      };
+
+    case 'Heap Fetches (Index-Only Scan)':
+      return {
+        title: 'Heap Fetches (Index-Only Scan)',
+        category: 'PostgreSQL Storage & MVCC',
+        definition: 'Number of times an Index-Only Scan had to inspect the base heap table page because the page was not marked all-visible in the visibility map.',
+        parts: [
+          { label: 'Heap Fetch Count', value: prop.value, detail: 'Heap table reads required to verify row MVCC visibility.' }
+        ],
+        impact: 'If heap fetches are high, an Index-Only Scan loses its performance advantage and behaves like a regular Index Scan, causing redundant table I/O.',
+        tuningTip: 'Run VACUUM ANALYZE on the table to update the visibility map and enable pure 0-fetch Index-Only Scans.'
+      };
+
+    case 'Lossy Heap Blocks':
+      return {
+        title: 'Lossy Heap Blocks',
+        category: 'PostgreSQL Bitmap Scan Mechanics',
+        definition: 'Number of table pages where Bitmap Index Scan degraded to lossy page-level tracking because work_mem was exhausted.',
+        parts: [
+          { label: 'Lossy Blocks', value: prop.value, detail: 'Pages requiring row-by-row recheck against the filter condition.' }
+        ],
+        impact: 'Lossy blocks require PostgreSQL to recheck every tuple on the page against index conditions, adding CPU overhead.',
+        tuningTip: 'Increase work_mem so the bitmap can record exact row pointers (TIDs) instead of lossy page addresses.'
+      };
+
+    case 'Exact Heap Blocks':
+      return {
+        title: 'Exact Heap Blocks',
+        category: 'PostgreSQL Bitmap Scan Mechanics',
+        definition: 'Number of table pages accessed where exact row pointers (TIDs) were recorded in the bitmap in work_mem.',
+        parts: [
+          { label: 'Exact Blocks', value: prop.value, detail: 'Pages with exact tuple addressing without recheck overhead.' }
+        ],
+        impact: 'Exact blocks ensure only matching rows are processed, maximizing bitmap scan efficiency.',
+        tuningTip: 'Ensure work_mem is large enough to avoid degrading to lossy blocks on large bitmap index scans.'
+      };
+
+    case 'Rows Removed by Filter':
+      return {
+        title: 'Rows Removed by Filter',
+        category: 'PostgreSQL Filtering & Selectivity',
+        definition: 'The number of table rows read from disk/buffers that were evaluated against the WHERE filter condition and discarded.',
+        parts: [
+          { label: 'Discarded Rows', value: prop.value, detail: 'Rows that consumed I/O bandwidth but did not match the query filter.' },
+          { label: 'Filter Predicate', value: node.pg?.filter || node.predicate || 'None', detail: 'Residual filter expression applied to each row.' }
+        ],
+        impact: 'High rows removed indicates low index selectivity; the engine spends substantial time scanning rows only to throw them away.',
+        tuningTip: 'Create a composite B-Tree index covering the filter predicate columns to evaluate conditions at the index level rather than as a post-scan filter.'
+      };
+
+    case 'Rows Removed by Index Recheck':
+      return {
+        title: 'Rows Removed by Index Recheck',
+        category: 'PostgreSQL Index Filtering',
+        definition: 'Rows discarded during Bitmap Heap Scan rechecking lossy blocks against the index condition.',
+        parts: [
+          { label: 'Recheck Discards', value: prop.value, detail: 'Non-matching rows on lossy pages eliminated after page fetch.' }
+        ],
+        impact: 'Indicates lossy bitmap tracking caused unnecessary row fetches.',
+        tuningTip: 'Increase work_mem to allow exact bitmap tracking and eliminate recheck discards.'
+      };
+
+    case 'Startup Cost':
+      return {
+        title: 'Startup Cost',
+        category: 'PostgreSQL Planner Cost Model',
+        definition: 'Estimated cost units incurred before this node can emit its very first output row (e.g., sorting, building a hash table).',
+        parts: [
+          { label: 'Startup Cost Units', value: prop.value, detail: 'Units calculated using seq_page_cost (1.0), random_page_cost (4.0), and cpu_operator_cost.' }
+        ],
+        impact: 'High startup cost delays Time-to-First-Row (TTFR), critical for interactive user queries or queries using LIMIT.',
+        tuningTip: 'If low startup latency is desired, consider indexes that provide pre-sorted ordering to replace Sort or Hash nodes.'
+      };
+
+    case 'Total Cost':
+      return {
+        title: 'Total Cost',
+        category: 'PostgreSQL Planner Cost Model',
+        definition: 'Estimated cumulative cost units for this operator and all underlying children to run to completion.',
+        parts: [
+          { label: 'Total Cost Units', value: prop.value, detail: 'Primary metric used by PostgreSQL optimizer to compare candidate execution paths.' },
+          { label: 'Statement Share', value: `${costPct.toFixed(1)}% of query`, detail: `Share of the total statement estimated cost.` }
+        ],
+        impact: 'The query planner compares alternative execution paths and always selects the path with the lowest Total Cost.',
+        tuningTip: 'If the planner chooses a slow plan, inspect planner cost parameters like random_page_cost (reduce to 1.1–1.5 for SSD/NVMe storage).'
+      };
+
+    case 'Plan Width (Row Size)':
+      return {
+        title: 'Plan Width (Row Size)',
+        category: 'PostgreSQL Memory & Buffer Footprint',
+        definition: 'The estimated average width in bytes of each row emitted by this plan node.',
+        parts: [
+          { label: 'Row Width', value: prop.value, detail: 'Average projected byte width per row.' }
+        ],
+        impact: 'Wider rows increase memory consumption for Sort and Hash nodes and reduce the number of rows fitting in shared_buffers 8KB pages.',
+        tuningTip: 'Project only required columns in SELECT clauses to keep plan width narrow and reduce memory usage.'
+      };
+
+    case 'Plan Rows (Estimated)':
+      return {
+        title: 'Plan Rows (Estimated)',
+        category: 'PostgreSQL Cardinality & Statistics',
+        definition: 'Number of rows the PostgreSQL planner estimated would be emitted by this plan node, based on pg_statistic and ANALYZE data.',
+        parts: [
+          { label: 'Estimated Rows', value: prop.value, detail: 'Statistical prediction based on column histograms and MCV (Most Common Values) lists.' }
+        ],
+        impact: 'Cardinality estimation drives every planner decision: join order, join algorithm (Nested Loop vs Hash vs Merge), and index usage.',
+        tuningTip: 'If plan rows diverges significantly from actual rows, run ANALYZE or increase default_statistics_target.'
+      };
+
+    case 'Actual Rows (Total)':
+      return {
+        title: 'Actual Rows (Total Across All Loops)',
+        category: 'PostgreSQL Execution Volume',
+        definition: 'The true total count of rows emitted by this operator across all loop iterations at runtime.',
+        parts: [
+          { label: 'Total Actual Rows', value: prop.value, detail: 'Measured by PostgreSQL executor under EXPLAIN (ANALYZE).' },
+          { label: 'Plan Rows', value: (node.pg?.planRows ?? node.estimateRows).toLocaleString(), detail: 'Compile-time estimate.' }
+        ],
+        impact: 'Comparing actual rows with plan rows reveals cardinality estimation errors that cause suboptimal plan selection.',
+        tuningTip: 'A large discrepancy indicates stale statistics or correlated filter columns that require extended statistics.'
+      };
+
+    case 'Actual Rows Per Loop':
+      return {
+        title: 'Actual Rows Per Loop',
+        category: 'PostgreSQL Execution Volume',
+        definition: 'Average number of rows emitted per single execution loop of this operator.',
+        parts: [
+          { label: 'Rows Per Loop', value: prop.value, detail: 'Standard row count reported directly by PostgreSQL EXPLAIN (ANALYZE).' }
+        ],
+        impact: 'In nested loops, this represents the average rows produced each time the inner relation is invoked.',
+        tuningTip: 'Useful for understanding inner scan efficiency in nested loop joins.'
+      };
+
+    case 'Actual Startup Time':
+      return {
+        title: 'Actual Startup Time',
+        category: 'PostgreSQL Runtime Timing',
+        definition: 'The elapsed time in milliseconds before this node emitted its very first output row.',
+        parts: [
+          { label: 'Startup Duration', value: prop.value, detail: 'Wall-clock time to begin yielding rows.' }
+        ],
+        impact: 'Directly impacts Time-to-First-Row (TTFR) latency for web APIs and interactive applications.',
+        tuningTip: 'To reduce startup time, avoid blocking operators like Sort and Materialize before yielding results.'
+      };
+
+    case 'Actual Total Time (Cumulative)':
+      return {
+        title: 'Actual Total Time (Cumulative)',
+        category: 'PostgreSQL Runtime Timing',
+        definition: 'The total wall-clock time in milliseconds spent in this node and all of its child subtrees from start to finish.',
+        parts: [
+          { label: 'Cumulative Duration', value: prop.value, detail: 'Total execution time including child operator trees.' }
+        ],
+        impact: 'The root node total time represents the overall query execution duration.',
+        tuningTip: 'Look at Operator Self Elapsed Time to isolate the specific operator causing the greatest delay.'
+      };
+
+    case 'I/O Read / Write Timing':
+      return {
+        title: 'I/O Read / Write Timing',
+        category: 'PostgreSQL Storage Engine & Timing',
+        definition: 'Time spent by this node waiting on storage subsystem block read and write operations (measured when track_io_timing = on).',
+        parts: [
+          { label: 'I/O Duration', value: prop.value, detail: 'Storage read and write latency recorded via OS clock.' }
+        ],
+        impact: 'High I/O read time confirms that slow query performance is caused by physical disk latency rather than CPU processing.',
+        tuningTip: 'Ensure track_io_timing is enabled in postgresql.conf to diagnose storage bottlenecks.'
+      };
+
+    case 'Planning Time':
+      return {
+        title: 'Planning Time',
+        category: 'PostgreSQL Planner & Optimization',
+        definition: 'Time taken by the PostgreSQL query planner to parse, analyze, rewrite, and generate the optimal execution plan tree.',
+        parts: [
+          { label: 'Planner Duration', value: prop.value, detail: 'Wall-clock time spent exploring candidate execution paths.' }
+        ],
+        impact: 'For short-running OLTP queries (<1ms), planning time can exceed execution time.',
+        tuningTip: 'Use prepared statements (PREPARE / EXECUTE) or connection poolers with statement caching to bypass re-planning overhead.'
+      };
+
+    case 'Execution Time':
+      return {
+        title: 'Execution Time',
+        category: 'PostgreSQL Execution Engine',
+        definition: 'Total runtime taken by the PostgreSQL executor to run the plan, retrieve tuples, and process triggers, excluding planning time.',
+        parts: [
+          { label: 'Executor Duration', value: prop.value, detail: 'Elapsed query runtime measured by the engine.' }
+        ],
+        impact: 'Primary benchmark of query latency and throughput on the server.',
+        tuningTip: 'Target the operator with highest Self Elapsed Time to reduce total execution time.'
+      };
+
+    case 'JIT Compilation':
+      return {
+        title: 'JIT Compilation (LLVM)',
+        category: 'PostgreSQL Execution Architecture',
+        definition: 'Just-In-Time compilation using LLVM to accelerate expressions, tuple deforming, and aggregates in complex queries.',
+        parts: [
+          { label: 'JIT Metrics', value: prop.value, detail: 'LLVM generation, inlining, optimization, and code emission timings.' }
+        ],
+        impact: 'JIT speeds up complex analytical queries on millions of rows, but JIT compile overhead can slow down short queries.',
+        tuningTip: 'If JIT overhead exceeds the execution time gains, disable JIT for the session (SET LOCAL jit = off).'
+      };
+
     default:
       return {
         title: prop.name,
@@ -1313,7 +2093,9 @@ export function getPropertyExplanation(
             detail: `Value recorded for operator ${node.physicalOp} (Node #${node.nodeId}).`
           }
         ],
-        impact: 'Influences SQL Server query execution, cardinality estimation, and engine resource allocation.'
+        impact: isPg
+          ? 'Influences PostgreSQL query execution, planner cost estimates, and engine resource allocation.'
+          : 'Influences SQL Server query execution, cardinality estimation, and engine resource allocation.'
       };
   }
 }
@@ -1422,23 +2204,26 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
   const activePropItem = useMemo(() => {
     if (hoveredProp) return hoveredProp.prop;
     if (pinnedPropName && selectedNode) {
-      const allProps = getSsmsProperties(selectedNode, selectedStatement);
+      const isPg = plan?.engine === 'postgresql' || !!selectedNode.pg || !!selectedStatement.pg;
+      const allProps = getSsmsProperties(selectedNode, selectedStatement, isPg);
       return allProps.find((p) => p.name === pinnedPropName) || null;
     }
     return null;
-  }, [hoveredProp, pinnedPropName, selectedNode, selectedStatement]);
+  }, [hoveredProp, pinnedPropName, selectedNode, selectedStatement, plan?.engine]);
 
   const activeRect = hoveredProp?.rect || pinnedRect;
 
   const activeExplanation = useMemo(() => {
     if (!activePropItem || !selectedNode) return null;
+    const isPg = plan?.engine === 'postgresql' || !!selectedNode.pg || !!selectedStatement.pg;
     return getPropertyExplanation(
       activePropItem,
       selectedNode,
       selectedStatement.statementSubTreeCost,
-      selectedStatement
+      selectedStatement,
+      isPg
     );
-  }, [activePropItem, selectedNode, selectedStatement]);
+  }, [activePropItem, selectedNode, selectedStatement, plan?.engine]);
 
   const activeCoords = useMemo(() => {
     if (!activeRect) return null;
@@ -1689,7 +2474,7 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
           </button>
           <button
             className="btn-copy-sm"
-            title="Copy a runnable T-SQL script with the plan's parameter values filled in"
+            title={plan?.engine === 'postgresql' || !!selectedStatement.pg ? 'Copy a runnable PostgreSQL script with EXPLAIN (ANALYZE, BUFFERS)' : "Copy a runnable T-SQL script with the plan's parameter values filled in"}
             onClick={() => handleCopySQL(buildReproScript(selectedStatement))}
           >
             <FileText size={13} />
@@ -1836,7 +2621,8 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
 
         {/* Node Inspector Drawer */}
         {selectedNode && (() => {
-          const allProperties = getSsmsProperties(selectedNode, selectedStatement);
+          const isPg = plan?.engine === 'postgresql' || !!selectedNode.pg || !!selectedStatement.pg;
+          const allProperties = getSsmsProperties(selectedNode, selectedStatement, isPg);
           const filteredProperties = propSearchTerm.trim()
             ? allProperties.filter(
                 (p) =>
@@ -1864,7 +2650,7 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
             ];
             const lines = [
               `============================================================`,
-              `  ${selectedNode.physicalOp.toUpperCase()} (Node #${selectedNode.nodeId}) - ShowPlan Properties`,
+              `  ${selectedNode.physicalOp.toUpperCase()} (Node #${selectedNode.nodeId}) - ${isPg ? 'PostgreSQL EXPLAIN Properties' : 'ShowPlan Properties'}`,
               `============================================================`,
               ``
             ];
@@ -2088,10 +2874,12 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
                         {selectedNode.skewReason}
                       </div>
                       <div style={{ marginTop: '6px', fontSize: '11px', color: '#fef3c7' }}>
-                        <strong>Immediate T-SQL Remedy:</strong>
+                        <strong>{isPg ? 'Immediate PostgreSQL Remedy:' : 'Immediate T-SQL Remedy:'}</strong>
                         <div style={{ marginTop: '3px' }}>
                           <code style={{ background: 'rgba(0,0,0,0.35)', padding: '3px 6px', borderRadius: '4px', display: 'inline-block' }}>
-                            UPDATE STATISTICS {selectedNode.schema ? `[${selectedNode.schema}].[${selectedNode.table}]` : (selectedNode.table ? `[${selectedNode.table}]` : '#TargetTable')} WITH FULLSCAN
+                            {isPg
+                              ? `ANALYZE ${selectedNode.schema ? `${selectedNode.schema}.${selectedNode.table}` : (selectedNode.table || 'target_table')};`
+                              : `UPDATE STATISTICS ${selectedNode.schema ? `[${selectedNode.schema}].[${selectedNode.table}]` : (selectedNode.table ? `[${selectedNode.table}]` : '#TargetTable')} WITH FULLSCAN`}
                           </code>
                         </div>
                       </div>
@@ -2099,7 +2887,7 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
                         type="button"
                         className="btn-open-skew-plan"
                         onClick={() => setShowSkewModal(true)}
-                        title="Click to view deep root cause diagnosis, memory impact, and copyable T-SQL fixes"
+                        title={isPg ? "Click to view deep root cause diagnosis, work_mem impact, and copyable PostgreSQL fixes" : "Click to view deep root cause diagnosis, memory impact, and copyable T-SQL fixes"}
                       >
                         <Zap size={12} color="#fbbf24" />
                         <span>View Deep Resolution Plan & Diagnostics ({selectedNode.skewRatio ? selectedNode.skewRatio.toFixed(0) : '3372'}x)</span>
@@ -2191,7 +2979,7 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
                           {catKey === 'predicate' && <Filter size={13} color="#fbbf24" />}
                           {catKey === 'output' && <Database size={13} color="#10b981" />}
                           {catKey === 'statement' && <FileText size={13} color="#60a5fa" />}
-                          <span>{meta.label}</span>
+                          <span>{isPg && catKey === 'actual_stats' ? 'PostgreSQL Buffers & I/O' : isPg && catKey === 'storage' ? 'Target Relation' : meta.label}</span>
                           <span className="category-group-badge">{items.length}</span>
                         </div>
                         <div className="category-group-actions" onClick={(e) => e.stopPropagation()}>
@@ -2374,11 +3162,11 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
                             </div>
                           )}
 
-                          {/* Extra Custom View for Statement Context: T-SQL Snippet */}
+                          {/* Extra Custom View for Statement Context: SQL Snippet */}
                           {catKey === 'statement' && selectedStatement.statementText && (
                             <div style={{ padding: '8px 12px 12px' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                <span style={{ fontSize: 11, color: '#94a3b8' }}>Statement T-SQL Code:</span>
+                                <span style={{ fontSize: 11, color: '#94a3b8' }}>{isPg ? 'Statement PostgreSQL Code:' : 'Statement T-SQL Code:'}</span>
                                 <button
                                   type="button"
                                   className="btn-category-action"
@@ -2410,7 +3198,7 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <Wrench size={13} color="#fbbf24" />
                         <span style={{ fontSize: '11px', fontWeight: 700, color: '#fde68a', textTransform: 'uppercase' }}>
-                          Tuning Playbook ({selectedNode.skewRatio ? selectedNode.skewRatio.toFixed(0) : '3372'}x Skew)
+                          {isPg ? 'PostgreSQL Tuning Playbook' : 'Tuning Playbook'} ({selectedNode.skewRatio ? selectedNode.skewRatio.toFixed(0) : '3372'}x Skew)
                         </span>
                       </div>
                       <button
@@ -2424,45 +3212,91 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <div className="remedy-step-card">
-                        <div className="step-header">
-                          <span className="step-num">Step 1</span>
-                          <span style={{ fontSize: '11px', color: '#cbd5e1', flex: 1 }}>Update Temp Table Stats</span>
-                          <button
-                            type="button"
-                            className="btn-code-copy"
-                            onClick={() => {
-                              navigator.clipboard.writeText(`UPDATE STATISTICS ${selectedNode.schema ? `[${selectedNode.schema}].[${selectedNode.table}]` : (selectedNode.table ? `[${selectedNode.table}]` : '#TargetTable')} WITH FULLSCAN;`);
-                            }}
-                          >
-                            <Copy size={10} />
-                            <span>Copy</span>
-                          </button>
-                        </div>
-                        <pre className="remedy-code-block" style={{ fontSize: '10.5px' }}>
-                          UPDATE STATISTICS {selectedNode.schema ? `[${selectedNode.schema}].[${selectedNode.table}]` : (selectedNode.table ? `[${selectedNode.table}]` : '#TargetTable')} WITH FULLSCAN;
-                        </pre>
-                      </div>
+                      {isPg ? (
+                        <>
+                          <div className="remedy-step-card">
+                            <div className="step-header">
+                              <span className="step-num">Step 1</span>
+                              <span style={{ fontSize: '11px', color: '#cbd5e1', flex: 1 }}>Update Table Statistics</span>
+                              <button
+                                type="button"
+                                className="btn-code-copy"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(`ANALYZE ${selectedNode.schema ? `${selectedNode.schema}.${selectedNode.table}` : (selectedNode.table || 'target_table')};`);
+                                }}
+                              >
+                                <Copy size={10} />
+                                <span>Copy</span>
+                              </button>
+                            </div>
+                            <pre className="remedy-code-block" style={{ fontSize: '10.5px' }}>
+                              ANALYZE {selectedNode.schema ? `${selectedNode.schema}.${selectedNode.table}` : (selectedNode.table || 'target_table')};
+                            </pre>
+                          </div>
 
-                      <div className="remedy-step-card">
-                        <div className="step-header">
-                          <span className="step-num">Step 2</span>
-                          <span style={{ fontSize: '11px', color: '#cbd5e1', flex: 1 }}>Bypass Parameter Sniffing</span>
-                          <button
-                            type="button"
-                            className="btn-code-copy"
-                            onClick={() => {
-                              navigator.clipboard.writeText(`OPTION (RECOMPILE);`);
-                            }}
-                          >
-                            <Copy size={10} />
-                            <span>Copy</span>
-                          </button>
-                        </div>
-                        <pre className="remedy-code-block" style={{ fontSize: '10.5px' }}>
-                          OPTION (RECOMPILE);
-                        </pre>
-                      </div>
+                          <div className="remedy-step-card">
+                            <div className="step-header">
+                              <span className="step-num">Step 2</span>
+                              <span style={{ fontSize: '11px', color: '#cbd5e1', flex: 1 }}>Tune Workspace Memory</span>
+                              <button
+                                type="button"
+                                className="btn-code-copy"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(`SET LOCAL work_mem = '64MB';`);
+                                }}
+                              >
+                                <Copy size={10} />
+                                <span>Copy</span>
+                              </button>
+                            </div>
+                            <pre className="remedy-code-block" style={{ fontSize: '10.5px' }}>
+                              SET LOCAL work_mem = '64MB';
+                            </pre>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="remedy-step-card">
+                            <div className="step-header">
+                              <span className="step-num">Step 1</span>
+                              <span style={{ fontSize: '11px', color: '#cbd5e1', flex: 1 }}>Update Temp Table Stats</span>
+                              <button
+                                type="button"
+                                className="btn-code-copy"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(`UPDATE STATISTICS ${selectedNode.schema ? `[${selectedNode.schema}].[${selectedNode.table}]` : (selectedNode.table ? `[${selectedNode.table}]` : '#TargetTable')} WITH FULLSCAN;`);
+                                }}
+                              >
+                                <Copy size={10} />
+                                <span>Copy</span>
+                              </button>
+                            </div>
+                            <pre className="remedy-code-block" style={{ fontSize: '10.5px' }}>
+                              UPDATE STATISTICS {selectedNode.schema ? `[${selectedNode.schema}].[${selectedNode.table}]` : (selectedNode.table ? `[${selectedNode.table}]` : '#TargetTable')} WITH FULLSCAN;
+                            </pre>
+                          </div>
+
+                          <div className="remedy-step-card">
+                            <div className="step-header">
+                              <span className="step-num">Step 2</span>
+                              <span style={{ fontSize: '11px', color: '#cbd5e1', flex: 1 }}>Bypass Parameter Sniffing</span>
+                              <button
+                                type="button"
+                                className="btn-code-copy"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(`OPTION (RECOMPILE);`);
+                                }}
+                              >
+                                <Copy size={10} />
+                                <span>Copy</span>
+                              </button>
+                            </div>
+                            <pre className="remedy-code-block" style={{ fontSize: '10.5px' }}>
+                              OPTION (RECOMPILE);
+                            </pre>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}

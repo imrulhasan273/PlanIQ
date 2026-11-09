@@ -23,6 +23,7 @@ interface LiveConnectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   status: ConnectionStatus | null;
+  engine?: 'sqlserver' | 'postgresql';
   onStatusChange: (status: ConnectionStatus | null) => void;
   defaultUsername?: string;
   onOpenConnectionsTab?: () => void;
@@ -32,19 +33,21 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
   isOpen,
   onClose,
   status,
+  engine = 'sqlserver',
   onStatusChange,
   defaultUsername,
   onOpenConnectionsTab,
 }) => {
+  const isPg = engine === 'postgresql' || status?.serverType === 'postgresql';
   const [savedProfiles, setSavedProfiles] = useState<DBConnectionProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
 
   const [config, setConfig] = useState<ConnectionConfig>(() => {
-    const saved = localStorage.getItem('planiq_live_conn');
+    const saved = localStorage.getItem(isPg ? 'planiq_live_conn_pg' : 'planiq_live_conn');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (defaultUsername && (!parsed.username || parsed.username === 'sa')) {
+        if (defaultUsername && (!parsed.username || parsed.username === 'sa' || parsed.username === 'postgres')) {
           parsed.username = defaultUsername;
         }
         return parsed;
@@ -52,10 +55,10 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
     }
     return {
       server: 'localhost',
-      port: 1433,
-      database: 'master',
+      port: isPg ? 5432 : 1433,
+      database: isPg ? 'postgres' : 'master',
       authType: 'sql',
-      username: defaultUsername || 'sa',
+      username: isPg ? 'postgres' : (defaultUsername || 'sa'),
       password: '',
       encrypt: false,
       trustServerCertificate: true,
@@ -100,9 +103,13 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
     setSelectedProfileId(id);
     const found = savedProfiles.find((p) => p.id === id);
     if (found) {
+      const profEngine =
+        found.engine === 'postgresql' || found.port === 5432 || found.database?.toLowerCase() === 'postgres'
+          ? 'postgresql'
+          : 'sqlserver';
       setConfig({
         server: found.server,
-        port: found.port || 1433,
+        port: found.port || (profEngine === 'postgresql' ? 5432 : 1433),
         database: found.database,
         authType: found.authType as any,
         username: found.username || '',
@@ -135,6 +142,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
         applicationIntent: config.applicationIntent || 'ReadOnly',
         timeoutSeconds: config.timeoutSeconds || 4,
         isDefault: false,
+        engine: isPg ? 'postgresql' : 'sqlserver',
         createdAt: '',
         updatedAt: '',
       } as any);
@@ -174,7 +182,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
         setErrorMsg('Live database connection requires running PlanIQ as a desktop application.');
       }
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Failed to connect to SQL Server');
+      setErrorMsg(err?.message || (isPg ? 'Failed to connect to PostgreSQL' : 'Failed to connect to SQL Server'));
     } finally {
       setIsLoading(false);
     }
@@ -221,10 +229,12 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
             </div>
             <div>
               <h2 style={{ fontSize: '17px', margin: 0, fontWeight: 700, color: '#f8fafc' }}>
-                Connect to Microsoft SQL Server
+                {isPg ? 'Connect to PostgreSQL' : 'Connect to Microsoft SQL Server'}
               </h2>
               <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>
-                Live In-Flight Plans, Query Store Harvesting & Real-Time Deadlocks
+                {isPg
+                  ? 'Live pg_stat_activity, pg_stat_statements, pg_locks & Wait Events'
+                  : 'Live In-Flight Plans, Query Store Harvesting & Real-Time Deadlocks'}
               </p>
             </div>
           </div>
@@ -351,12 +361,17 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                   overflow: 'hidden',
                 }}
               >
-                <option value="">-- Choose from Saved SQLite Connections --</option>
-                {savedProfiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.server}:{p.port || 1433} / {p.database}) {p.isDefault ? '★' : ''}
-                  </option>
-                ))}
+                {savedProfiles.map((p) => {
+                  const profEngine =
+                    p.engine === 'postgresql' || p.port === 5432 || p.database?.toLowerCase() === 'postgres'
+                      ? 'postgresql'
+                      : 'sqlserver';
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {profEngine === 'postgresql' ? '🐘 ' : '🗄️ '} {p.name} ({p.server}:{p.port || (profEngine === 'postgresql' ? 5432 : 1433)} / {p.database}) {p.isDefault ? '★' : ''}
+                    </option>
+                  );
+                })}
               </select>
 
               <button
@@ -395,9 +410,9 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
               <input
                 type="number"
                 className="form-input"
-                placeholder="1433"
+                placeholder={isPg ? "5432" : "1433"}
                 value={config.port}
-                onChange={(e) => handleSaveConfig({ ...config, port: parseInt(e.target.value) || 1433 })}
+                onChange={(e) => handleSaveConfig({ ...config, port: parseInt(e.target.value) || (isPg ? 5432 : 1433) })}
               />
             </div>
           </div>
@@ -409,7 +424,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
             <input
               type="text"
               className="form-input"
-              placeholder="e.g. SalesDB, AdventureWorks"
+              placeholder={isPg ? "postgres, production_db" : "e.g. SalesDB, AdventureWorks"}
               value={config.database}
               onChange={(e) => handleSaveConfig({ ...config, database: e.target.value })}
             />
@@ -428,7 +443,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                   checked={config.authType === 'sql'}
                   onChange={() => handleSaveConfig({ ...config, authType: 'sql' })}
                 />
-                SQL Authentication
+                {isPg ? 'Password (MD5 / SCRAM-SHA-256)' : 'SQL Authentication'}
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#e2e8f0', cursor: 'pointer' }}>
                 <input
@@ -437,7 +452,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                   checked={config.authType === 'windows'}
                   onChange={() => handleSaveConfig({ ...config, authType: 'windows' })}
                 />
-                Windows / Integrated
+                {isPg ? 'Local / OS Peer' : 'Windows / Integrated'}
               </label>
             </div>
           </div>
@@ -451,7 +466,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="sa"
+                  placeholder={isPg ? "postgres" : "sa"}
                   value={config.username || ''}
                   onChange={(e) => handleSaveConfig({ ...config, username: e.target.value })}
                 />
@@ -485,9 +500,19 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
           >
             <ShieldCheck size={16} color="#34d399" style={{ flexShrink: 0, marginTop: '2px' }} />
             <div style={{ fontSize: '11.5px', color: '#94a3b8', lineHeight: '1.4' }}>
-              <strong style={{ color: '#e2e8f0' }}>DBA Safety Enforcement:</strong> PlanIQ connects with{' '}
-              <code style={{ color: '#38bdf8' }}>ApplicationIntent=ReadOnly</code> and runs all DMV queries under{' '}
-              <code style={{ color: '#38bdf8' }}>READ UNCOMMITTED</code>. It never creates tables or takes database locks.
+              <strong style={{ color: '#e2e8f0' }}>DBA Safety Enforcement:</strong>{' '}
+              {isPg ? (
+                <>
+                  PlanIQ queries PostgreSQL system catalogs with{' '}
+                  <code style={{ color: '#38bdf8' }}>READ ONLY</code> transactions and non-blocking metadata lookups.
+                  It never creates objects or takes restrictive table locks.
+                </>
+              ) : (
+                <>
+                  PlanIQ connects with <code style={{ color: '#38bdf8' }}>ApplicationIntent=ReadOnly</code> and runs all
+                  DMV queries under <code style={{ color: '#38bdf8' }}>READ UNCOMMITTED</code>. It never creates tables or takes database locks.
+                </>
+              )}
             </div>
           </div>
 
@@ -542,7 +567,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
             disabled={isLoading || !config.server || !config.database}
           >
             {isLoading ? <RefreshCw size={14} className="spin" /> : <Zap size={14} />}
-            <span>Connect to SQL Server</span>
+            <span>{isPg ? 'Connect to PostgreSQL' : 'Connect to SQL Server'}</span>
           </button>
         </div>
       </div>

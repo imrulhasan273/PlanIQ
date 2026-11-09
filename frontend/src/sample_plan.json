@@ -27857,13 +27857,13 @@
         "readAheadsMb": 9124.8,
         "readPercent": 77.9,
         "accessOperations": [
-          "Clustered Index Seek",
           "Clustered Index Scan",
-          "Index Seek"
+          "Index Seek",
+          "Clustered Index Seek"
         ],
         "indexesUsed": [
-          "[IX_LoanAccount_partitioncol]",
-          "[PK_LoanAccount]"
+          "[PK_LoanAccount]",
+          "[IX_LoanAccount_partitioncol]"
         ]
       },
       {
@@ -27883,8 +27883,8 @@
           "Clustered Index Seek"
         ],
         "indexesUsed": [
-          "[PK_MemberMoveHistory]",
-          "[IX_MemberMoveHistory_partitioncol]"
+          "[IX_MemberMoveHistory_partitioncol]",
+          "[PK_MemberMoveHistory]"
         ]
       },
       {
@@ -27939,9 +27939,9 @@
         "readAheadsMb": 0.8,
         "readPercent": 1.8,
         "accessOperations": [
-          "Clustered Index Scan",
           "Index Seek",
-          "Clustered Index Seek"
+          "Clustered Index Seek",
+          "Clustered Index Scan"
         ],
         "indexesUsed": [
           "[PK_BadDebtAccount]",
@@ -27961,8 +27961,8 @@
         "readAheadsMb": 0,
         "readPercent": 1.5,
         "accessOperations": [
-          "Clustered Index Seek",
-          "Index Seek"
+          "Index Seek",
+          "Clustered Index Seek"
         ],
         "indexesUsed": [
           "[ix_LoanAccountSchedule_LoanAccountId]",
@@ -27986,8 +27986,8 @@
           "Clustered Index Seek"
         ],
         "indexesUsed": [
-          "[ix_SavingsAccount_MemberId]",
-          "[IX_SavingsAccount_partitioncol]"
+          "[IX_SavingsAccount_partitioncol]",
+          "[ix_SavingsAccount_MemberId]"
         ]
       },
       {
@@ -28301,9 +28301,9 @@
         "readAheadsMb": 0,
         "readPercent": 0,
         "accessOperations": [
+          "Clustered Index Scan",
           "Index Insert",
-          "Table Scan",
-          "Clustered Index Scan"
+          "Table Scan"
         ],
         "indexesUsed": [
           "[IX_FilteredLoan_Id]",
@@ -28384,8 +28384,8 @@
         "readAheadsMb": 0,
         "readPercent": 0,
         "accessOperations": [
-          "Table Scan",
-          "Index Insert"
+          "Index Insert",
+          "Table Scan"
         ],
         "indexesUsed": [
           "[IX_BadDebt]"
@@ -28404,13 +28404,13 @@
         "readAheadsMb": 0,
         "readPercent": 0,
         "accessOperations": [
+          "Table Scan",
           "Index Insert",
-          "Clustered Index Scan",
-          "Table Scan"
+          "Clustered Index Scan"
         ],
         "indexesUsed": [
-          "[IX_LoanSchedule_Lookup]",
-          "[IX_LoanSchedule]"
+          "[IX_LoanSchedule]",
+          "[IX_LoanSchedule_Lookup]"
         ]
       },
       {
@@ -28478,25 +28478,6 @@
         "rank": 32,
         "database": "[tempdb]",
         "schema": "[dbo]",
-        "table": "[#SavingsTransaction]",
-        "logicalReads": 5,
-        "logicalReadsMb": 0,
-        "physicalReads": 0,
-        "physicalReadsMb": 0,
-        "readAheads": 0,
-        "readAheadsMb": 0,
-        "readPercent": 0,
-        "accessOperations": [
-          "Clustered Index Scan"
-        ],
-        "indexesUsed": [
-          "[IX_SavingsTransaction]"
-        ]
-      },
-      {
-        "rank": 33,
-        "database": "[tempdb]",
-        "schema": "[dbo]",
         "table": "[#LoanAccountSchedule]",
         "logicalReads": 5,
         "logicalReadsMb": 0,
@@ -28513,7 +28494,7 @@
         ]
       },
       {
-        "rank": 34,
+        "rank": 33,
         "database": "[tempdb]",
         "schema": "[dbo]",
         "table": "[#LoanAccountScheduleData]",
@@ -28532,11 +28513,11 @@
         ]
       },
       {
-        "rank": 35,
+        "rank": 34,
         "database": "[tempdb]",
         "schema": "[dbo]",
-        "table": "[#tempMemberStatus]",
-        "logicalReads": 4,
+        "table": "[#SavingsTransaction]",
+        "logicalReads": 5,
         "logicalReadsMb": 0,
         "physicalReads": 0,
         "physicalReadsMb": 0,
@@ -28547,11 +28528,11 @@
           "Clustered Index Scan"
         ],
         "indexesUsed": [
-          "[IX_MemberStatus]"
+          "[IX_SavingsTransaction]"
         ]
       },
       {
-        "rank": 36,
+        "rank": 35,
         "database": "[tempdb]",
         "schema": "[dbo]",
         "table": "[#OtherTransaction]",
@@ -28570,7 +28551,7 @@
         ]
       },
       {
-        "rank": 37,
+        "rank": 36,
         "database": "[BkpDB]",
         "schema": "[dbo]",
         "table": "[ProcExecutionTimeReportLog]",
@@ -28586,6 +28567,25 @@
         ],
         "indexesUsed": [
           "[IX_ProcExecutionTimeReportLog_ProcName]"
+        ]
+      },
+      {
+        "rank": 37,
+        "database": "[tempdb]",
+        "schema": "[dbo]",
+        "table": "[#tempMemberStatus]",
+        "logicalReads": 4,
+        "logicalReadsMb": 0,
+        "physicalReads": 0,
+        "physicalReadsMb": 0,
+        "readAheads": 0,
+        "readAheadsMb": 0,
+        "readPercent": 0,
+        "accessOperations": [
+          "Clustered Index Scan"
+        ],
+        "indexesUsed": [
+          "[IX_MemberStatus]"
         ]
       },
       {
@@ -28611,26 +28611,6 @@
         "rank": 39,
         "database": "[tempdb]",
         "schema": "[dbo]",
-        "table": "[#SavingsTransaction_________________________________________________________________________________________________00000AEA1B31]",
-        "logicalReads": 3,
-        "logicalReadsMb": 0,
-        "physicalReads": 0,
-        "physicalReadsMb": 0,
-        "readAheads": 0,
-        "readAheadsMb": 0,
-        "readPercent": 0,
-        "accessOperations": [
-          "Index Insert",
-          "Table Scan"
-        ],
-        "indexesUsed": [
-          "[IX_SavingsTransaction]"
-        ]
-      },
-      {
-        "rank": 40,
-        "database": "[tempdb]",
-        "schema": "[dbo]",
         "table": "[#LoanAccountScheduleData____________________________________________________________________________________________00000AEA1B33]",
         "logicalReads": 3,
         "logicalReadsMb": 0,
@@ -28648,30 +28628,11 @@
         ]
       },
       {
-        "rank": 41,
+        "rank": 40,
         "database": "[tempdb]",
         "schema": "[dbo]",
-        "table": "[#tempTransferMember]",
-        "logicalReads": 2,
-        "logicalReadsMb": 0,
-        "physicalReads": 0,
-        "physicalReadsMb": 0,
-        "readAheads": 0,
-        "readAheadsMb": 0,
-        "readPercent": 0,
-        "accessOperations": [
-          "Clustered Index Scan"
-        ],
-        "indexesUsed": [
-          "[IX_TransferMember]"
-        ]
-      },
-      {
-        "rank": 42,
-        "database": "[tempdb]",
-        "schema": "[dbo]",
-        "table": "[#tempMemberStatus___________________________________________________________________________________________________00000AEA1B2A]",
-        "logicalReads": 2,
+        "table": "[#SavingsTransaction_________________________________________________________________________________________________00000AEA1B31]",
+        "logicalReads": 3,
         "logicalReadsMb": 0,
         "physicalReads": 0,
         "physicalReadsMb": 0,
@@ -28683,49 +28644,11 @@
           "Table Scan"
         ],
         "indexesUsed": [
-          "[IX_MemberStatus]"
+          "[IX_SavingsTransaction]"
         ]
       },
       {
-        "rank": 43,
-        "database": "[tempdb]",
-        "schema": "[dbo]",
-        "table": "[#BadDebtTransaction]",
-        "logicalReads": 2,
-        "logicalReadsMb": 0,
-        "physicalReads": 0,
-        "physicalReadsMb": 0,
-        "readAheads": 0,
-        "readAheadsMb": 0,
-        "readPercent": 0,
-        "accessOperations": [
-          "Clustered Index Scan"
-        ],
-        "indexesUsed": [
-          "[IX_BadDebt]"
-        ]
-      },
-      {
-        "rank": 44,
-        "database": "[tempdb]",
-        "schema": "[dbo]",
-        "table": "[#SavingsAccount]",
-        "logicalReads": 2,
-        "logicalReadsMb": 0,
-        "physicalReads": 0,
-        "physicalReadsMb": 0,
-        "readAheads": 0,
-        "readAheadsMb": 0,
-        "readPercent": 0,
-        "accessOperations": [
-          "Clustered Index Scan"
-        ],
-        "indexesUsed": [
-          "[IX_SavingsAccount]"
-        ]
-      },
-      {
-        "rank": 45,
+        "rank": 41,
         "database": "[tempdb]",
         "schema": "[dbo]",
         "table": "[#OtherTransaction___________________________________________________________________________________________________00000AEA1B32]",
@@ -28745,11 +28668,68 @@
         ]
       },
       {
-        "rank": 46,
+        "rank": 42,
         "database": "[tempdb]",
         "schema": "[dbo]",
-        "table": "[#SavingsAccount_____________________________________________________________________________________________________00000AEA1B2D]",
-        "logicalReads": 1,
+        "table": "[#SavingsAccount]",
+        "logicalReads": 2,
+        "logicalReadsMb": 0,
+        "physicalReads": 0,
+        "physicalReadsMb": 0,
+        "readAheads": 0,
+        "readAheadsMb": 0,
+        "readPercent": 0,
+        "accessOperations": [
+          "Clustered Index Scan"
+        ],
+        "indexesUsed": [
+          "[IX_SavingsAccount]"
+        ]
+      },
+      {
+        "rank": 43,
+        "database": "[tempdb]",
+        "schema": "[dbo]",
+        "table": "[#tempTransferMember]",
+        "logicalReads": 2,
+        "logicalReadsMb": 0,
+        "physicalReads": 0,
+        "physicalReadsMb": 0,
+        "readAheads": 0,
+        "readAheadsMb": 0,
+        "readPercent": 0,
+        "accessOperations": [
+          "Clustered Index Scan"
+        ],
+        "indexesUsed": [
+          "[IX_TransferMember]"
+        ]
+      },
+      {
+        "rank": 44,
+        "database": "[tempdb]",
+        "schema": "[dbo]",
+        "table": "[#BadDebtTransaction]",
+        "logicalReads": 2,
+        "logicalReadsMb": 0,
+        "physicalReads": 0,
+        "physicalReadsMb": 0,
+        "readAheads": 0,
+        "readAheadsMb": 0,
+        "readPercent": 0,
+        "accessOperations": [
+          "Clustered Index Scan"
+        ],
+        "indexesUsed": [
+          "[IX_BadDebt]"
+        ]
+      },
+      {
+        "rank": 45,
+        "database": "[tempdb]",
+        "schema": "[dbo]",
+        "table": "[#tempMemberStatus___________________________________________________________________________________________________00000AEA1B2A]",
+        "logicalReads": 2,
         "logicalReadsMb": 0,
         "physicalReads": 0,
         "physicalReadsMb": 0,
@@ -28761,11 +28741,11 @@
           "Table Scan"
         ],
         "indexesUsed": [
-          "[IX_SavingsAccount]"
+          "[IX_MemberStatus]"
         ]
       },
       {
-        "rank": 47,
+        "rank": 46,
         "database": "[tempdb]",
         "schema": "[dbo]",
         "table": "[#tempTransferMember_________________________________________________________________________________________________00000AEA1B2C]",
@@ -28782,6 +28762,26 @@
         ],
         "indexesUsed": [
           "[IX_TransferMember]"
+        ]
+      },
+      {
+        "rank": 47,
+        "database": "[tempdb]",
+        "schema": "[dbo]",
+        "table": "[#SavingsAccount_____________________________________________________________________________________________________00000AEA1B2D]",
+        "logicalReads": 1,
+        "logicalReadsMb": 0,
+        "physicalReads": 0,
+        "physicalReadsMb": 0,
+        "readAheads": 0,
+        "readAheadsMb": 0,
+        "readPercent": 0,
+        "accessOperations": [
+          "Index Insert",
+          "Table Scan"
+        ],
+        "indexesUsed": [
+          "[IX_SavingsAccount]"
         ]
       },
       {
@@ -28941,7 +28941,7 @@
         "rank": 57,
         "database": "",
         "schema": "",
-        "table": "[#SavingsAccount]",
+        "table": "[#OtherTransaction]",
         "logicalReads": 0,
         "logicalReadsMb": 0,
         "physicalReads": 0,
@@ -28958,7 +28958,7 @@
         "rank": 58,
         "database": "",
         "schema": "",
-        "table": "[#tempMemberStatus]",
+        "table": "[#SavingsAccount]",
         "logicalReads": 0,
         "logicalReadsMb": 0,
         "physicalReads": 0,
@@ -28975,7 +28975,7 @@
         "rank": 59,
         "database": "",
         "schema": "",
-        "table": "[#OtherTransaction]",
+        "table": "[#tempTransferMember]",
         "logicalReads": 0,
         "logicalReadsMb": 0,
         "physicalReads": 0,
@@ -28992,7 +28992,7 @@
         "rank": 60,
         "database": "",
         "schema": "",
-        "table": "[#tempTransferMember]",
+        "table": "[#tempMemberStatus]",
         "logicalReads": 0,
         "logicalReadsMb": 0,
         "physicalReads": 0,

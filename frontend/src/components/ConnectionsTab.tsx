@@ -39,35 +39,55 @@ import {
 interface ConnectionsTabProps {
   liveStatus: ConnectionStatus | null;
   windowsUser?: WindowsUserInfo | null;
+  engine?: 'sqlserver' | 'postgresql';
   onConnectSuccess: (status: ConnectionStatus) => void;
   onNavigateToRadar?: () => void;
+  onEngineChange?: (engine: 'sqlserver' | 'postgresql') => void;
 }
 
-const EMPTY_PROFILE: DBConnectionProfile = {
-  id: '',
-  name: 'New SQL Connection',
-  server: 'localhost',
-  port: 1433,
-  database: 'master',
-  authType: 'sql',
-  username: 'sa',
-  password: '',
-  encrypt: false,
-  trustServerCertificate: true,
-  applicationIntent: 'ReadOnly',
-  timeoutSeconds: 4,
-  isDefault: false,
+export const getProfileEngine = (p: DBConnectionProfile): 'sqlserver' | 'postgresql' => {
+  if (p.engine === 'postgresql' || p.engine === 'sqlserver') return p.engine;
+  return (p.port === 5432 || p.database?.toLowerCase() === 'postgres') ? 'postgresql' : 'sqlserver';
+};
+
+const getEmptyProfile = (targetEngine: 'sqlserver' | 'postgresql' = 'sqlserver', count: number = 0, defaultUser?: string): DBConnectionProfile => {
+  const isPg = targetEngine === 'postgresql';
+  return {
+    id: '',
+    name: isPg ? `PostgreSQL #${count + 1}` : `SQL Server #${count + 1}`,
+    server: 'localhost',
+    port: isPg ? 5432 : 1433,
+    database: isPg ? 'postgres' : 'master',
+    authType: 'sql',
+    username: isPg ? 'postgres' : (defaultUser || 'sa'),
+    password: '',
+    encrypt: false,
+    trustServerCertificate: true,
+    applicationIntent: 'ReadOnly',
+    timeoutSeconds: 4,
+    isDefault: false,
+    engine: targetEngine,
+  };
 };
 
 export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   liveStatus,
   windowsUser,
+  engine = 'sqlserver',
   onConnectSuccess,
-  onNavigateToRadar
+  onNavigateToRadar,
+  onEngineChange,
 }) => {
+  // Engine filter in sidebar: 'all' | 'postgresql' | 'sqlserver'
+  const [engineFilter, setEngineFilter] = useState<'all' | 'postgresql' | 'sqlserver'>(() => {
+    return engine === 'postgresql' ? 'postgresql' : 'sqlserver';
+  });
+
   const [profiles, setProfiles] = useState<DBConnectionProfile[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
-  const [formData, setFormData] = useState<DBConnectionProfile>(EMPTY_PROFILE);
+  const [formData, setFormData] = useState<DBConnectionProfile>(() =>
+    getEmptyProfile(engine, 0, windowsUser?.username)
+  );
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
 
@@ -82,6 +102,13 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     error?: string;
   } | null>(null);
   const [bannerMsg, setBannerMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Synchronize engine filter with app engine change (e.g. from top bar)
+  useEffect(() => {
+    if (engine) {
+      setEngineFilter(engine);
+    }
+  }, [engine]);
 
   // Load all profiles from SQLite on mount
   useEffect(() => {
@@ -112,11 +139,17 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
           const found = safeList.find((p) => p.id === selectIdAfterLoad);
           if (found) target = found;
         } else {
-          const defaultProfile = safeList.find((p) => p.isDefault);
-          if (defaultProfile) target = defaultProfile;
+          // Find matching default or first profile for current engine filter
+          const defaultForEngine = safeList.find(
+            (p) => p.isDefault && (engineFilter === 'all' || getProfileEngine(p) === engineFilter)
+          );
+          const firstForEngine = safeList.find(
+            (p) => engineFilter === 'all' || getProfileEngine(p) === engineFilter
+          );
+          target = defaultForEngine || firstForEngine || safeList[0];
         }
         setSelectedId(target.id);
-        setFormData({ ...target });
+        setFormData({ ...target, engine: getProfileEngine(target) });
       } else {
         handleNewProfile();
       }
@@ -135,19 +168,53 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
 
   const handleSelectProfile = (p: DBConnectionProfile) => {
     setSelectedId(p.id);
-    setFormData({ ...p });
+    setFormData({ ...p, engine: getProfileEngine(p) });
     setTestResult(null);
   };
 
   const handleNewProfile = () => {
-    const newId = '';
-    const def = {
-      ...EMPTY_PROFILE,
-      name: `SQL Server #${profiles.length + 1}`,
-      username: windowsUser?.username || 'sa',
-    };
-    setSelectedId(newId);
+    const targetEngine: 'sqlserver' | 'postgresql' =
+      engineFilter === 'all' ? (engine || 'sqlserver') : engineFilter;
+    const sameEngineCount = profiles.filter((p) => getProfileEngine(p) === targetEngine).length;
+    const def = getEmptyProfile(targetEngine, sameEngineCount, windowsUser?.username);
+    setSelectedId('');
     setFormData(def);
+    setTestResult(null);
+  };
+
+  const handleSwitchFormEngine = (newEngine: 'sqlserver' | 'postgresql') => {
+    const currentEngine = getProfileEngine(formData);
+    if (currentEngine === newEngine && formData.engine === newEngine) return;
+
+    const isTargetPg = newEngine === 'postgresql';
+
+    let newPort = formData.port;
+    if (!isTargetPg && formData.port === 5432) newPort = 1433;
+    if (isTargetPg && formData.port === 1433) newPort = 5432;
+
+    let newDb = formData.database;
+    if (!isTargetPg && formData.database === 'postgres') newDb = 'master';
+    if (isTargetPg && formData.database === 'master') newDb = 'postgres';
+
+    let newUsername = formData.username;
+    if (!isTargetPg && formData.username === 'postgres') newUsername = windowsUser?.username || 'sa';
+    if (isTargetPg && (formData.username === 'sa' || formData.username === windowsUser?.username)) newUsername = 'postgres';
+
+    let newName = formData.name;
+    if (!newName.trim() || /^(PostgreSQL|SQL Server) #\d+$/i.test(newName.trim())) {
+      const sameEngineCount = profiles.filter((p) => getProfileEngine(p) === newEngine).length;
+      newName = isTargetPg ? `PostgreSQL #${sameEngineCount + 1}` : `SQL Server #${sameEngineCount + 1}`;
+    }
+
+    setFormData({
+      ...formData,
+      engine: newEngine,
+      port: newPort,
+      database: newDb,
+      username: newUsername,
+      name: newName,
+      authType: isTargetPg && formData.authType === 'windows' ? 'sql' : formData.authType,
+    });
     setTestResult(null);
   };
 
@@ -157,6 +224,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
       id: '',
       name: `${p.name} (Copy)`,
       isDefault: false,
+      engine: getProfileEngine(p),
     };
     setSelectedId('');
     setFormData(clone);
@@ -180,13 +248,18 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
 
     setIsSaving(true);
     try {
+      const payload: DBConnectionProfile = {
+        ...formData,
+        engine: getProfileEngine(formData),
+      };
+
       let saved: DBConnectionProfile;
       if (typeof window !== 'undefined' && (window as any).go?.main?.App?.SaveDBConnection) {
-        saved = await SaveDBConnection(formData as any);
+        saved = await SaveDBConnection(payload as any);
       } else {
         saved = {
-          ...formData,
-          id: formData.id || `conn_${Date.now()}`,
+          ...payload,
+          id: payload.id || `conn_${Date.now()}`,
           updatedAt: new Date().toISOString(),
         };
         const updated = [...profiles.filter((p) => p.id !== saved.id), saved];
@@ -248,9 +321,11 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     setIsTesting(true);
     setTestResult(null);
     try {
+      const profEngine = getProfileEngine(formData);
       const connPayload = {
+        engine: profEngine,
         server: formData.server,
-        port: Number(formData.port) || 1433,
+        port: Number(formData.port) || (profEngine === 'postgresql' ? 5432 : 1433),
         database: formData.database,
         authType: formData.authType,
         username: formData.username,
@@ -291,11 +366,16 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
 
   const handleConnect = async (profileToConnect?: DBConnectionProfile) => {
     const p = profileToConnect || formData;
+    const profEngine = getProfileEngine(p);
     setIsConnecting(true);
     try {
+      if (onEngineChange) {
+        onEngineChange(profEngine);
+      }
       const status = await ConnectLiveDB({
+        engine: profEngine,
         server: p.server,
-        port: Number(p.port) || 1433,
+        port: Number(p.port) || (profEngine === 'postgresql' ? 5432 : 1433),
         database: p.database,
         authType: p.authType,
         username: p.username,
@@ -331,18 +411,40 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     }
   };
 
-  const filteredProfiles = profiles.filter(
-    (p) =>
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.server.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.database.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const pgCount = profiles.filter((p) => getProfileEngine(p) === 'postgresql').length;
+  const sqlCount = profiles.filter((p) => getProfileEngine(p) === 'sqlserver').length;
+  const allCount = profiles.length;
 
-  const isCurrentActive =
-    liveStatus?.connected &&
-    (liveStatus.serverName.toLowerCase().includes(formData.server.toLowerCase()) ||
-      formData.server.toLowerCase().includes(liveStatus.serverName.toLowerCase())) &&
-    liveStatus.databaseName.toLowerCase() === formData.database.toLowerCase();
+  const filteredProfiles = profiles.filter((p) => {
+    const profEngine = getProfileEngine(p);
+    if (engineFilter !== 'all' && profEngine !== engineFilter) {
+      return false;
+    }
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      p.name.toLowerCase().includes(q) ||
+      p.server.toLowerCase().includes(q) ||
+      p.database.toLowerCase().includes(q)
+    );
+  });
+
+  const formEngine = getProfileEngine(formData);
+  const isPg = formEngine === 'postgresql';
+
+  const headerTitle =
+    engineFilter === 'postgresql'
+      ? 'PostgreSQL Connection Studio'
+      : engineFilter === 'sqlserver'
+      ? 'SQL Server Connection Studio'
+      : 'Database Connection Studio';
+
+  const headerSubtitle =
+    engineFilter === 'postgresql'
+      ? 'Manage saved PostgreSQL cluster profiles, SCRAM/MD5 credentials, and 1-click active session switches.'
+      : engineFilter === 'sqlserver'
+      ? 'Manage saved Microsoft SQL Server credentials, TLS parameters, and 1-click active session switches.'
+      : 'Manage saved PostgreSQL & SQL Server credentials, TLS parameters, and 1-click active session switches.';
 
   return (
     <div className="conn-page-wrapper">
@@ -354,16 +456,16 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
           </div>
           <div>
             <div className="conn-title-row">
-              <h1 className="conn-page-title">SQL Server Connection Studio</h1>
+              <h1 className="conn-page-title">{headerTitle}</h1>
               <span className="conn-sqlite-pill">
                 <HardDrive size={11} color="#34d399" />
                 <span>SQLite DB Storage</span>
               </span>
-              <span className="conn-count-pill">{profiles.length} Profiles</span>
+              <span className="conn-count-pill">
+                {filteredProfiles.length} of {profiles.length} Profiles
+              </span>
             </div>
-            <p className="conn-page-subtitle">
-              Manage saved Microsoft SQL Server credentials, TLS parameters, and 1-click active session switches.
-            </p>
+            <p className="conn-page-subtitle">{headerSubtitle}</p>
           </div>
         </div>
 
@@ -451,11 +553,45 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
             </button>
           </div>
 
+          {/* Engine Filter Tabs */}
+          <div className="conn-filter-tabs">
+            <button
+              type="button"
+              className={`conn-filter-tab ${engineFilter === 'postgresql' ? 'active pg-filter' : ''}`}
+              onClick={() => {
+                setEngineFilter('postgresql');
+                if (onEngineChange) onEngineChange('postgresql');
+              }}
+            >
+              <span>🐘 PostgreSQL</span>
+              <span className="conn-filter-count">{pgCount}</span>
+            </button>
+            <button
+              type="button"
+              className={`conn-filter-tab ${engineFilter === 'sqlserver' ? 'active mssql-filter' : ''}`}
+              onClick={() => {
+                setEngineFilter('sqlserver');
+                if (onEngineChange) onEngineChange('sqlserver');
+              }}
+            >
+              <span>🗄️ SQL Server</span>
+              <span className="conn-filter-count">{sqlCount}</span>
+            </button>
+            <button
+              type="button"
+              className={`conn-filter-tab ${engineFilter === 'all' ? 'active' : ''}`}
+              onClick={() => setEngineFilter('all')}
+            >
+              <span>All</span>
+              <span className="conn-filter-count">{allCount}</span>
+            </button>
+          </div>
+
           <div className="conn-card-list">
             {filteredProfiles.length === 0 ? (
               <div className="conn-empty-state">
                 <Database size={32} color="#64748b" />
-                <p>No connections found</p>
+                <p>No {engineFilter !== 'all' ? (engineFilter === 'postgresql' ? 'PostgreSQL' : 'SQL Server') : ''} connections found</p>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={handleNewProfile}>
                   Create First Connection
                 </button>
@@ -463,6 +599,8 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
             ) : (
               filteredProfiles.map((p) => {
                 const isSelected = p.id === selectedId;
+                const cardEngine = getProfileEngine(p);
+                const isCardPg = cardEngine === 'postgresql';
                 const isLive =
                   liveStatus?.connected &&
                   (liveStatus.serverName.toLowerCase().includes(p.server.toLowerCase()) ||
@@ -478,6 +616,9 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     <div className="conn-card-top">
                       <div className="conn-card-title-wrap">
                         <span className="conn-card-name">{p.name}</span>
+                        <span className={`conn-engine-tag ${isCardPg ? 'pg-tag' : 'mssql-tag'}`}>
+                          {isCardPg ? '🐘 PostgreSQL' : '🗄️ SQL Server'}
+                        </span>
                         {p.isDefault && (
                           <span className="conn-default-tag" title="Default startup connection">
                             <Star size={10} fill="#f59e0b" color="#f59e0b" />
@@ -528,7 +669,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                       <div className="conn-detail-pill">
                         <Server size={11} color="#38bdf8" />
                         <span>
-                          {p.server}:{p.port || 1433}
+                          {p.server}:{p.port || (isCardPg ? 5432 : 1433)}
                         </span>
                       </div>
                       <div className="conn-detail-pill">
@@ -536,7 +677,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                         <span>{p.database}</span>
                       </div>
                       <span className={`conn-auth-badge auth-${p.authType}`}>
-                        {p.authType === 'windows' ? 'Windows' : p.authType === 'demo' ? 'Demo' : 'SQL Auth'}
+                        {p.authType === 'windows' ? (isCardPg ? 'Peer' : 'Windows') : p.authType === 'demo' ? 'Demo' : 'Password'}
                       </span>
                     </div>
 
@@ -603,6 +744,51 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
           </div>
 
           <div className="conn-form-scrollable">
+            {/* SECTION 0: Target Database Engine */}
+            <div className="conn-form-section conn-engine-section">
+              <div className="conn-section-header">
+                <Database size={15} color="#38bdf8" />
+                <span>Target Database Engine</span>
+              </div>
+              <div className="conn-engine-toggle-grid">
+                <div
+                  className={`conn-engine-card ${isPg ? 'selected pg-selected' : ''}`}
+                  onClick={() => handleSwitchFormEngine('postgresql')}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="conn-engine-icon">🐘</div>
+                  <div className="conn-engine-info">
+                    <div className="conn-engine-title">PostgreSQL</div>
+                    <div className="conn-engine-desc">Port 5432 · db 'postgres' · pg_stat_activity</div>
+                  </div>
+                  {isPg && (
+                    <span className="conn-engine-active-indicator">
+                      <Check size={14} /> Active
+                    </span>
+                  )}
+                </div>
+
+                <div
+                  className={`conn-engine-card ${!isPg ? 'selected mssql-selected' : ''}`}
+                  onClick={() => handleSwitchFormEngine('sqlserver')}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="conn-engine-icon">🗄️</div>
+                  <div className="conn-engine-info">
+                    <div className="conn-engine-title">Microsoft SQL Server</div>
+                    <div className="conn-engine-desc">Port 1433 · db 'master' · sys.dm_exec_requests</div>
+                  </div>
+                  {!isPg && (
+                    <span className="conn-engine-active-indicator">
+                      <Check size={14} /> Active
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
             {/* SECTION 1: Identity & Server Target */}
             <div className="conn-form-section">
               <div className="conn-section-header">
@@ -617,7 +803,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="e.g., Production Cluster (DC-DBPROD1)"
+                    placeholder={isPg ? "e.g., PostgreSQL Production (pg-prod-01)" : "e.g., Production Cluster (DC-DBPROD1)"}
                     className="conn-input"
                   />
                 </div>
@@ -642,7 +828,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     type="text"
                     value={formData.server}
                     onChange={(e) => setFormData({ ...formData, server: e.target.value })}
-                    placeholder="localhost, 192.168.1.100, or demo"
+                    placeholder={isPg ? "localhost, 127.0.0.1, or db.example.com" : "localhost, 192.168.1.100, or .\\SQLEXPRESS"}
                     className="conn-input"
                   />
                   <div className="conn-shortcuts-row">
@@ -661,13 +847,31 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     >
                       127.0.0.1
                     </button>
-                    <button
-                      type="button"
-                      className="conn-chip"
-                      onClick={() => setFormData({ ...formData, server: '.\\SQLEXPRESS' })}
-                    >
-                      .\SQLEXPRESS
-                    </button>
+                    {isPg ? (
+                      <button
+                        type="button"
+                        className="conn-chip"
+                        onClick={() =>
+                          setFormData({
+                            ...formData,
+                            server: 'localhost',
+                            port: 5432,
+                            database: 'postgres',
+                            username: 'postgres',
+                          })
+                        }
+                      >
+                        postgres-local
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="conn-chip"
+                        onClick={() => setFormData({ ...formData, server: '.\\SQLEXPRESS' })}
+                      >
+                        .\\SQLEXPRESS
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="conn-chip demo-chip"
@@ -676,7 +880,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                           ...formData,
                           server: 'demo',
                           authType: 'demo',
-                          database: 'AmmisOnlineProd',
+                          database: isPg ? 'dvdrental' : 'AmmisOnlineProd',
                         })
                       }
                     >
@@ -690,8 +894,8 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   <input
                     type="number"
                     value={formData.port}
-                    onChange={(e) => setFormData({ ...formData, port: Number(e.target.value) || 1433 })}
-                    placeholder="1433"
+                    onChange={(e) => setFormData({ ...formData, port: Number(e.target.value) || (isPg ? 5432 : 1433) })}
+                    placeholder={isPg ? "5432" : "1433"}
                     className="conn-input"
                   />
                 </div>
@@ -702,7 +906,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     type="text"
                     value={formData.database}
                     onChange={(e) => setFormData({ ...formData, database: e.target.value })}
-                    placeholder="master, SalesDB, etc."
+                    placeholder={isPg ? "postgres, production_db, etc." : "master, SalesDB, etc."}
                     className="conn-input"
                   />
                 </div>
@@ -723,7 +927,9 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                 >
                   <Lock size={14} />
                   <div>
-                    <span className="conn-auth-title">SQL Server Authentication</span>
+                    <span className="conn-auth-title">
+                      {isPg ? 'Standard Password Auth' : 'SQL Server Authentication'}
+                    </span>
                     <span className="conn-auth-desc">Login with username and password</span>
                   </div>
                 </div>
@@ -740,9 +946,11 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                 >
                   <ShieldCheck size={14} />
                   <div>
-                    <span className="conn-auth-title">Windows Authentication</span>
+                    <span className="conn-auth-title">
+                      {isPg ? 'Local / OS Peer Security' : 'Windows Authentication'}
+                    </span>
                     <span className="conn-auth-desc">
-                      Integrated SSPI security ({windowsUser?.username || 'Current User'})
+                      Integrated security ({windowsUser?.username || 'Current User'})
                     </span>
                   </div>
                 </div>
@@ -754,7 +962,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                       ...formData,
                       authType: 'demo',
                       server: 'demo',
-                      database: 'AmmisOnlineProd',
+                      database: isPg ? 'dvdrental' : 'AmmisOnlineProd',
                     })
                   }
                 >
@@ -786,7 +994,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                       type="text"
                       value={formData.username || ''}
                       onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                      placeholder={formData.authType === 'windows' ? 'DOMAIN\\username or local' : 'sa'}
+                      placeholder={formData.authType === 'windows' ? 'DOMAIN\\username or local' : (isPg ? 'postgres' : 'sa')}
                       className="conn-input"
                     />
                   </div>
@@ -832,7 +1040,9 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     onChange={(e) => setFormData({ ...formData, trustServerCertificate: e.target.checked })}
                   />
                   <div>
-                    <span className="conn-check-title">Trust Server Certificate</span>
+                    <span className="conn-check-title">
+                      {isPg ? 'Trust Server Certificate (sslmode=no-verify)' : 'Trust Server Certificate'}
+                    </span>
                     <span className="conn-check-desc">Allow self-signed certificates without chain validation</span>
                   </div>
                 </label>
@@ -844,8 +1054,10 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     onChange={(e) => setFormData({ ...formData, encrypt: e.target.checked })}
                   />
                   <div>
-                    <span className="conn-check-title">Encrypt Data in Transit</span>
-                    <span className="conn-check-desc">Force SSL/TLS payload encryption for sensitive networks</span>
+                    <span className="conn-check-title">
+                      {isPg ? 'Enable SSL (sslmode=require)' : 'Encrypt Data in Transit'}
+                    </span>
+                    <span className="conn-check-desc">Force SSL/TLS payload encryption for secure networks</span>
                   </div>
                 </label>
 

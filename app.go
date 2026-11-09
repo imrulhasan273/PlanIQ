@@ -17,12 +17,15 @@ import (
 
 // App struct
 type App struct {
-	ctx context.Context
+	ctx          context.Context
+	activeEngine string
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{}
+	return &App{
+		activeEngine: "sqlserver",
+	}
 }
 
 // startup is called when the app starts. The context is saved
@@ -56,11 +59,19 @@ func (a *App) LoadSamplePlan() (*sqlplan.PlanAnalysis, error) {
 // and returns the parsed PlanAnalysis struct without sending large raw XML across IPC.
 func (a *App) OpenFileAndParse() (*sqlplan.PlanAnalysis, error) {
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select SQL Server Execution Plan or Deadlock (.sqlplan, .xml, .xdl)",
+		Title: "Select Execution Plan or Deadlock (.sqlplan, .xml, .json, .xdl)",
 		Filters: []runtime.FileFilter{
 			{
-				DisplayName: "Execution Plans & Deadlocks (*.sqlplan;*.xml;*.xdl)",
-				Pattern:     "*.sqlplan;*.xml;*.xdl",
+				DisplayName: "Execution Plans & Deadlocks (*.sqlplan;*.xml;*.json;*.xdl)",
+				Pattern:     "*.sqlplan;*.xml;*.json;*.xdl",
+			},
+			{
+				DisplayName: "PostgreSQL Plans (*.json)",
+				Pattern:     "*.json",
+			},
+			{
+				DisplayName: "SQL Server Plans (*.sqlplan;*.xml)",
+				Pattern:     "*.sqlplan;*.xml",
 			},
 			{
 				DisplayName: "Deadlock Graphs (*.xdl)",
@@ -89,24 +100,64 @@ type SelectedPlanFile struct {
 	Content string `json:"content"`
 }
 
-// OpenFilePicker opens a native file dialog for selecting a .sqlplan, .xml, or .xdl file
+// SetActiveEngine sets the currently active database engine filter ("sqlserver" or "postgresql")
+func (a *App) SetActiveEngine(engine string) error {
+	a.activeEngine = strings.ToLower(engine)
+	return nil
+}
+
+// GetActiveEngine gets the currently active database engine filter
+func (a *App) GetActiveEngine() string {
+	if a.activeEngine == "" {
+		return "sqlserver"
+	}
+	return a.activeEngine
+}
+
+// OpenFilePicker opens a native file dialog for selecting a plan file filtered by active engine
 func (a *App) OpenFilePicker() (*SelectedPlanFile, error) {
-	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select SQL Server Plan or Deadlock (.sqlplan, .xml, .xdl)",
-		Filters: []runtime.FileFilter{
+	return a.OpenFilePickerForEngine(a.GetActiveEngine())
+}
+
+// OpenFilePickerForEngine opens a native file dialog filtered specifically for the requested engine
+func (a *App) OpenFilePickerForEngine(engine string) (*SelectedPlanFile, error) {
+	engine = strings.ToLower(engine)
+	var title string
+	var filters []runtime.FileFilter
+
+	if engine == "postgresql" {
+		title = "Select PostgreSQL Execution Plan (.json)"
+		filters = []runtime.FileFilter{
 			{
-				DisplayName: "Execution Plans & Deadlocks (*.sqlplan;*.xml;*.xdl)",
-				Pattern:     "*.sqlplan;*.xml;*.xdl",
+				DisplayName: "PostgreSQL Execution Plans (*.json)",
+				Pattern:     "*.json",
 			},
 			{
-				DisplayName: "Deadlock Graphs (*.xdl)",
+				DisplayName: "All Files (*.*)",
+				Pattern:     "*.*",
+			},
+		}
+	} else {
+		title = "Select SQL Server Execution Plan or Deadlock (.sqlplan, .xml, .xdl)"
+		filters = []runtime.FileFilter{
+			{
+				DisplayName: "SQL Server Execution Plans (*.sqlplan;*.xml)",
+				Pattern:     "*.sqlplan;*.xml",
+			},
+			{
+				DisplayName: "SQL Server Deadlock Graphs (*.xdl)",
 				Pattern:     "*.xdl",
 			},
 			{
 				DisplayName: "All Files (*.*)",
 				Pattern:     "*.*",
 			},
-		},
+		}
+	}
+
+	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:   title,
+		Filters: filters,
 	})
 	if err != nil {
 		return nil, err

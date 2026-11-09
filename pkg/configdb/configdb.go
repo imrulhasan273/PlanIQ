@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,6 +90,7 @@ func GetDB() (*Store, error) {
 			application_intent TEXT NOT NULL DEFAULT 'ReadOnly',
 			timeout_seconds INTEGER NOT NULL DEFAULT 4,
 			is_default INTEGER NOT NULL DEFAULT 0,
+			engine TEXT NOT NULL DEFAULT 'sqlserver',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
@@ -133,6 +135,9 @@ func GetDB() (*Store, error) {
 			initErr = fmt.Errorf("failed to init config db tables: %w", err)
 			return
 		}
+
+		// Run migrations for existing SQLite databases
+		_, _ = db.Exec(`ALTER TABLE db_connections ADD COLUMN engine TEXT NOT NULL DEFAULT 'sqlserver';`)
 
 		// Purge any legacy demo mock connection from SQLite
 		_, _ = db.Exec(`DELETE FROM db_connections WHERE id = 'conn_demo_prod' OR auth_type = 'demo' OR server = 'demo';`)
@@ -217,7 +222,7 @@ func (s *Store) SetRadarPagePolling(pageID string, enabled bool) error {
 	return err
 }
 
-// DBConnectionProfile represents a saved SQL Server connection profile in SQLite
+// DBConnectionProfile represents a saved database connection profile in SQLite
 type DBConnectionProfile struct {
 	ID                     string `json:"id"`
 	Name                   string `json:"name"`
@@ -232,6 +237,7 @@ type DBConnectionProfile struct {
 	ApplicationIntent      string `json:"applicationIntent"`
 	TimeoutSeconds         int    `json:"timeoutSeconds"`
 	IsDefault              bool   `json:"isDefault"`
+	Engine                 string `json:"engine"`
 	CreatedAt              string `json:"createdAt"`
 	UpdatedAt              string `json:"updatedAt"`
 }
@@ -244,7 +250,7 @@ func (s *Store) GetDBConnections() ([]DBConnectionProfile, error) {
 	rows, err := s.db.Query(`
 		SELECT id, name, server, port, database_name, auth_type, username, password,
 		       encrypt, trust_server_certificate, application_intent, timeout_seconds,
-		       is_default, created_at, updated_at
+		       is_default, COALESCE(engine, 'sqlserver'), created_at, updated_at
 		FROM db_connections
 		ORDER BY is_default DESC, updated_at DESC;
 	`)
@@ -260,7 +266,7 @@ func (s *Store) GetDBConnections() ([]DBConnectionProfile, error) {
 		if err := rows.Scan(
 			&p.ID, &p.Name, &p.Server, &p.Port, &p.Database, &p.AuthType,
 			&p.Username, &p.Password, &encInt, &trustInt, &p.ApplicationIntent,
-			&p.TimeoutSeconds, &defInt, &p.CreatedAt, &p.UpdatedAt,
+			&p.TimeoutSeconds, &defInt, &p.Engine, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			continue
 		}
@@ -287,8 +293,20 @@ func (s *Store) SaveDBConnection(p DBConnectionProfile) (*DBConnectionProfile, e
 	}
 	p.UpdatedAt = now
 
+	if p.Engine == "" {
+		if p.Port == 5432 || strings.ToLower(p.Database) == "postgres" {
+			p.Engine = "postgresql"
+		} else {
+			p.Engine = "sqlserver"
+		}
+	}
+
 	if p.Port == 0 {
-		p.Port = 1433
+		if p.Engine == "postgresql" {
+			p.Port = 5432
+		} else {
+			p.Port = 1433
+		}
 	}
 	if p.TimeoutSeconds == 0 {
 		p.TimeoutSeconds = 4
@@ -322,8 +340,8 @@ func (s *Store) SaveDBConnection(p DBConnectionProfile) (*DBConnectionProfile, e
 	INSERT INTO db_connections (
 		id, name, server, port, database_name, auth_type, username, password,
 		encrypt, trust_server_certificate, application_intent, timeout_seconds,
-		is_default, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		is_default, engine, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		name = excluded.name,
 		server = excluded.server,
@@ -337,12 +355,13 @@ func (s *Store) SaveDBConnection(p DBConnectionProfile) (*DBConnectionProfile, e
 		application_intent = excluded.application_intent,
 		timeout_seconds = excluded.timeout_seconds,
 		is_default = excluded.is_default,
+		engine = excluded.engine,
 		updated_at = excluded.updated_at;
 	`
 	_, err := s.db.Exec(stmt,
 		p.ID, p.Name, p.Server, p.Port, p.Database, p.AuthType,
 		p.Username, p.Password, encInt, trustInt, p.ApplicationIntent,
-		p.TimeoutSeconds, defInt, p.CreatedAt, p.UpdatedAt,
+		p.TimeoutSeconds, defInt, p.Engine, p.CreatedAt, p.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save connection profile: %w", err)

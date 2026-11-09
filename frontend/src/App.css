@@ -11257,6 +11257,176 @@
   background: rgba(56, 189, 248, 0.1);
 }
 
+/* ── Engine Switcher Dropdown (Top Bar & Plan Context Tier) ── */
+.nav-engine-dropdown-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.btn-engine-switch-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+  background: transparent;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  line-height: 1.4;
+}
+
+.btn-engine-switch-badge.engine-mssql {
+  background: rgba(99, 102, 241, 0.2);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.45);
+}
+
+.btn-engine-switch-badge.engine-mssql:hover {
+  background: rgba(99, 102, 241, 0.32);
+  border-color: rgba(99, 102, 241, 0.7);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+}
+
+.btn-engine-switch-badge.engine-pg {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+}
+
+.btn-engine-switch-badge.engine-pg:hover {
+  background: rgba(56, 189, 248, 0.32);
+  border-color: rgba(56, 189, 248, 0.7);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+}
+
+.nav-engine-flyout {
+  left: 0 !important;
+  right: auto !important;
+  width: 320px !important;
+  z-index: 1060;
+}
+
+.nav-engine-flyout-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  background: rgba(2, 6, 23, 0.6);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.nav-engine-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.nav-engine-action-btn:hover {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+}
+
+.nav-engine-action-btn.btn-reset-view {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.25);
+  color: #fbbf24;
+}
+
+.nav-engine-action-btn.btn-reset-view:hover {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.5);
+  color: #fef08a;
+}
+
+.reset-plan-pill {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.reset-plan-pill:hover {
+  background: rgba(244, 63, 94, 0.15);
+  border-color: rgba(244, 63, 94, 0.4);
+  color: #f43f5e;
+}
+
+/* ── Welcome Screen Engine Toggle Pills ── */
+.welcome-engine-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 14px 0 22px;
+}
+
+.welcome-engine-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.engine-switch-pills {
+  display: inline-flex;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 3px;
+  gap: 4px;
+}
+
+.engine-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  border-radius: 16px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.engine-pill-btn:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.engine-pill-btn.active {
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.45);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+}
+
 /* ==========================================================================
    CONNECTIONS TAB (PAGE VIEW)
    ========================================================================== */
@@ -11470,6 +11640,170 @@
   padding: 12px;
   background: rgba(2, 6, 23, 0.5);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Engine Filter Tabs in Connection Sidebar */
+.conn-filter-tabs {
+  display: flex;
+  background: rgba(2, 6, 23, 0.7);
+  padding: 4px;
+  gap: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.conn-filter-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.conn-filter-tab:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #f1f5f9;
+}
+
+.conn-filter-tab.active {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.15);
+}
+
+.conn-filter-tab.active.mssql-filter {
+  background: rgba(129, 140, 248, 0.15);
+  border-color: rgba(129, 140, 248, 0.4);
+  color: #818cf8;
+}
+
+.conn-filter-tab.active.pg-filter {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+
+.conn-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+  font-size: 9.5px;
+  font-weight: 700;
+}
+
+.conn-filter-tab.active .conn-filter-count {
+  background: rgba(56, 189, 248, 0.3);
+  color: #ffffff;
+}
+
+.conn-filter-tab.active.mssql-filter .conn-filter-count {
+  background: rgba(129, 140, 248, 0.3);
+  color: #ffffff;
+}
+
+/* Engine Badges on Connection Cards */
+.conn-engine-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+}
+
+.conn-engine-tag.pg-tag {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.conn-engine-tag.mssql-tag {
+  background: rgba(129, 140, 248, 0.15);
+  color: #818cf8;
+  border: 1px solid rgba(129, 140, 248, 0.3);
+}
+
+/* Database Engine Picker inside Configure Connection Form */
+.conn-engine-section {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.7) 0%, rgba(2, 6, 23, 0.6) 100%) !important;
+  border: 1px solid rgba(56, 189, 248, 0.25) !important;
+}
+
+.conn-engine-toggle-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.conn-engine-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1.5px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.conn-engine-card:hover {
+  background: rgba(30, 41, 59, 0.6);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.conn-engine-card.selected.pg-selected {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: #38bdf8;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.2);
+}
+
+.conn-engine-card.selected.mssql-selected {
+  background: rgba(129, 140, 248, 0.12);
+  border-color: #818cf8;
+  box-shadow: 0 0 16px rgba(129, 140, 248, 0.2);
+}
+
+.conn-engine-card-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.conn-engine-card-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.conn-engine-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.conn-engine-card-subtitle {
+  font-size: 10.5px;
+  color: #94a3b8;
+  margin-top: 2px;
 }
 
 .conn-search-box {

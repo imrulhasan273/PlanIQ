@@ -318,7 +318,7 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
     </div>
     <div class="meta-box">
       <div>Generated: <strong>${now}</strong></div>
-      <div>Engine: <strong>PlanIQ v2.0 (Offline)</strong></div>
+      <div>Engine: <strong>PlanIQ v2.0 (${plan.engine === 'postgresql' ? 'PostgreSQL' : 'SQL Server'})</strong></div>
       <button class="btn-print" onclick="window.print()">Print / Save as PDF</button>
     </div>
   </div>
@@ -388,7 +388,7 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
   }
 
   <h2>Missing Index Recommendations (${plan.allMissingIndexes.length})</h2>
-  ${missingIndexesHtml || '<p style="color: var(--text-muted);">No missing indexes recommended by SQL Server optimizer.</p>'}
+  ${missingIndexesHtml || (plan.engine === 'postgresql' ? '<p style="color: var(--text-muted);">No missing indexes recommended by PostgreSQL query analysis.</p>' : '<p style="color: var(--text-muted);">No missing indexes recommended by SQL Server optimizer.</p>')}
 
   <h2>Statement Cost Breakdown (Top 24)</h2>
   <div class="card" style="padding: 0; overflow: hidden;">

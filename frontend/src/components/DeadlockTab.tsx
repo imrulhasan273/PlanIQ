@@ -34,21 +34,33 @@ import {
   DeadlockProcess,
   DeadlockResource,
 } from '../types/deadlock';
-import { SAMPLE_DEADLOCK_XDL, parseDeadlockXML, readFileAsDecodedText } from '../utils/deadlockParser';
+import {
+  SAMPLE_DEADLOCK_XDL,
+  SAMPLE_DEADLOCK_PG,
+  parseDeadlockXML,
+  parsePgDeadlockLog,
+  isPgDeadlockLog,
+  readFileAsDecodedText,
+} from '../utils/deadlockParser';
 import { OpenFilePicker } from '../../wailsjs/go/main/App';
 import { toPng, toSvg } from 'html-to-image';
 
 interface DeadlockTabProps {
   initialDeadlocks?: DeadlockGraph[];
+  engine?: 'sqlserver' | 'postgresql';
   onOpenXdlFile?: () => void;
   onLoadSample?: () => void;
+  onNavigateToLiveRadar?: () => void;
 }
 
 export const DeadlockTab: React.FC<DeadlockTabProps> = ({
   initialDeadlocks,
+  engine = 'sqlserver',
   onOpenXdlFile,
   onLoadSample,
+  onNavigateToLiveRadar,
 }) => {
+  const isPg = engine === 'postgresql';
   const [deadlocks, setDeadlocks] = useState<DeadlockGraph[]>(() => {
     if (initialDeadlocks && initialDeadlocks.length > 0) {
       return initialDeadlocks;
@@ -100,7 +112,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
 
   const handleLoadSample = () => {
     try {
-      const parsed = parseDeadlockXML(SAMPLE_DEADLOCK_XDL);
+      const parsed = isPg ? [SAMPLE_DEADLOCK_PG] : parseDeadlockXML(SAMPLE_DEADLOCK_XDL);
       setDeadlocks(parsed);
       setActiveIdx(0);
       if (onLoadSample) {
@@ -120,7 +132,9 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
       try {
         const res = await OpenFilePicker();
         if (res && res.content) {
-          const parsed = parseDeadlockXML(res.content);
+          const parsed = (isPg || isPgDeadlockLog(res.content))
+            ? parsePgDeadlockLog(res.content)
+            : parseDeadlockXML(res.content);
           setDeadlocks(parsed);
           setActiveIdx(0);
           return;
@@ -140,7 +154,9 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
     if (!file) return;
     try {
       const content = await readFileAsDecodedText(file);
-      const parsed = parseDeadlockXML(content);
+      const parsed = (isPg || isPgDeadlockLog(content))
+        ? parsePgDeadlockLog(content)
+        : parseDeadlockXML(content);
       setDeadlocks(parsed);
       setActiveIdx(0);
     } catch (err: any) {
@@ -208,22 +224,24 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
               width: '72px',
               height: '72px',
               borderRadius: '20px',
-              background: 'rgba(244, 63, 94, 0.12)',
-              border: '1px solid rgba(244, 63, 94, 0.3)',
+              background: isPg ? 'rgba(56, 189, 248, 0.12)' : 'rgba(244, 63, 94, 0.12)',
+              border: `1px solid ${isPg ? 'rgba(56, 189, 248, 0.3)' : 'rgba(244, 63, 94, 0.3)'}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               margin: '0 auto 20px',
             }}
           >
-            <ShieldAlert size={36} color="#f43f5e" />
+            <ShieldAlert size={36} color={isPg ? '#38bdf8' : '#f43f5e'} />
           </div>
 
           <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#f8fafc', marginBottom: '8px' }}>
-            SQL Server Deadlock Analyzer
+            {isPg ? 'PostgreSQL Deadlock & Lock Conflict Analyzer' : 'SQL Server Deadlock Analyzer'}
           </h2>
-          <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.6', maxWidth: '520px', margin: '0 auto 28px' }}>
-            Visualize circular lock dependencies, identify victim processes rolled back by the engine, inspect lock resources, and generate automated EF Core &amp; T-SQL resolution scripts.
+          <p style={{ color: '#94a3b8', fontSize: '14px', lineHeight: '1.6', maxWidth: '540px', margin: '0 auto 28px' }}>
+            {isPg
+              ? 'Visualize circular lock dependencies across active backends, identify victim transactions aborted by PostgreSQL, inspect relation & tuple lock modes, and generate automated retry and lock order remedies.'
+              : 'Visualize circular lock dependencies, identify victim processes rolled back by the engine, inspect lock resources, and generate automated EF Core & T-SQL resolution scripts.'}
           </p>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '32px' }}>
@@ -234,14 +252,36 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
               style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 24px', fontSize: '13px', fontWeight: 600 }}
             >
               <Upload size={16} />
-              <span>Open .xdl File</span>
+              <span>{isPg ? 'Open Deadlock Log / Plan' : 'Open .xdl File'}</span>
             </button>
+
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleLoadSample}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 24px', fontSize: '13px', fontWeight: 600, borderColor: isPg ? 'rgba(56, 189, 248, 0.4)' : undefined }}
+            >
+              <Sparkles size={16} color={isPg ? '#38bdf8' : '#818cf8'} />
+              <span>{isPg ? 'Try PostgreSQL Deadlock Sample' : 'Load SQL Server Sample'}</span>
+            </button>
+
+            {isPg && onNavigateToLiveRadar && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={onNavigateToLiveRadar}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 24px', fontSize: '13px', fontWeight: 600, borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+              >
+                <Zap size={16} color="#38bdf8" />
+                <span>Inspect Live pg_locks Tree →</span>
+              </button>
+            )}
           </div>
 
           <input
             ref={fileInputRef}
             type="file"
-            accept=".xdl,.xml"
+            accept={isPg ? '.log,.txt,.json,.xdl,.xml' : '.xdl,.xml'}
             onChange={handleFileUpload}
             style={{ display: 'none' }}
           />
@@ -262,14 +302,14 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
               <Skull size={18} color="#f43f5e" />
               <div>
                 <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#e2e8f0' }}>Victim Detection</div>
-                <div style={{ fontSize: '11px', color: '#64748b' }}>Identifies rolled-back SPID</div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>{isPg ? 'Identifies aborted backend PID' : 'Identifies rolled-back SPID'}</div>
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Lock size={18} color="#fbbf24" />
               <div>
                 <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#e2e8f0' }}>Lock Modes &amp; Graph</div>
-                <div style={{ fontSize: '11px', color: '#64748b' }}>Key, page &amp; object locks</div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>{isPg ? 'Relation, tuple & transaction locks' : 'Key, page & object locks'}</div>
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -283,7 +323,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
               <Sparkles size={18} color="#34d399" />
               <div>
                 <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#e2e8f0' }}>Automated Fixes</div>
-                <div style={{ fontSize: '11px', color: '#64748b' }}>EF Core &amp; T-SQL remedies</div>
+                <div style={{ fontSize: '11px', color: '#64748b' }}>{isPg ? 'PostgreSQL lock_timeout & order remedies' : 'EF Core & T-SQL remedies'}</div>
               </div>
             </div>
           </div>
@@ -372,7 +412,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                 }}
               >
                 <Skull size={12} />
-                Victim SPID #{activeDeadlock.victimSpid || 'N/A'} Rolled Back
+                Victim {isPg ? 'PID #' : 'SPID #'}{activeDeadlock.victimSpid || 'N/A'} {isPg ? 'Aborted' : 'Rolled Back'}
               </span>
               <span
                 style={{
@@ -434,15 +474,15 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={handleOpenXdlFile}
-              title="Open .xdl or deadlock .xml file"
+              title={isPg ? 'Open PostgreSQL deadlock log or JSON' : 'Open .xdl or deadlock .xml file'}
             >
               <Upload size={13} color="#a78bfa" />
-              <span>Open .xdl</span>
+              <span>{isPg ? 'Open Log' : 'Open .xdl'}</span>
             </button>
             <input
               ref={fileInputRef}
               type="file"
-              accept=".xdl,.xml"
+              accept={isPg ? '.log,.txt,.json,.xdl,.xml' : '.xdl,.xml'}
               onChange={handleFileUpload}
               style={{ display: 'none' }}
             />
@@ -1360,7 +1400,9 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                   </div>
 
                   <p style={{ fontSize: '12.5px', color: '#fecdd3', margin: 0, lineHeight: '1.5' }}>
-                    SQL Server Deadlock Monitor chose SPID #{activeDeadlock.victimSpid} as the victim. Error 1205 was returned to the client, rolling back its transaction. The surviving session was unblocked and completed successfully.
+                    {isPg
+                      ? `PostgreSQL deadlock detector aborted Backend PID #${activeDeadlock.victimSpid} with Error 40P01 (deadlock_detected). The cycle was broken and the surviving transaction completed.`
+                      : `SQL Server Deadlock Monitor chose SPID #${activeDeadlock.victimSpid} as the victim. Error 1205 was returned to the client, rolling back its transaction. The surviving session was unblocked and completed successfully.`}
                   </p>
                   {activeDeadlock.victimSelectionReason && (
                     <div style={{ marginTop: '8px', fontSize: '11.5px', color: '#fda4af' }}>
@@ -1403,11 +1445,11 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Skull size={18} color="#f43f5e" />
                   <h4 style={{ fontSize: '15px', fontWeight: 800, color: '#f43f5e', margin: 0 }}>
-                    SPID #{victimProcess?.spid || 'N/A'} (Deadlock Victim)
+                    {isPg ? 'PID #' : 'SPID #'}{victimProcess?.spid || 'N/A'} (Deadlock Victim)
                   </h4>
                 </div>
                 <span style={{ background: '#f43f5e', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '4px' }}>
-                  ROLLED BACK
+                  {isPg ? 'ABORTED' : 'ROLLED BACK'}
                 </span>
               </div>
 
@@ -1415,7 +1457,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '12px' }}>
                   <div className="deadlock-session-meta" style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div><span style={{ color: '#64748b' }}>Rollback Cost:</span> <strong style={{ color: '#f43f5e' }}>{victimProcess.logUsedBytes !== undefined ? `${(victimProcess.logUsedBytes / 1024).toFixed(1)} KB` : 'N/A'}</strong></div>
-                    <div><span style={{ color: '#64748b' }}>Deadlock Priority:</span> <strong style={{ color: '#e2e8f0' }}>{victimProcess.priority}</strong></div>
+                    <div><span style={{ color: '#64748b' }}>{isPg ? 'Backend PID:' : 'Deadlock Priority:'}</span> <strong style={{ color: '#e2e8f0' }}>{isPg ? victimProcess.spid : victimProcess.priority}</strong></div>
                     <div><span style={{ color: '#64748b' }}>Status:</span> <strong style={{ color: '#e2e8f0' }}>{victimProcess.status}</strong></div>
                     <div><span style={{ color: '#64748b' }}>Lock Mode:</span> <strong style={{ color: '#f43f5e' }}>{victimProcess.lockMode}</strong></div>
                     <div><span style={{ color: '#64748b' }}>Wait Time:</span> <strong style={{ color: '#fbbf24' }}>{victimProcess.waittimeMs} ms</strong></div>
@@ -1423,7 +1465,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                     <div><span style={{ color: '#64748b' }}>Client App:</span> <strong style={{ color: '#cbd5e1' }}>{victimProcess.clientapp || 'N/A'}</strong></div>
                     <div><span style={{ color: '#64748b' }}>Host Name:</span> <strong style={{ color: '#cbd5e1' }}>{victimProcess.hostname || 'N/A'}</strong></div>
                     <div><span style={{ color: '#64748b' }}>Isolation Level:</span> <strong style={{ color: '#a78bfa' }}>{victimProcess.isolationlevel || 'Read Committed'}</strong></div>
-                    <div><span style={{ color: '#64748b' }}>KPID (Thread):</span> <strong style={{ color: '#cbd5e1' }}>{victimProcess.kpid || 'N/A'}</strong></div>
+                    <div><span style={{ color: '#64748b' }}>{isPg ? 'Database:' : 'KPID (Thread):'}</span> <strong style={{ color: '#cbd5e1' }}>{isPg ? (victimProcess.currentDb || 'postgres') : (victimProcess.kpid || 'N/A')}</strong></div>
                   </div>
 
                   <div>
@@ -1459,7 +1501,7 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Server size={18} color="#38bdf8" />
                   <h4 style={{ fontSize: '15px', fontWeight: 800, color: '#38bdf8', margin: 0 }}>
-                    SPID #{survivorProcess?.spid || 'N/A'} (Deadlock Survivor)
+                    {isPg ? 'PID #' : 'SPID #'}{survivorProcess?.spid || 'N/A'} (Deadlock Survivor)
                   </h4>
                 </div>
                 <span style={{ background: '#0284c7', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '4px' }}>
@@ -1512,10 +1554,12 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
             <Lock size={20} color="#fbbf24" />
             <div>
               <h3 style={{ fontSize: '16px', fontWeight: 800, color: '#fff', margin: 0 }}>
-                Lock Granularity &amp; Compatibility Deep Dive
+                {isPg ? 'PostgreSQL Lock Modes & Compatibility Deep Dive' : 'Lock Granularity & Compatibility Deep Dive'}
               </h3>
               <p style={{ fontSize: '12px', color: '#94a3b8', margin: '2px 0 0' }}>
-                Understanding why 8 KB Page Locks conflict during concurrent bulk inserts, and how to eliminate them.
+                {isPg
+                  ? 'Understanding relation-level vs tuple-level locks and how conflicting transaction lock requests trigger deadlocks.'
+                  : 'Understanding why 8 KB Page Locks conflict during concurrent bulk inserts, and how to eliminate them.'}
               </p>
             </div>
           </div>
@@ -1533,94 +1577,209 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
               lineHeight: '1.6',
             }}
           >
-            <strong style={{ color: '#fbbf24' }}>Why did EF Core Bulk Inserts deadlock on PAGELOCK?</strong>
-            <p style={{ margin: '6px 0 0' }}>
-              In SQL Server, tables are stored in <strong>8 KB data pages</strong>. When EF Core batches inserts, SQL Server acquires Intent-Exclusive (<code style={{ color: '#fbbf24' }}>IX</code>) or Exclusive (<code style={{ color: '#f43f5e' }}>X</code>) page locks during space allocation.
-              Even if two sessions insert completely different rows with different primary keys, if both sessions allocate space on the same 8 KB page or allocate multiple pages in opposite order, an <strong>Exclusive (X)</strong> lock conflicts with an <strong>Intent-Exclusive (IX)</strong> lock, triggering a deadlock!
-            </p>
+            {isPg ? (
+              <>
+                <strong style={{ color: '#fbbf24' }}>Why do PostgreSQL Transactions Deadlock?</strong>
+                <p style={{ margin: '6px 0 0' }}>
+                  In PostgreSQL, transactions acquire row-level locks (<code style={{ color: '#38bdf8' }}>ExclusiveLock</code> on tuples during <code style={{ color: '#fbbf24' }}>UPDATE</code> / <code style={{ color: '#f43f5e' }}>DELETE</code>, or explicit <code style={{ color: '#34d399' }}>FOR UPDATE</code>). When two transactions update multiple rows or tables in differing orders, both wait mutually on the other&apos;s locked tuples until <code style={{ color: '#38bdf8' }}>deadlock_timeout</code> expires and PostgreSQL aborts one transaction with Error <strong>40P01</strong>.
+                </p>
+              </>
+            ) : (
+              <>
+                <strong style={{ color: '#fbbf24' }}>Why did EF Core Bulk Inserts deadlock on PAGELOCK?</strong>
+                <p style={{ margin: '6px 0 0' }}>
+                  In SQL Server, tables are stored in <strong>8 KB data pages</strong>. When EF Core batches inserts, SQL Server acquires Intent-Exclusive (<code style={{ color: '#fbbf24' }}>IX</code>) or Exclusive (<code style={{ color: '#f43f5e' }}>X</code>) page locks during space allocation.
+                  Even if two sessions insert completely different rows with different primary keys, if both sessions allocate space on the same 8 KB page or allocate multiple pages in opposite order, an <strong>Exclusive (X)</strong> lock conflicts with an <strong>Intent-Exclusive (IX)</strong> lock, triggering a deadlock!
+                </p>
+              </>
+            )}
           </div>
 
           {/* Lock Compatibility Table */}
           <div style={{ marginBottom: '24px' }}>
             <h4 style={{ fontSize: '13px', fontWeight: 700, color: '#e2e8f0', marginBottom: '10px' }}>
-              SQL Server Lock Compatibility Matrix (Existing Lock vs. Requested Lock)
+              {isPg ? 'PostgreSQL Core Lock Modes Compatibility Matrix' : 'SQL Server Lock Compatibility Matrix (Existing Lock vs. Requested Lock)'}
             </h4>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center' }}>
                 <thead>
                   <tr style={{ background: '#090d16', color: '#94a3b8' }}>
                     <th style={{ padding: '8px', border: '1px solid #1e293b', textAlign: 'left' }}>Requested \ Existing</th>
-                    <th style={{ padding: '8px', border: '1px solid #1e293b' }}>IS (Intent Shared)</th>
-                    <th style={{ padding: '8px', border: '1px solid #1e293b' }}>S (Shared)</th>
-                    <th style={{ padding: '8px', border: '1px solid #1e293b' }}>U (Update)</th>
-                    <th style={{ padding: '8px', border: '1px solid #1e293b', background: 'rgba(234, 179, 8, 0.15)', color: '#fbbf24' }}>IX (Intent Excl)</th>
-                    <th style={{ padding: '8px', border: '1px solid #1e293b', background: 'rgba(244, 63, 94, 0.15)', color: '#f43f5e' }}>X (Exclusive)</th>
+                    {isPg ? (
+                      <>
+                        <th style={{ padding: '8px', border: '1px solid #1e293b' }}>AccessShare</th>
+                        <th style={{ padding: '8px', border: '1px solid #1e293b' }}>RowShare</th>
+                        <th style={{ padding: '8px', border: '1px solid #1e293b', background: 'rgba(234, 179, 8, 0.15)', color: '#fbbf24' }}>RowExclusive</th>
+                        <th style={{ padding: '8px', border: '1px solid #1e293b' }}>Share</th>
+                        <th style={{ padding: '8px', border: '1px solid #1e293b', background: 'rgba(244, 63, 94, 0.15)', color: '#f43f5e' }}>AccessExclusive</th>
+                      </>
+                    ) : (
+                      <>
+                        <th style={{ padding: '8px', border: '1px solid #1e293b' }}>IS (Intent Shared)</th>
+                        <th style={{ padding: '8px', border: '1px solid #1e293b' }}>S (Shared)</th>
+                        <th style={{ padding: '8px', border: '1px solid #1e293b' }}>U (Update)</th>
+                        <th style={{ padding: '8px', border: '1px solid #1e293b', background: 'rgba(234, 179, 8, 0.15)', color: '#fbbf24' }}>IX (Intent Excl)</th>
+                        <th style={{ padding: '8px', border: '1px solid #1e293b', background: 'rgba(244, 63, 94, 0.15)', color: '#f43f5e' }}>X (Exclusive)</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#94a3b8' }}>IS</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
-                  </tr>
-                  <tr>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#94a3b8' }}>S</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
-                  </tr>
-                  <tr>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#94a3b8' }}>U</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
-                  </tr>
-                  <tr style={{ background: 'rgba(234, 179, 8, 0.05)' }}>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#fbbf24' }}>IX</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e', fontWeight: 800, background: 'rgba(244, 63, 94, 0.25)' }}>
-                      ✗ CONFLICT (Deadlock!)
-                    </td>
-                  </tr>
-                  <tr style={{ background: 'rgba(244, 63, 94, 0.05)' }}>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#f43f5e' }}>X</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e', fontWeight: 800, background: 'rgba(244, 63, 94, 0.25)' }}>
-                      ✗ CONFLICT (Deadlock!)
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e', fontWeight: 800 }}>
-                      ✗ CONFLICT
-                    </td>
-                  </tr>
+                  {isPg ? (
+                    <>
+                      <tr>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#94a3b8' }}>AccessShare (SELECT)</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#94a3b8' }}>RowShare (FOR SHARE)</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                      </tr>
+                      <tr style={{ background: 'rgba(234, 179, 8, 0.05)' }}>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#fbbf24' }}>RowExclusive (UPDATE/DELETE)</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes (Table) / ✗ Tuple Block</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e', fontWeight: 800 }}>✗ CONFLICT</td>
+                      </tr>
+                      <tr style={{ background: 'rgba(244, 63, 94, 0.05)' }}>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#f43f5e' }}>AccessExclusive (DDL/TRUNCATE)</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e', fontWeight: 800 }}>✗ CONFLICT</td>
+                      </tr>
+                    </>
+                  ) : (
+                    <>
+                      <tr>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#94a3b8' }}>IS</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#94a3b8' }}>S</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#94a3b8' }}>U</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                      </tr>
+                      <tr style={{ background: 'rgba(234, 179, 8, 0.05)' }}>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#fbbf24' }}>IX</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#34d399' }}>✓ Yes</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e', fontWeight: 800, background: 'rgba(244, 63, 94, 0.25)' }}>
+                          ✗ CONFLICT (Deadlock!)
+                        </td>
+                      </tr>
+                      <tr style={{ background: 'rgba(244, 63, 94, 0.05)' }}>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', fontWeight: 700, textAlign: 'left', color: '#f43f5e' }}>X</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e' }}>✗ No</td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e', fontWeight: 800, background: 'rgba(244, 63, 94, 0.25)' }}>
+                          ✗ CONFLICT (Deadlock!)
+                        </td>
+                        <td style={{ padding: '8px', border: '1px solid #1e293b', color: '#f43f5e', fontWeight: 800 }}>
+                          ✗ CONFLICT
+                        </td>
+                      </tr>
+                    </>
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
 
-          {/* Quick DDL Fix to Disable Page Locks */}
+          {/* Solution Banner */}
           <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <strong style={{ fontSize: '13px', color: '#34d399' }}>
-                Instant DDL Solution: Disable Page Locks (Force Row-Level KEYLOCK)
-              </strong>
-              <button
-                className="btn btn-secondary btn-sm"
-                style={{ padding: '2px 8px', fontSize: '11px' }}
-                onClick={() =>
-                  handleCopy(
-                    `-- Disable Page Locks on the contested tables:
+            {isPg ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <strong style={{ fontSize: '13px', color: '#34d399' }}>
+                    PostgreSQL Tuning: deadlock_timeout &amp; lock_timeout Configuration
+                  </strong>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '2px 8px', fontSize: '11px' }}
+                    onClick={() =>
+                      handleCopy(
+                        `-- Tune deadlock detector responsiveness and fail fast on lock contention:
+ALTER SYSTEM SET deadlock_timeout = '500ms';
+ALTER SYSTEM SET lock_timeout = '3000ms';
+SELECT pg_reload_conf();
+
+-- Inspect real-time locks and blocking queries:
+SELECT
+    blocked.pid AS blocked_pid,
+    blocked.query AS blocked_query,
+    blocking.pid AS blocking_pid,
+    blocking.query AS blocking_statement
+FROM pg_locks bl
+JOIN pg_stat_activity blocked ON blocked.pid = bl.pid
+JOIN pg_locks kl ON kl.locktype = bl.locktype
+    AND kl.database IS NOT DISTINCT FROM bl.database
+    AND kl.relation IS NOT DISTINCT FROM bl.relation
+    AND kl.page IS NOT DISTINCT FROM bl.page
+    AND kl.tuple IS NOT DISTINCT FROM bl.tuple
+    AND kl.virtualxid IS NOT DISTINCT FROM bl.virtualxid
+    AND kl.transactionid IS NOT DISTINCT FROM bl.transactionid
+    AND kl.pid != bl.pid
+JOIN pg_stat_activity blocking ON blocking.pid = kl.pid
+WHERE NOT bl.granted;`,
+                        'pg_deadlock_tuning_sql'
+                      )
+                    }
+                  >
+                    {copiedKey === 'pg_deadlock_tuning_sql' ? <Check size={12} color="#34d399" /> : <Copy size={12} />}
+                    <span>{copiedKey === 'pg_deadlock_tuning_sql' ? 'Copied SQL' : 'Copy SQL'}</span>
+                  </button>
+                </div>
+                <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 8px' }}>
+                  By lowering <code style={{ color: '#34d399' }}>deadlock_timeout</code> from the default 1000ms to 500ms and setting a strict <code style={{ color: '#38bdf8' }}>lock_timeout</code>, PostgreSQL identifies deadlocks and aborts blocked transactions immediately instead of stalling connection pools.
+                </p>
+                <pre style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#34d399', fontFamily: 'Consolas, monospace', margin: 0 }}>
+{`ALTER SYSTEM SET deadlock_timeout = '500ms';
+ALTER SYSTEM SET lock_timeout = '3000ms';
+SELECT pg_reload_conf();`}
+                </pre>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <strong style={{ fontSize: '13px', color: '#34d399' }}>
+                    Instant DDL Solution: Disable Page Locks (Force Row-Level KEYLOCK)
+                  </strong>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '2px 8px', fontSize: '11px' }}
+                    onClick={() =>
+                      handleCopy(
+                        `-- Disable Page Locks on the contested tables:
 ALTER INDEX ALL ON [program].[LoanAccountSchedule] SET (ALLOW_PAGE_LOCKS = OFF);
 ALTER INDEX ALL ON [program].[LoanTransaction] SET (ALLOW_PAGE_LOCKS = OFF);
 
@@ -1631,21 +1790,23 @@ WHERE object_id IN (
     OBJECT_ID('[program].[LoanAccountSchedule]'),
     OBJECT_ID('[program].[LoanTransaction]')
 );`,
-                    'disable_page_locks_sql'
-                  )
-                }
-              >
-                {copiedKey === 'disable_page_locks_sql' ? <Check size={12} color="#34d399" /> : <Copy size={12} />}
-                <span>{copiedKey === 'disable_page_locks_sql' ? 'Copied DDL' : 'Copy DDL'}</span>
-              </button>
-            </div>
-            <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 8px' }}>
-              By setting <code style={{ color: '#34d399' }}>ALLOW_PAGE_LOCKS = OFF</code>, SQL Server is forced to use row-level locks (<code style={{ color: '#38bdf8' }}>KEYLOCK</code>) instead of page locks. Sessions inserting different records will never block each other, even when inserting onto the same 8 KB page!
-            </p>
-            <pre style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#34d399', fontFamily: 'Consolas, monospace', margin: 0 }}>
+                        'disable_page_locks_sql'
+                      )
+                    }
+                  >
+                    {copiedKey === 'disable_page_locks_sql' ? <Check size={12} color="#34d399" /> : <Copy size={12} />}
+                    <span>{copiedKey === 'disable_page_locks_sql' ? 'Copied DDL' : 'Copy DDL'}</span>
+                  </button>
+                </div>
+                <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 8px' }}>
+                  By setting <code style={{ color: '#34d399' }}>ALLOW_PAGE_LOCKS = OFF</code>, SQL Server is forced to use row-level locks (<code style={{ color: '#38bdf8' }}>KEYLOCK</code>) instead of page locks. Sessions inserting different records will never block each other, even when inserting onto the same 8 KB page!
+                </p>
+                <pre style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#34d399', fontFamily: 'Consolas, monospace', margin: 0 }}>
 {`ALTER INDEX ALL ON [program].[LoanAccountSchedule] SET (ALLOW_PAGE_LOCKS = OFF);
 ALTER INDEX ALL ON [program].[LoanTransaction] SET (ALLOW_PAGE_LOCKS = OFF);`}
-            </pre>
+                </pre>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1657,7 +1818,7 @@ ALTER INDEX ALL ON [program].[LoanTransaction] SET (ALLOW_PAGE_LOCKS = OFF);`}
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Zap size={18} color="#34d399" />
               <h3 style={{ fontSize: '16px', fontWeight: 800, color: '#fff', margin: 0 }}>
-                Actionable DBA Deadlock Remediation Playbook
+                {isPg ? 'PostgreSQL Deadlock Remediation Playbook' : 'Actionable DBA Deadlock Remediation Playbook'}
               </h3>
             </div>
 
@@ -1669,7 +1830,7 @@ ALTER INDEX ALL ON [program].[LoanTransaction] SET (ALLOW_PAGE_LOCKS = OFF);`}
                 style={{ padding: '2px 10px', fontSize: '11px' }}
                 onClick={() => setRemedyTab('efcore')}
               >
-                EF Core / .NET (C#)
+                {isPg ? 'Npgsql / EF Core' : 'EF Core / .NET (C#)'}
               </button>
               <button
                 type="button"
@@ -1677,7 +1838,7 @@ ALTER INDEX ALL ON [program].[LoanTransaction] SET (ALLOW_PAGE_LOCKS = OFF);`}
                 style={{ padding: '2px 10px', fontSize: '11px' }}
                 onClick={() => setRemedyTab('tsql')}
               >
-                T-SQL &amp; DDL
+                {isPg ? 'PostgreSQL SQL & DDL' : 'T-SQL & DDL'}
               </button>
               <button
                 type="button"
@@ -1685,7 +1846,7 @@ ALTER INDEX ALL ON [program].[LoanTransaction] SET (ALLOW_PAGE_LOCKS = OFF);`}
                 style={{ padding: '2px 10px', fontSize: '11px' }}
                 onClick={() => setRemedyTab('architecture')}
               >
-                Architecture &amp; RCSI
+                {isPg ? 'MVCC & Concurrency' : 'Architecture & RCSI'}
               </button>
             </div>
           </div>
@@ -1694,18 +1855,66 @@ ALTER INDEX ALL ON [program].[LoanTransaction] SET (ALLOW_PAGE_LOCKS = OFF);`}
             {activeDeadlock.remedy}
           </p>
 
-          {/* EF Core Tab */}
+          {/* EF Core / Npgsql Tab */}
           {remedyTab === 'efcore' && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <strong style={{ fontSize: '13px', color: '#38bdf8' }}>1. EnableRetryOnFailure with Error 1205</strong>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    style={{ padding: '2px 8px', fontSize: '11px' }}
-                    onClick={() =>
-                      handleCopy(
-                        `builder.Services.AddDbContext<AppDbContext>(options =>
+              {isPg ? (
+                <>
+                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <strong style={{ fontSize: '13px', color: '#38bdf8' }}>1. Npgsql EnableRetryOnFailure with 40P01</strong>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '2px 8px', fontSize: '11px' }}
+                        onClick={() =>
+                          handleCopy(
+                            `builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(connectionString, npgsqlOptions =>
+    {
+        npgsqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 5,
+            maxRetryDelay: TimeSpan.FromSeconds(30),
+            errorCodesToAdd: new[] { "40P01" }); // 40P01 = deadlock_detected
+    }));`,
+                            'npgsql_retry'
+                          )
+                        }
+                      >
+                        {copiedKey === 'npgsql_retry' ? <Check size={12} color="#34d399" /> : <Copy size={12} />}
+                        <span>Copy</span>
+                      </button>
+                    </div>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 8px' }}>
+                      Configures Npgsql and Entity Framework Core to automatically catch PostgreSQL Error <strong>40P01</strong> (<code style={{ color: '#38bdf8' }}>deadlock_detected</code>) and replay the transaction cleanly with exponential jitter.
+                    </p>
+                    <pre className="deadlock-sql-box" style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#38bdf8', fontFamily: 'Consolas, monospace', maxHeight: '140px', overflowY: 'auto' }}>
+{`npgsqlOptions.EnableRetryOnFailure(
+    maxRetryCount: 5,
+    maxRetryDelay: TimeSpan.FromSeconds(30),
+    errorCodesToAdd: new[] { "40P01" }); // 40P01 = deadlock_detected`}
+                    </pre>
+                  </div>
+
+                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
+                    <strong style={{ fontSize: '13px', color: '#34d399', display: 'block', marginBottom: '8px' }}>
+                      2. Deterministic Row Access Ordering
+                    </strong>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: 0 }}>
+                      When updating multiple rows in the same transaction, always sort primary keys ascending before performing updates (e.g. <code style={{ color: '#38bdf8' }}>orders.OrderBy(x =&gt; x.Id)</code>). If all transactions lock rows in identical order, circular wait-for deadlock cycles become mathematically impossible.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <strong style={{ fontSize: '13px', color: '#38bdf8' }}>1. EnableRetryOnFailure with Error 1205</strong>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '2px 8px', fontSize: '11px' }}
+                        onClick={() =>
+                          handleCopy(
+                            `builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(connectionString, sqlOptions =>
     {
         sqlOptions.EnableRetryOnFailure(
@@ -1713,48 +1922,102 @@ ALTER INDEX ALL ON [program].[LoanTransaction] SET (ALLOW_PAGE_LOCKS = OFF);`}
             maxRetryDelay: TimeSpan.FromSeconds(30),
             errorNumbersToAdd: new[] { 1205 }); // Error 1205 = Deadlock victim
     }));`,
-                        'efcore_retry'
-                      )
-                    }
-                  >
-                    {copiedKey === 'efcore_retry' ? <Check size={12} color="#34d399" /> : <Copy size={12} />}
-                    <span>Copy</span>
-                  </button>
-                </div>
-                <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 8px' }}>
-                  Configures Entity Framework Core connection resiliency to automatically replay transactions when SQL Server kills a session as a deadlock victim.
-                </p>
-                <pre className="deadlock-sql-box" style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#38bdf8', fontFamily: 'Consolas, monospace', maxHeight: '140px', overflowY: 'auto' }}>
+                            'efcore_retry'
+                          )
+                        }
+                      >
+                        {copiedKey === 'efcore_retry' ? <Check size={12} color="#34d399" /> : <Copy size={12} />}
+                        <span>Copy</span>
+                      </button>
+                    </div>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 8px' }}>
+                      Configures Entity Framework Core connection resiliency to automatically replay transactions when SQL Server kills a session as a deadlock victim.
+                    </p>
+                    <pre className="deadlock-sql-box" style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#38bdf8', fontFamily: 'Consolas, monospace', maxHeight: '140px', overflowY: 'auto' }}>
 {`sqlOptions.EnableRetryOnFailure(
     maxRetryCount: 5,
     maxRetryDelay: TimeSpan.FromSeconds(30),
     errorNumbersToAdd: new[] { 1205 }); // 1205 = Deadlock`}
-                </pre>
-              </div>
+                    </pre>
+                  </div>
 
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
-                <strong style={{ fontSize: '13px', color: '#34d399', display: 'block', marginBottom: '8px' }}>
-                  2. Enforce Deterministic Save Order in EF Core
-                </strong>
-                <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: 0 }}>
-                  EF Core batches entities during <code style={{ color: '#38bdf8' }}>SaveChangesAsync()</code> by topological dependency graph. If multiple transactions insert into both <code style={{ color: '#38bdf8' }}>LoanAccountSchedule</code> and <code style={{ color: '#38bdf8' }}>LoanTransaction</code>, ensure the code always creates and adds parent records first, or sort batch items by primary key before bulk saving.
-                </p>
-              </div>
+                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
+                    <strong style={{ fontSize: '13px', color: '#34d399', display: 'block', marginBottom: '8px' }}>
+                      2. Enforce Deterministic Save Order in EF Core
+                    </strong>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: 0 }}>
+                      EF Core batches entities during <code style={{ color: '#38bdf8' }}>SaveChangesAsync()</code> by topological dependency graph. If multiple transactions insert into both <code style={{ color: '#38bdf8' }}>LoanAccountSchedule</code> and <code style={{ color: '#38bdf8' }}>LoanTransaction</code>, ensure the code always creates and adds parent records first, or sort batch items by primary key before bulk saving.
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
-          {/* T-SQL & DDL Tab */}
+          {/* SQL & DDL Tab */}
           {remedyTab === 'tsql' && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <strong style={{ fontSize: '13px', color: '#38bdf8' }}>1. T-SQL Deadlock Retry Pattern</strong>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    style={{ padding: '2px 8px', fontSize: '11px' }}
-                    onClick={() =>
-                      handleCopy(
-                        `DECLARE @RetryCount INT = 0;
+              {isPg ? (
+                <>
+                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <strong style={{ fontSize: '13px', color: '#38bdf8' }}>1. PostgreSQL lock_timeout &amp; statement_timeout</strong>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '2px 8px', fontSize: '11px' }}
+                        onClick={() =>
+                          handleCopy(
+                            `-- Prevent indefinite session hangs on row/table locks:
+SET lock_timeout = '2000ms';
+SET statement_timeout = '15000ms';
+
+-- Queue processing without deadlock risk:
+SELECT id, status
+FROM orders
+WHERE status = 'PENDING'
+ORDER BY id
+LIMIT 10
+FOR UPDATE SKIP LOCKED;`,
+                            'pg_timeout_sql'
+                          )
+                        }
+                      >
+                        {copiedKey === 'pg_timeout_sql' ? <Check size={12} color="#34d399" /> : <Copy size={12} />}
+                        <span>Copy</span>
+                      </button>
+                    </div>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 8px' }}>
+                      Set <code style={{ color: '#38bdf8' }}>lock_timeout</code> to prevent transactions from waiting endlessly. For worker queues, always use <code style={{ color: '#34d399' }}>FOR UPDATE SKIP LOCKED</code> to bypass locked rows.
+                    </p>
+                    <pre className="deadlock-sql-box" style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#94a3b8', fontFamily: 'Consolas, monospace', maxHeight: '120px', overflowY: 'auto' }}>
+{`SET lock_timeout = '2000ms';
+SELECT * FROM orders WHERE status = 'PENDING'
+FOR UPDATE SKIP LOCKED;`}
+                    </pre>
+                  </div>
+
+                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
+                    <strong style={{ fontSize: '13px', color: '#fbbf24', display: 'block', marginBottom: '8px' }}>
+                      2. Deterministic Batched UPDATEs
+                    </strong>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: 0 }}>
+                      When executing multi-row updates, sort IDs before passing to SQL:
+                      <br />
+                      <code style={{ color: '#38bdf8' }}>UPDATE accounts SET balance = balance + 10 WHERE id = ANY(ARRAY[1, 2]::int[] ORDER BY 1);</code>
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <strong style={{ fontSize: '13px', color: '#38bdf8' }}>1. T-SQL Deadlock Retry Pattern</strong>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '2px 8px', fontSize: '11px' }}
+                        onClick={() =>
+                          handleCopy(
+                            `DECLARE @RetryCount INT = 0;
 DECLARE @MaxRetries INT = 3;
 WHILE @RetryCount < @MaxRetries
 BEGIN
@@ -1775,58 +2038,84 @@ BEGIN
             THROW;
     END CATCH
 END;`,
-                        'retry_tsql'
-                      )
-                    }
-                  >
-                    {copiedKey === 'retry_tsql' ? <Check size={12} color="#34d399" /> : <Copy size={12} />}
-                    <span>Copy</span>
-                  </button>
-                </div>
-                <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 8px' }}>
-                  Wrap high-concurrency transactions with error 1205 retry handlers so transient deadlocks resolve seamlessly.
-                </p>
-                <pre className="deadlock-sql-box" style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#94a3b8', fontFamily: 'Consolas, monospace', maxHeight: '120px', overflowY: 'auto' }}>
+                            'retry_tsql'
+                          )
+                        }
+                      >
+                        {copiedKey === 'retry_tsql' ? <Check size={12} color="#34d399" /> : <Copy size={12} />}
+                        <span>Copy</span>
+                      </button>
+                    </div>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 8px' }}>
+                      Wrap high-concurrency transactions with error 1205 retry handlers so transient deadlocks resolve seamlessly.
+                    </p>
+                    <pre className="deadlock-sql-box" style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#94a3b8', fontFamily: 'Consolas, monospace', maxHeight: '120px', overflowY: 'auto' }}>
 {`IF ERROR_NUMBER() = 1205 -- Deadlock
 BEGIN
     SET @RetryCount = @RetryCount + 1;
     WAITFOR DELAY '00:00:00.050';
 END`}
-                </pre>
-              </div>
+                    </pre>
+                  </div>
 
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
-                <strong style={{ fontSize: '13px', color: '#fbbf24', display: 'block', marginBottom: '8px' }}>
-                  2. Control Victim Selection with DEADLOCK_PRIORITY
-                </strong>
-                <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: 0 }}>
-                  Assign <code style={{ color: '#fbbf24' }}>SET DEADLOCK_PRIORITY HIGH;</code> to user-facing or critical payments, and <code style={{ color: '#94a3b8' }}>SET DEADLOCK_PRIORITY LOW;</code> to background batch or report processing jobs. SQL Server will always terminate the LOW priority session.
-                </p>
-              </div>
+                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
+                    <strong style={{ fontSize: '13px', color: '#fbbf24', display: 'block', marginBottom: '8px' }}>
+                      2. Control Victim Selection with DEADLOCK_PRIORITY
+                    </strong>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: 0 }}>
+                      Assign <code style={{ color: '#fbbf24' }}>SET DEADLOCK_PRIORITY HIGH;</code> to user-facing or critical payments, and <code style={{ color: '#94a3b8' }}>SET DEADLOCK_PRIORITY LOW;</code> to background batch or report processing jobs. SQL Server will always terminate the LOW priority session.
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
-          {/* Architecture & RCSI Tab */}
+          {/* Architecture / MVCC Tab */}
           {remedyTab === 'architecture' && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
-                <strong style={{ fontSize: '13px', color: '#a78bfa', display: 'block', marginBottom: '8px' }}>
-                  1. Read Committed Snapshot (RCSI)
-                </strong>
-                <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: '0 0 8px' }}>
-                  Enable RCSI (<code style={{ color: '#a78bfa' }}>ALTER DATABASE CURRENT SET READ_COMMITTED_SNAPSHOT ON</code>)
-                  to allow readers to read row-versioned copies in TempDB without acquiring shared locks, completely eliminating reader-writer deadlocks.
-                </p>
-              </div>
+              {isPg ? (
+                <>
+                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
+                    <strong style={{ fontSize: '13px', color: '#a78bfa', display: 'block', marginBottom: '8px' }}>
+                      1. PostgreSQL MVCC (Multi-Version Concurrency)
+                    </strong>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: '0 0 8px' }}>
+                      Unlike legacy engines, PostgreSQL readers never block writers and writers never block readers under default Read Committed isolation. Deadlocks only occur during concurrent writes to identical records in reverse order or conflicting lock upgrade requests.
+                    </p>
+                  </div>
 
-              <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
-                <strong style={{ fontSize: '13px', color: '#38bdf8', display: 'block', marginBottom: '8px' }}>
-                  2. Chunk Bulk Insert Operations
-                </strong>
-                <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: 0 }}>
-                  Avoid running 50,000+ row inserts inside a single open transaction. Chunk records into batches of 1,000 to 5,000 rows. This minimizes the duration lock resources are held and prevents lock escalation to table level.
-                </p>
-              </div>
+                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
+                    <strong style={{ fontSize: '13px', color: '#38bdf8', display: 'block', marginBottom: '8px' }}>
+                      2. Minimize Transaction Lifespan
+                    </strong>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: 0 }}>
+                      Never perform HTTP network calls, external API integrations, or slow serialization while holding open PostgreSQL transactions. Execute all remote requests first, open the transaction, perform DB writes, and commit immediately to minimize lock duration.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
+                    <strong style={{ fontSize: '13px', color: '#a78bfa', display: 'block', marginBottom: '8px' }}>
+                      1. Read Committed Snapshot (RCSI)
+                    </strong>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: '0 0 8px' }}>
+                      Enable RCSI (<code style={{ color: '#a78bfa' }}>ALTER DATABASE CURRENT SET READ_COMMITTED_SNAPSHOT ON</code>)
+                      to allow readers to read row-versioned copies in TempDB without acquiring shared locks, completely eliminating reader-writer deadlocks.
+                    </p>
+                  </div>
+
+                  <div style={{ background: '#090d16', border: '1px solid #1e293b', borderRadius: '8px', padding: '16px' }}>
+                    <strong style={{ fontSize: '13px', color: '#38bdf8', display: 'block', marginBottom: '8px' }}>
+                      2. Chunk Bulk Insert Operations
+                    </strong>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: 0 }}>
+                      Avoid running 50,000+ row inserts inside a single open transaction. Chunk records into batches of 1,000 to 5,000 rows. This minimizes the duration lock resources are held and prevents lock escalation to table level.
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1834,3 +2123,4 @@ END`}
     </div>
   );
 };
+
