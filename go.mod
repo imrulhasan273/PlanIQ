@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/microsoft/go-mssqldb v1.11.2
 	github.com/wailsapp/wails/v2 v2.13.0
-	golang.org/x/text v0.41.0
+	golang.org/x/text v0.44.0
 	modernc.org/sqlite v1.61.0
 )
 
