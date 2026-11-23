@@ -1,0 +1,137 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Aggregate",
+      "Strategy": "Sorted",
+      "Partial Mode": "Simple",
+      "Parallel Aware": false,
+      "Startup Cost": 8450.25,
+      "Total Cost": 9120.40,
+      "Plan Rows": 1250,
+      "Plan Width": 64,
+      "Actual Startup Time": 34.120,
+      "Actual Total Time": 82.450,
+      "Actual Rows": 1250,
+      "Actual Loops": 1,
+      "Group Key": ["c.customer_id", "c.company_name"],
+      "Shared Hit Blocks": 4120,
+      "Shared Read Blocks": 850,
+      "Shared Dirtied Blocks": 12,
+      "Shared Written Blocks": 0,
+      "Plans": [
+        {
+          "Node Type": "Sort",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Startup Cost": 8450.25,
+          "Total Cost": 8580.10,
+          "Plan Rows": 51940,
+          "Plan Width": 48,
+          "Actual Startup Time": 33.850,
+          "Actual Total Time": 48.620,
+          "Actual Rows": 51940,
+          "Actual Loops": 1,
+          "Sort Key": ["c.customer_id", "c.company_name"],
+          "Sort Method": "external merge",
+          "Sort Space Used": 3480,
+          "Sort Space Type": "Disk",
+          "Shared Hit Blocks": 3900,
+          "Shared Read Blocks": 850,
+          "Plans": [
+            {
+              "Node Type": "Hash Join",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Join Type": "Inner",
+              "Startup Cost": 245.50,
+              "Total Cost": 6120.80,
+              "Plan Rows": 51940,
+              "Plan Width": 48,
+              "Actual Startup Time": 2.450,
+              "Actual Total Time": 28.320,
+              "Actual Rows": 51940,
+              "Actual Loops": 1,
+              "Hash Cond": "(o.customer_id = c.customer_id)",
+              "Shared Hit Blocks": 3900,
+              "Shared Read Blocks": 850,
+              "Plans": [
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Relation Name": "orders",
+                  "Schema": "public",
+                  "Alias": "o",
+                  "Startup Cost": 0.00,
+                  "Total Cost": 4820.00,
+                  "Plan Rows": 51940,
+                  "Plan Width": 32,
+                  "Actual Startup Time": 0.045,
+                  "Actual Total Time": 21.150,
+                  "Actual Rows": 51940,
+                  "Actual Loops": 1,
+                  "Filter": "((status)::text = 'COMPLETED'::text AND order_date >= '2025-01-01'::date)",
+                  "Rows Removed by Filter": 74800,
+                  "Shared Hit Blocks": 3820,
+                  "Shared Read Blocks": 850
+                },
+                {
+                  "Node Type": "Hash",
+                  "Parent Relationship": "Inner",
+                  "Parallel Aware": false,
+                  "Startup Cost": 185.00,
+                  "Total Cost": 185.00,
+                  "Plan Rows": 4840,
+                  "Plan Width": 24,
+                  "Actual Startup Time": 2.380,
+                  "Actual Total Time": 2.380,
+                  "Actual Rows": 4840,
+                  "Actual Loops": 1,
+                  "Hash Buckets": 8192,
+                  "Hash Batches": 1,
+                  "Original Hash Batches": 1,
+                  "Peak Memory Usage": 340,
+                  "Shared Hit Blocks": 80,
+                  "Shared Read Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Index Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Scan Direction": "Forward",
+                      "Index Name": "idx_customers_active",
+                      "Relation Name": "customers",
+                      "Schema": "public",
+                      "Alias": "c",
+                      "Startup Cost": 0.28,
+                      "Total Cost": 185.00,
+                      "Plan Rows": 4840,
+                      "Plan Width": 24,
+                      "Actual Startup Time": 0.025,
+                      "Actual Total Time": 1.450,
+                      "Actual Rows": 4840,
+                      "Actual Loops": 1,
+                      "Index Cond": "(is_active = true)",
+                      "Rows Removed by Index Recheck": 0,
+                      "Shared Hit Blocks": 80,
+                      "Shared Read Blocks": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "Planning Time": 0.485,
+    "Execution Time": 84.150,
+    "Query": "SELECT c.customer_id, c.company_name, COUNT(o.order_id) AS total_orders, SUM(o.total_amount) AS revenue FROM customers c JOIN orders o ON c.customer_id = o.customer_id WHERE o.status = 'COMPLETED' AND o.order_date >= '2025-01-01' AND c.is_active = true GROUP BY c.customer_id, c.company_name ORDER BY c.customer_id;",
+    "Settings": {
+      "work_mem": "4MB",
+      "shared_buffers": "4GB",
+      "effective_cache_size": "12GB",
+      "random_page_cost": "1.1"
+    }
+  }
+]
