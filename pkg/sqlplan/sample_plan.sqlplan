@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ShowPlanXML xmlns="http://schemas.microsoft.com/sqlserver/2004/07/showplan" Version="1.5" Build="15.0.2000.5">
+  <BatchSequence>
+    <Batch>
+      <Statements>
+        <StmtSimple StatementId="1" StatementCompId="1" StatementText="SELECT o.OrderID, o.CustomerID, o.OrderDate, o.TotalAmount INTO #ActiveCustomerOrders FROM dbo.Orders o INNER JOIN dbo.Customers c ON o.CustomerID = c.CustomerID WHERE YEAR(o.OrderDate) = 2026 AND c.RegionCode = @RegionCode" StatementType="SELECT" StatementSubTreeCost="18.45" StatementEstRows="500" StatementOptmLevel="FULL" CardinalityEstimationModelVersion="150">
+          <QueryPlan CachedPlanSize="128" CompileTime="45" CompileCPU="42" CompileMemory="2048" NonParallelPlanReason="MaxDOPSetToOne">
+            <MissingIndexes>
+              <MissingIndexGroup Impact="78.4">
+                <MissingIndex Database="[SalesDB]" Schema="[dbo]" Table="[Orders]">
+                  <ColumnGroup Usage="EQUALITY">
+                    <Column Name="[CustomerID]" ColumnId="2" />
+                  </ColumnGroup>
+                  <ColumnGroup Usage="INEQUALITY">
+                    <Column Name="[OrderDate]" ColumnId="3" />
+                  </ColumnGroup>
+                  <ColumnGroup Usage="INCLUDE">
+                    <Column Name="[TotalAmount]" ColumnId="4" />
+                  </ColumnGroup>
+                </MissingIndex>
+              </MissingIndexGroup>
+            </MissingIndexes>
+            <MemoryGrantInfo SerialRequiredMemory="1024" SerialDesiredMemory="4096" RequestedMemory="4096" GrantedMemory="4096" MaxUsedMemory="4096" IsMemoryGrantFeedbackAdjusted="YesStable" />
+            <OptimizerHardwareDependentProperties EstimatedAvailableMemoryGrant="204800" EstimatedPagesCached="51200" EstimatedAvailableDegreeOfParallelism="4" MaxCompileMemory="1048576" />
+            <QueryTimeStats CpuTime="385" ElapsedTime="840" />
+            <WaitStats>
+              <Wait WaitType="PAGEIOLATCH_SH" WaitTimeMs="310" WaitCount="42" />
+              <Wait WaitType="SOS_SCHEDULER_YIELD" WaitTimeMs="95" WaitCount="18" />
+              <Wait WaitType="CXPACKET" WaitTimeMs="40" WaitCount="6" />
+            </WaitStats>
+            <Warnings>
+              <PlanAffectingConvert ConvertIssue="Seek Plan" Expression="CONVERT_IMPLICIT(nvarchar(20),[c].[RegionCode],0)" />
+              <ColumnsWithNoStatistics>
+                <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Column="Status" />
+              </ColumnsWithNoStatistics>
+              <SpillToTempDb SpillLevel="1" />
+            </Warnings>
+            <RelOp NodeId="0" PhysicalOp="Hash Match" LogicalOp="Inner Join" EstimateRows="500" EstimateIO="0" EstimateCPU="0.85" EstimatedTotalSubtreeCost="18.45" ExecutionMode="Row">
+              <OutputList>
+                <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Column="OrderID" />
+                <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Column="CustomerID" />
+                <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Column="OrderDate" />
+                <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Column="TotalAmount" />
+              </OutputList>
+              <RunTimeInformation>
+                <RunTimeCountersPerThread Thread="0" ActualRows="28500" ActualExecutions="1" ActualCPUms="385" ActualElapsedms="840" ActualLogicalReads="16050" ActualPhysicalReads="640" ActualReadAheads="512" />
+              </RunTimeInformation>
+              <Hash>
+                <RelOp NodeId="1" PhysicalOp="Clustered Index Scan" LogicalOp="Clustered Index Scan" EstimateRows="500" EstimatedRowsRead="250000" EstimateIO="11.2" EstimateCPU="2.4" EstimatedTotalSubtreeCost="13.60" TableCardinality="250000" ExecutionMode="Row">
+                  <OutputList>
+                    <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Column="OrderID" />
+                    <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Column="CustomerID" />
+                    <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Column="OrderDate" />
+                    <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Column="TotalAmount" />
+                  </OutputList>
+                  <RunTimeInformation>
+                    <RunTimeCountersPerThread Thread="0" ActualRows="28500" ActualExecutions="1" ActualCPUms="210" ActualElapsedms="520" ActualLogicalReads="14200" ActualPhysicalReads="640" ActualReadAheads="512" ActualScans="1" />
+                  </RunTimeInformation>
+                  <IndexScan Ordered="0">
+                    <Object Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Index="[PK_Orders]" IndexKind="Clustered" />
+                    <Predicate>
+                      <ScalarOperator ScalarString="datepart(year,[o].[OrderDate])=(2026)" />
+                    </Predicate>
+                  </IndexScan>
+                </RelOp>
+                <RelOp NodeId="2" PhysicalOp="Index Scan" LogicalOp="Index Scan" EstimateRows="1200" EstimatedRowsRead="45000" EstimateIO="3.1" EstimateCPU="0.9" EstimatedTotalSubtreeCost="4.00" TableCardinality="45000" ExecutionMode="Row">
+                  <OutputList>
+                    <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[Customers]" Column="CustomerID" />
+                    <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[Customers]" Column="RegionCode" />
+                  </OutputList>
+                  <RunTimeInformation>
+                    <RunTimeCountersPerThread Thread="0" ActualRows="4200" ActualExecutions="1" ActualCPUms="95" ActualElapsedms="180" ActualLogicalReads="1850" ActualPhysicalReads="0" ActualReadAheads="0" ActualScans="1" />
+                  </RunTimeInformation>
+                  <IndexScan Ordered="0">
+                    <Object Database="[SalesDB]" Schema="[dbo]" Table="[Customers]" Index="[IX_Customers_Region]" IndexKind="NonClustered" />
+                    <Predicate>
+                      <ScalarOperator ScalarString="CONVERT_IMPLICIT(nvarchar(20),[c].[RegionCode],0)=[@RegionCode]" />
+                    </Predicate>
+                  </IndexScan>
+                </RelOp>
+              </Hash>
+            </RelOp>
+            <ParameterList>
+              <ColumnReference Column="@RegionCode" ParameterDataType="nvarchar(20)" ParameterCompiledValue="N'US-EAST'" ParameterRuntimeValue="N'EU-WEST'" />
+            </ParameterList>
+          </QueryPlan>
+        </StmtSimple>
+        <StmtSimple StatementId="2" StatementCompId="2" StatementText="SELECT a.OrderID, oi.ProductID, oi.Quantity, oi.UnitPrice FROM #ActiveCustomerOrders a INNER JOIN dbo.OrderItems oi ON a.OrderID = oi.OrderID WHERE oi.UnitPrice &gt; 50" StatementType="SELECT" StatementSubTreeCost="9.20" StatementEstRows="4200" StatementOptmLevel="FULL" CardinalityEstimationModelVersion="150">
+          <QueryPlan CachedPlanSize="64" CompileTime="18" CompileCPU="16" CompileMemory="1024">
+            <MissingIndexes>
+              <MissingIndexGroup Impact="64.5">
+                <MissingIndex Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]">
+                  <ColumnGroup Usage="EQUALITY">
+                    <Column Name="[OrderID]" ColumnId="2" />
+                  </ColumnGroup>
+                  <ColumnGroup Usage="INEQUALITY">
+                    <Column Name="[UnitPrice]" ColumnId="5" />
+                  </ColumnGroup>
+                  <ColumnGroup Usage="INCLUDE">
+                    <Column Name="[ProductID]" ColumnId="3" />
+                    <Column Name="[Quantity]" ColumnId="4" />
+                  </ColumnGroup>
+                </MissingIndex>
+              </MissingIndexGroup>
+            </MissingIndexes>
+            <QueryTimeStats CpuTime="165" ElapsedTime="210" />
+            <RelOp NodeId="0" PhysicalOp="Nested Loops" LogicalOp="Inner Join" EstimateRows="4200" EstimateIO="0" EstimateCPU="0.45" EstimatedTotalSubtreeCost="9.20" ExecutionMode="Row">
+              <OutputList>
+                <ColumnReference Table="[#ActiveCustomerOrders]" Column="OrderID" />
+                <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]" Column="ProductID" />
+                <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]" Column="Quantity" />
+                <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]" Column="UnitPrice" />
+              </OutputList>
+              <RunTimeInformation>
+                <RunTimeCountersPerThread Thread="0" ActualRows="4200" ActualExecutions="1" ActualCPUms="165" ActualElapsedms="210" ActualLogicalReads="13400" />
+              </RunTimeInformation>
+              <NestedLoops>
+                <RelOp NodeId="1" PhysicalOp="Table Scan" LogicalOp="Table Scan" EstimateRows="4200" EstimateIO="0.8" EstimateCPU="0.2" EstimatedTotalSubtreeCost="1.00" TableCardinality="28500" ExecutionMode="Row">
+                  <OutputList>
+                    <ColumnReference Table="[#ActiveCustomerOrders]" Column="OrderID" />
+                  </OutputList>
+                  <RunTimeInformation>
+                    <RunTimeCountersPerThread Thread="0" ActualRows="4200" ActualExecutions="1" ActualCPUms="20" ActualElapsedms="25" ActualLogicalReads="320" ActualScans="1" />
+                  </RunTimeInformation>
+                  <TableScan>
+                    <Object Database="[tempdb]" Schema="[dbo]" Table="[#ActiveCustomerOrders]" IndexKind="Heap" />
+                  </TableScan>
+                </RelOp>
+                <RelOp NodeId="2" PhysicalOp="Nested Loops" LogicalOp="Inner Join" EstimateRows="1" EstimateIO="0" EstimateCPU="0.25" EstimatedTotalSubtreeCost="7.75" ExecutionMode="Row">
+                  <OutputList>
+                    <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]" Column="ProductID" />
+                    <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]" Column="Quantity" />
+                    <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]" Column="UnitPrice" />
+                  </OutputList>
+                  <RunTimeInformation>
+                    <RunTimeCountersPerThread Thread="0" ActualRows="4200" ActualExecutions="4200" ActualCPUms="135" ActualElapsedms="175" />
+                  </RunTimeInformation>
+                  <NestedLoops>
+                    <RelOp NodeId="3" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1" EstimateIO="0.9" EstimateCPU="0.3" EstimatedTotalSubtreeCost="1.20" TableCardinality="900000" ExecutionMode="Row">
+                      <OutputList>
+                        <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]" Column="OrderItemID" />
+                      </OutputList>
+                      <RunTimeInformation>
+                        <RunTimeCountersPerThread Thread="0" ActualRows="4200" ActualExecutions="4200" ActualCPUms="45" ActualElapsedms="55" ActualLogicalReads="4680" ActualScans="4200" />
+                      </RunTimeInformation>
+                      <IndexScan>
+                        <Object Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]" Index="[IX_OrderItems_OrderID]" IndexKind="NonClustered" />
+                      </IndexScan>
+                    </RelOp>
+                    <RelOp NodeId="4" PhysicalOp="Clustered Index Seek" LogicalOp="Clustered Index Seek" EstimateRows="1" EstimateIO="5.5" EstimateCPU="0.8" EstimatedTotalSubtreeCost="6.30" TableCardinality="900000" ExecutionMode="Row">
+                      <OutputList>
+                        <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]" Column="ProductID" />
+                        <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]" Column="Quantity" />
+                        <ColumnReference Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]" Column="UnitPrice" />
+                      </OutputList>
+                      <RunTimeInformation>
+                        <RunTimeCountersPerThread Thread="0" ActualRows="4200" ActualExecutions="4200" ActualCPUms="85" ActualElapsedms="110" ActualLogicalReads="8400" ActualScans="4200" />
+                      </RunTimeInformation>
+                      <IndexScan Lookup="1">
+                        <Object Database="[SalesDB]" Schema="[dbo]" Table="[OrderItems]" Index="[PK_OrderItems]" IndexKind="Clustered" />
+                      </IndexScan>
+                    </RelOp>
+                  </NestedLoops>
+                </RelOp>
+              </NestedLoops>
+            </RelOp>
+          </QueryPlan>
+        </StmtSimple>
+        <StmtSimple StatementId="3" StatementCompId="3" StatementText="UPDATE dbo.Orders SET Status = 'PROCESSED' WHERE OrderID IN (SELECT OrderID FROM #ActiveCustomerOrders)" StatementType="UPDATE" StatementSubTreeCost="4.15" StatementEstRows="250" StatementOptmLevel="FULL" CardinalityEstimationModelVersion="150">
+          <QueryPlan CachedPlanSize="48" CompileTime="14" CompileCPU="12" CompileMemory="768">
+            <QueryTimeStats CpuTime="75" ElapsedTime="95" />
+            <RelOp NodeId="0" PhysicalOp="Clustered Index Update" LogicalOp="Update" EstimateRows="0" EstimateIO="0.9" EstimateCPU="0.25" EstimatedTotalSubtreeCost="4.15" ExecutionMode="Row">
+              <RunTimeInformation>
+                <RunTimeCountersPerThread Thread="0" ActualRows="250" ActualExecutions="1" ActualCPUms="75" ActualElapsedms="95" ActualLogicalReads="1120" />
+              </RunTimeInformation>
+              <Update>
+                <Object Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Index="[PK_Orders]" IndexKind="Clustered" />
+                <RelOp NodeId="1" PhysicalOp="Table Spool" LogicalOp="Eager Spool" EstimateRows="250" EstimateIO="0.6" EstimateCPU="0.15" EstimatedTotalSubtreeCost="3.00" EstimateRebinds="0" EstimateRewinds="0" ExecutionMode="Row">
+                  <RunTimeInformation>
+                    <RunTimeCountersPerThread Thread="0" ActualRows="250" ActualExecutions="1" ActualCPUms="15" ActualElapsedms="20" ActualLogicalReads="180" />
+                  </RunTimeInformation>
+                  <Spool>
+                    <RelOp NodeId="2" PhysicalOp="Adaptive Join" LogicalOp="Inner Join" EstimateRows="250" EstimateIO="1.2" EstimateCPU="1.05" EstimatedTotalSubtreeCost="2.25" EstimatedExecutionMode="Batch">
+                      <AdaptiveJoin AdaptiveThresholdRows="250" EstimatedJoinType="HashMatch" />
+                      <RunTimeInformation>
+                        <RunTimeCountersPerThread Thread="0" ActualRows="120" ActualExecutions="1" ActualCPUms="45" ActualElapsedms="55" ActualJoinType="NestedLoops" ActualExecutionMode="Batch" />
+                      </RunTimeInformation>
+                      <RelOp NodeId="3" PhysicalOp="Table Scan" LogicalOp="Table Scan" EstimateRows="250" EstimateIO="0.5" EstimateCPU="0.1" EstimatedTotalSubtreeCost="0.60" ExecutionMode="Batch">
+                        <RunTimeInformation>
+                          <RunTimeCountersPerThread Thread="0" ActualRows="120" ActualExecutions="1" ActualCPUms="10" ActualElapsedms="12" ActualLogicalReads="120" ActualExecutionMode="Batch" />
+                        </RunTimeInformation>
+                        <TableScan>
+                          <Object Database="[tempdb]" Schema="[dbo]" Table="[#ActiveCustomerOrders]" IndexKind="Heap" />
+                        </TableScan>
+                      </RelOp>
+                      <RelOp NodeId="4" PhysicalOp="Clustered Index Seek" LogicalOp="Clustered Index Seek" EstimateRows="1" EstimateIO="0.4" EstimateCPU="0.1" EstimatedTotalSubtreeCost="0.50" ExecutionMode="Row">
+                        <RunTimeInformation>
+                          <RunTimeCountersPerThread Thread="0" ActualRows="120" ActualExecutions="120" ActualCPUms="25" ActualElapsedms="30" ActualLogicalReads="480" ActualScans="120" />
+                        </RunTimeInformation>
+                        <IndexScan>
+                          <Object Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Index="[PK_Orders]" IndexKind="Clustered" />
+                        </IndexScan>
+                      </RelOp>
+                    </RelOp>
+                  </Spool>
+                </RelOp>
+              </Update>
+            </RelOp>
+          </QueryPlan>
+        </StmtSimple>
+      </Statements>
+    </Batch>
+  </BatchSequence>
+</ShowPlanXML>

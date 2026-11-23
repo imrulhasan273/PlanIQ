@@ -1780,15 +1780,15 @@ SELECT pg_reload_conf();`}
                     onClick={() =>
                       handleCopy(
                         `-- Disable Page Locks on the contested tables:
-ALTER INDEX ALL ON [program].[LoanAccountSchedule] SET (ALLOW_PAGE_LOCKS = OFF);
-ALTER INDEX ALL ON [program].[LoanTransaction] SET (ALLOW_PAGE_LOCKS = OFF);
+ALTER INDEX ALL ON [dbo].[OrderSchedule] SET (ALLOW_PAGE_LOCKS = OFF);
+ALTER INDEX ALL ON [dbo].[OrderTransaction] SET (ALLOW_PAGE_LOCKS = OFF);
 
 -- Verification Query:
 SELECT name, type_desc, allow_page_locks, allow_row_locks
 FROM sys.indexes
 WHERE object_id IN (
-    OBJECT_ID('[program].[LoanAccountSchedule]'),
-    OBJECT_ID('[program].[LoanTransaction]')
+    OBJECT_ID('[dbo].[OrderSchedule]'),
+    OBJECT_ID('[dbo].[OrderTransaction]')
 );`,
                         'disable_page_locks_sql'
                       )
@@ -1802,8 +1802,8 @@ WHERE object_id IN (
                   By setting <code style={{ color: '#34d399' }}>ALLOW_PAGE_LOCKS = OFF</code>, SQL Server is forced to use row-level locks (<code style={{ color: '#38bdf8' }}>KEYLOCK</code>) instead of page locks. Sessions inserting different records will never block each other, even when inserting onto the same 8 KB page!
                 </p>
                 <pre style={{ background: '#040711', border: '1px solid #1e293b', borderRadius: '6px', padding: '10px', fontSize: '11px', color: '#34d399', fontFamily: 'Consolas, monospace', margin: 0 }}>
-{`ALTER INDEX ALL ON [program].[LoanAccountSchedule] SET (ALLOW_PAGE_LOCKS = OFF);
-ALTER INDEX ALL ON [program].[LoanTransaction] SET (ALLOW_PAGE_LOCKS = OFF);`}
+{`ALTER INDEX ALL ON [dbo].[OrderSchedule] SET (ALLOW_PAGE_LOCKS = OFF);
+ALTER INDEX ALL ON [dbo].[OrderTransaction] SET (ALLOW_PAGE_LOCKS = OFF);`}
                 </pre>
               </>
             )}
@@ -1946,7 +1946,7 @@ ALTER INDEX ALL ON [program].[LoanTransaction] SET (ALLOW_PAGE_LOCKS = OFF);`}
                       2. Enforce Deterministic Save Order in EF Core
                     </strong>
                     <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', margin: 0 }}>
-                      EF Core batches entities during <code style={{ color: '#38bdf8' }}>SaveChangesAsync()</code> by topological dependency graph. If multiple transactions insert into both <code style={{ color: '#38bdf8' }}>LoanAccountSchedule</code> and <code style={{ color: '#38bdf8' }}>LoanTransaction</code>, ensure the code always creates and adds parent records first, or sort batch items by primary key before bulk saving.
+                      EF Core batches entities during <code style={{ color: '#38bdf8' }}>SaveChangesAsync()</code> by topological dependency graph. If multiple transactions insert into both <code style={{ color: '#38bdf8' }}>OrderSchedule</code> and <code style={{ color: '#38bdf8' }}>OrderTransaction</code>, ensure the code always creates and adds parent records first, or sort batch items by primary key before bulk saving.
                     </p>
                   </div>
                 </>

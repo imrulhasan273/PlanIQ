@@ -42,17 +42,9 @@ func (a *App) ParsePlan(xmlContent string, planName string) (*sqlplan.PlanAnalys
 	return sqlplan.ParseXML(xmlContent, planName)
 }
 
-// LoadSamplePlan loads the bundled explan.xml sample execution plan
+// LoadSamplePlan loads the embedded synthetic sample execution plan
 func (a *App) LoadSamplePlan() (*sqlplan.PlanAnalysis, error) {
-	bytes, err := os.ReadFile("sample_plans/explan.xml")
-	if err != nil {
-		// Fallback check in parent or scratch
-		bytes, err = os.ReadFile("explan.xml")
-		if err != nil {
-			return nil, fmt.Errorf("sample plan not found: %w", err)
-		}
-	}
-	return sqlplan.ParseBytes(bytes, "explan.xml (InsertDailyOperationalReport)")
+	return sqlplan.ParseBytes(sqlplan.DefaultSamplePlanXML, sqlplan.DefaultSamplePlanName)
 }
 
 // OpenFileAndParse opens a native file dialog, parses the plan directly on disk,

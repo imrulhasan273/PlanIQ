@@ -46,7 +46,7 @@ export const SkewResolutionModal: React.FC<SkewResolutionModalProps> = ({
   const actualRowsStr = node.hasActualRows ? node.actualRows.toLocaleString() : '14';
   const estimatedRowsStr = node.estimateRows > 0 ? node.estimateRows.toLocaleString() : '47,206.6';
   
-  const rawTable = node.table || (isPg ? 'target_table' : '#FilteredLoanAccount');
+  const rawTable = node.table || (isPg ? 'target_table' : '#FilteredOrders');
   const tableName = isPg
     ? (node.schema ? `${node.schema}.${rawTable}` : rawTable)
     : (node.schema ? `[${node.schema}].[${rawTable}]` : `[${rawTable}]`);

@@ -2353,7 +2353,7 @@ export const PlanComparatorTab: React.FC<PlanComparatorTabProps> = ({ currentPla
                     <strong style={{ fontSize: '13px', color: '#fff' }}>Full Clustered Index Scan Converted to Seek</strong>
                   </div>
                   <p style={{ fontSize: '11.5px', color: '#94a3b8', margin: '4px 0 0 24px' }}>
-                    <strong>Plan A:</strong> Query performed full table scan on <code>MemberMoveHistory</code>.<br />
+                    <strong>Plan A:</strong> Query performed full table scan on <code>OrderStatusHistory</code>.<br />
                     <strong>Plan B:</strong> SARGable range predicate enabled direct clustered index seek.
                   </p>
                 </div>

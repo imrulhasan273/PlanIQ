@@ -1,14 +1,15 @@
 # PlanIQ ⚡
-### Modern SQL Server Execution Plan Visualizer, Root-Cause Diagnostics & AI Advisor
+### Modern SQL Server & PostgreSQL Execution Plan Visualizer, Root-Cause Diagnostics & AI Advisor
 
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)](https://golang.org)
-[![React](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org/)
+[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://golang.org)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat&logo=react)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6+-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org/)
 [![Wails](https://img.shields.io/badge/Wails-v2-DF105A?style=flat&logo=wails)](https://wails.io/)
 [![SQL Server](https://img.shields.io/badge/SQL%20Server-2016%20--%202022-CC292B?style=flat&logo=microsoftsqlserver)](https://www.microsoft.com/sql-server)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-EXPLAIN%20JSON-336791?style=flat&logo=postgresql)](https://www.postgresql.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**PlanIQ** is a high-performance execution plan visualizer, root-cause diagnostic engine, and AI-powered query tuning copilot for Microsoft SQL Server (`.sqlplan` / `.xml`). 
+**PlanIQ** is a high-performance execution plan visualizer, root-cause diagnostic engine, and AI-powered query tuning copilot for **Microsoft SQL Server** (`.sqlplan` / `.xml` / `.xdl`) and **PostgreSQL** (`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` `.json`).
 
 While traditional tools like SQL Server Management Studio (SSMS) simply render raw operator trees and leave interpretation to manual effort, **PlanIQ decodes execution plans in seconds**—calculating health scores, isolating dominant bottlenecks, consolidating fragmented index hints, and generating production-ready query rewrites.
 
@@ -33,8 +34,10 @@ While traditional tools like SQL Server Management Studio (SSMS) simply render r
 - **📚 SQL Server Tuning Playbook & Anti-Pattern Lab:** Interactive encyclopedia of 15+ engine anti-patterns with before-and-after T-SQL code comparisons, relational join physics deep-dive (Nested Loops vs Hash vs Merge vs Adaptive), query hints guide, and plan-aware detection.
 - **🧩 Smart Missing Index Consolidator:** Deduplicates and merges overlapping equality, inequality, and include columns into clean composite covering indexes (e.g. consolidates 13 raw hints down to 5 covering indexes).
 - **🤖 Deterministic DBA Engine & AI Query Rewriter:** Generates production-ready T-SQL rewrites (pre-creating `#temp` tables with clustered PKs, sargable date bounds) with an interactive **Monaco Side-by-Side Diff Viewer**.
-- **⚖️ Side-by-Side Plan Comparator:** Compare baseline and optimized `.sqlplan` files with cost reduction diffs and missing index resolution metrics.
-- **🔒 100% Offline & Private:** Operates entirely locally without requiring live database credentials or transmitting sensitive data.
+- **⚖️ Side-by-Side Plan Comparator:** Compare baseline and optimized `.sqlplan` or PostgreSQL `.json` files with cost reduction diffs and missing index resolution metrics.
+- **🐘 PostgreSQL EXPLAIN JSON Support:** Dedicated engine switcher dropdown with interactive tree visualization, shared/temp buffer hit/read/spill block metrics, parallel worker planned vs. launched tracking, Index-Only Scan heap fetch analysis, rows removed by filter alerts, and A/B plan comparison.
+- **📡 Live Radar & Query Store Studio (Optional SQL Server Mode):** Read-only DPA-style wait trend charts, active/blocking session trees, buffer pool & PLE monitoring, TempDB usage inspection, Query Store top-query analysis, and local SQLite connection profile storage (`planiq_config.db`).
+- **🔒 Offline-First & Private by Design:** All plan/deadlock parsing, root-cause diagnostics, deterministic tuning rules, and HTML/PNG/SVG report exports run locally with zero database connection required; Live Radar and cloud LLM providers are strictly opt-in.
 
 ---
 
@@ -69,28 +72,30 @@ While traditional tools like SQL Server Management Studio (SSMS) simply render r
 PlanIQ is built with a decoupled, high-performance architecture:
 
 ```
-┌────────────────────────────────────────────────────────┐
-│                   PlanIQ Frontend                      │
-│     React 18 • TypeScript • Tailwind / CSS Modules     │
-│       Monaco Diff Editor • Lucide Icons • Vite        │
-└───────────────▲────────────────────────▲───────────────┘
-                │                        │
-       (Wails IPC Bridge)         (Direct Web Mode)
-                │                        │
-┌───────────────▼──────────────┐         │
-│         Go Backend           │         │
-│  Streaming XML Plan Parser   │         │
-│  Deterministic DBA Engine    │         │
-│  LLM Advisor (Ollama/OpenAI) │         │
-└──────────────────────────────┘         │
-                │                        │
-                ▼                        ▼
-        Local .sqlplan / XML Execution Plan File
+┌────────────────────────────────────────────────────────────────┐
+│                        PlanIQ Frontend                         │
+│        React 19 • TypeScript 5.6+ • Vite • Lucide Icons        │
+│    Monaco Diff Editor • SQL Server XML & PG JSON Parsers       │
+└───────────────▲────────────────────────────▲───────────────────┘
+                │                            │
+       (Wails IPC Bridge)             (Direct Web Mode)
+                │                            │
+┌───────────────▼──────────────────┐         │
+│            Go Backend            │         │
+│  Streaming XML Plan Parser       │         │
+│  Deterministic DBA Rule Engine   │         │
+│  Local SQLite Config Store       │         │
+│  Optional Live SQL Server Client │         │
+│  LLM Advisor (Ollama/Cloud AI)   │         │
+└──────────────────────────────────┘         │
+                │                            │
+                ▼                            ▼
+     Local .sqlplan / .xml / .json / .xdl Execution Plan File
 ```
 
-- **Backend (Go + Wails):** Uses standard library streaming XML tokenizers to parse massive multi-megabyte plan files in milliseconds without memory bloat.
-- **Client-Side Parser Fallback:** In web mode, the browser utilizes an equivalent TypeScript XML diagnostic engine to provide full offline functionality.
-- **Tuning Advisor:** Combines deterministic DBA heuristic rules with an optional LLM interface (supporting OpenAI, Azure, Anthropic, or local Ollama).
+- **Frontend (React 19 + TypeScript + Vite):** Renders the interactive plan canvas, charts, and Monaco side-by-side diff viewer, with client-side parsers for both SQL Server ShowPlan XML and PostgreSQL `EXPLAIN (FORMAT JSON)` plans.
+- **Backend (Go + Wails):** Uses standard library streaming XML tokenizers to parse massive multi-megabyte `.sqlplan` files in milliseconds, persists settings/profiles locally in SQLite (`modernc.org/sqlite`), and supports optional read-only SQL Server connections (`go-mssqldb`).
+- **Tuning Advisor:** Combines a local deterministic DBA heuristic rule engine with optional LLM support (local **Ollama** at `http://localhost:11434`, or opt-in cloud **Google Gemini** / **OpenAI**).
 
 ---
 
@@ -110,14 +115,14 @@ PlanIQ is built with a decoupled, high-performance architecture:
    npm run dev
    ```
 
-3. Open `http://localhost:5173/` in your browser. Drag and drop any `.sqlplan` or `.xml` file to start analyzing.
+3. Open `http://localhost:5173/` in your browser. Drag and drop any `.sqlplan`, `.xml`, `.json`, or `.xdl` file to start analyzing.
 
 ---
 
 ### Option 2: Build & Run Native Desktop App (Wails)
 
 #### Prerequisites
-- [Go 1.22+](https://golang.org/dl/)
+- [Go 1.26+](https://golang.org/dl/)
 - [Node.js 18+](https://nodejs.org/)
 - [Wails CLI v2](https://wails.io/docs/gettingstarted/installation):
   ```bash
@@ -141,9 +146,10 @@ The compiled binary will be placed in `build/bin/`.
 ## 🧭 Using PlanIQ
 
 ### 1. Loading an Execution Plan
-- Click **Open Plan File** to select any `.sqlplan` or `.xml` file exported from SSMS, Azure Data Studio, or Extended Events.
-- Or click **Paste XML** to paste execution plan XML directly from clipboard.
-- Or click **Load Sample Plan** to explore pre-loaded multi-statement production plans.
+- Select **SQL Server** or **PostgreSQL** via the top engine switcher dropdown (or reset back to the welcome screen anytime).
+- Click **Open File** to select a SQL Server `.sqlplan`/`.xml` file, a PostgreSQL `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` `.json` file, or a `.xdl` deadlock graph—or drag and drop directly onto the app.
+- Or click **Paste XML** to paste SQL Server ShowPlan XML or PostgreSQL EXPLAIN JSON directly from your clipboard.
+- Or load the bundled **SQL Server** or **PostgreSQL** sample plans from the welcome screen or engine dropdown.
 
 ### 2. Overview & Diagnostics
 - Review the **Plan Health Score** and grade.
@@ -178,18 +184,30 @@ The compiled binary will be placed in `build/bin/`.
 
 ---
 
-## 🛡️ Security & Privacy
+## 🛡️ Security, Privacy & Offline Transparency
 
-PlanIQ was created with enterprise security requirements in mind:
-- **No Database Connection Needed:** Operates solely on exported plan XML.
-- **Zero Data Leakage:** Plans contain metadata and schema definitions, but no actual table data rows.
-- **Offline Capable:** The Deterministic Rule Engine runs 100% on your machine without external API dependencies.
+PlanIQ is engineered as an **offline-first** diagnostic workbench:
+
+### Works 100% Locally / Offline
+- **Plan & Deadlock Analysis:** SQL Server `.sqlplan`/`.xml` parsing, PostgreSQL EXPLAIN `.json` parsing, `.xdl` deadlock graphing, health scoring, root-cause diagnostics, missing index consolidation, A/B plan comparison, and the Tuning Playbook all execute locally in Go/TypeScript with zero database connection required.
+- **Deterministic DBA Rule Engine:** Generates query tuning advice and rewrites completely offline without external API calls.
+- **Local Persistence & Self-Contained Exports:** Settings, connection profiles (with **AES-256-GCM** encrypted passwords), and wait snapshots are stored locally in SQLite (`planiq_config.db`). PNG, SVG, and standalone HTML diagnostic reports work on air-gapped networks with no external scripts or CDNs.
+- **Local LLM Support:** Connects to a local **Ollama** instance (`http://localhost:11434`) on your workstation or internal network.
+
+### Current Air-Gapped Caveat (Known Limitation)
+- **Monaco Diff Editor CDN:** `@monaco-editor/react` loads Monaco Editor assets from jsDelivr CDN by default unless locally bundled. In offline environments, switch to the built-in **Code View** toggle inside the **AI Advisor** tab to inspect rewritten SQL locally.
+
+### Strictly Opt-In Network Features
+- **Live Radar & Connections:** Read-only TCP connection (`READ UNCOMMITTED`, `ApplicationIntent=ReadOnly`) only initiated when you explicitly connect to a SQL Server instance.
+- **Cloud AI Providers (Google Gemini / OpenAI):** Only called when you explicitly select a cloud provider and supply an API key in **AI Settings** (includes an optional **Sanitize Literals** toggle before sending SQL).
+
+See [SECURITY.md](SECURITY.md) for credential encryption and vulnerability reporting details.
 
 ---
 
 ## 🤝 Contributing
 
-Contributions, issues, and feature requests are welcome!
+Contributions, issues, and feature requests are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md) before opening a pull request.
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)

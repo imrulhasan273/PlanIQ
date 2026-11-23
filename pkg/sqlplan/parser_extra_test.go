@@ -190,7 +190,7 @@ func TestHardwareMetricsAndClassification(t *testing.T) {
         <RunTimeCountersPerThread Thread="0" ActualRows="100000" ActualCPUms="200" ActualElapsedms="220" ActualLogicalReads="10240" ActualPhysicalReads="0" ActualReadAheads="64" />
        </RunTimeInformation>
        <IndexScan>
-        <Object Database="[AmmsDB]" Schema="[dbo]" Table="[HeavyTable]" Index="[PK_HeavyTable]" />
+        <Object Database="[SalesDB]" Schema="[dbo]" Table="[HeavyTable]" Index="[PK_HeavyTable]" />
        </IndexScan>
       </RelOp>
       <RelOp NodeId="2" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1" EstimatedTotalSubtreeCost="20">
@@ -198,7 +198,7 @@ func TestHardwareMetricsAndClassification(t *testing.T) {
         <RunTimeCountersPerThread Thread="0" ActualRows="100000" ActualCPUms="150" ActualElapsedms="180" ActualLogicalReads="2560" ActualPhysicalReads="0" ActualReadAheads="64" />
        </RunTimeInformation>
        <IndexScan>
-        <Object Database="[AmmsDB]" Schema="[dbo]" Table="[LookupTable]" Index="[IX_Lookup_Key]" />
+        <Object Database="[SalesDB]" Schema="[dbo]" Table="[LookupTable]" Index="[IX_Lookup_Key]" />
        </IndexScan>
       </RelOp>
      </NestedLoops>

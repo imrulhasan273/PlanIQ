@@ -14,8 +14,9 @@ import (
 
 // Store handles persistent SQLite storage for user preferences and page polling toggles
 type Store struct {
-	mu sync.RWMutex
-	db *sql.DB
+	mu        sync.RWMutex
+	db        *sql.DB
+	secretKey []byte
 }
 
 var (
@@ -162,7 +163,13 @@ func GetDB() (*Store, error) {
 			)
 		}
 
-		defaultStore = &Store{db: db}
+		secretKey, keyErr := loadOrCreateKey(dir)
+		if keyErr != nil {
+			initErr = keyErr
+			return
+		}
+
+		defaultStore = &Store{db: db, secretKey: secretKey}
 	})
 
 	if initErr != nil {
@@ -273,6 +280,9 @@ func (s *Store) GetDBConnections() ([]DBConnectionProfile, error) {
 		p.Encrypt = (encInt == 1)
 		p.TrustServerCertificate = (trustInt == 1)
 		p.IsDefault = (defInt == 1)
+		if decrypted, decErr := decryptSecret(s.secretKey, p.Password); decErr == nil {
+			p.Password = decrypted
+		}
 		list = append(list, p)
 	}
 
@@ -336,6 +346,11 @@ func (s *Store) SaveDBConnection(p DBConnectionProfile) (*DBConnectionProfile, e
 		_, _ = s.db.Exec(`UPDATE db_connections SET is_default = 0;`)
 	}
 
+	encPassword, err := encryptSecret(s.secretKey, p.Password)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt connection password: %w", err)
+	}
+
 	stmt := `
 	INSERT INTO db_connections (
 		id, name, server, port, database_name, auth_type, username, password,
@@ -358,9 +373,9 @@ func (s *Store) SaveDBConnection(p DBConnectionProfile) (*DBConnectionProfile, e
 		engine = excluded.engine,
 		updated_at = excluded.updated_at;
 	`
-	_, err := s.db.Exec(stmt,
+	_, err = s.db.Exec(stmt,
 		p.ID, p.Name, p.Server, p.Port, p.Database, p.AuthType,
-		p.Username, p.Password, encInt, trustInt, p.ApplicationIntent,
+		p.Username, encPassword, encInt, trustInt, p.ApplicationIntent,
 		p.TimeoutSeconds, defInt, p.Engine, p.CreatedAt, p.UpdatedAt,
 	)
 	if err != nil {

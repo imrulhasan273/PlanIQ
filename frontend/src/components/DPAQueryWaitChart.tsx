@@ -188,7 +188,7 @@ export const DPAQueryWaitChart: React.FC<DPAQueryWaitChartProps> = ({
     if (advisor.queryId) return String(advisor.queryId);
     const hashMatch = advisor.title.match(/#([a-zA-Z0-9_]+)/);
     if (hashMatch && hashMatch[1]) return hashMatch[1];
-    if (advisor.id.includes('2589928315') || (advisor.queryText && advisor.queryText.includes('MemberMoveHistory'))) {
+    if (advisor.id.includes('2589928315') || (advisor.queryText && advisor.queryText.includes('OrderStatusHistory'))) {
       return '2589928315';
     }
     return advisor.id.replace('adv-', '');
@@ -223,11 +223,11 @@ export const DPAQueryWaitChart: React.FC<DPAQueryWaitChartProps> = ({
       execCount = parseInt(execMatch[1].replace(/,/g, ''), 10);
     }
 
-    // 4. Special benchmark query 2589928315 (MemberMoveHistory)
+    // 4. Special benchmark query 2589928315 (OrderStatusHistory)
     if (
       queryHash === '2589928315' ||
       advisor.id.includes('2589928315') ||
-      (advisor.queryText && advisor.queryText.includes('MemberMoveHistory'))
+      (advisor.queryText && advisor.queryText.includes('OrderStatusHistory'))
     ) {
       return {
         isBenchmark: true,
@@ -525,14 +525,14 @@ export const DPAQueryWaitChart: React.FC<DPAQueryWaitChartProps> = ({
 
   const sqlText =
     advisor.queryText ||
-    `SELECT DISTINCT [m].[BranchId] FROM [program].[MemberMoveHistory] AS [m] WHERE [m].[MemberId] = @memberId`;
+    `SELECT DISTINCT [o].[WarehouseId] FROM [dbo].[OrderStatusHistory] AS [o] WHERE [o].[OrderId] = @orderId`;
 
   // Dynamic Intelligent Analysis Diagnosis tailored to the real query
   const analysisReport = useMemo(() => {
     const text = advisor.queryText || '';
     const isMSTVF = /CREATE\s+FUNCTION/i.test(text) && /RETURNS\s+@\w+\s+TABLE/i.test(text);
-    const isMemberMove = queryHash === '2589928315' || /MemberMoveHistory/i.test(text);
-    const isSavings = /SavingsTransaction/i.test(text);
+    const isOrderStatus = queryHash === '2589928315' || /OrderStatusHistory/i.test(text);
+    const isAccountTxns = /AccountTransactions/i.test(text);
 
     if (isMSTVF) {
       const funcNameMatch = text.match(/CREATE\s+FUNCTION\s+([a-zA-Z0-9_.\[\]]+)/i);
@@ -553,25 +553,25 @@ RETURN (
       };
     }
 
-    if (isMemberMove) {
+    if (isOrderStatus) {
       return {
         title: 'Critical Bottleneck: N+1 Execution Loop with Clustered Index Scans',
-        description: `During peak business hours (8:00 AM – 2:00 PM), this query accumulated over 200–238 minutes of wait per hour. 98.2% of the total delay is Memory/CPU (SOS_SCHEDULER_YIELD) with near-zero physical I/O. The application is repeatedly executing this statement inside an N+1 loop (~650,000 executions) performing full Clustered Index Scans on table [program].[MemberMoveHistory].`,
+        description: `During peak business hours (8:00 AM – 2:00 PM), this query accumulated over 200–238 minutes of wait per hour. 98.2% of the total delay is Memory/CPU (SOS_SCHEDULER_YIELD) with near-zero physical I/O. The application is repeatedly executing this statement inside an N+1 loop (~650,000 executions) performing full Clustered Index Scans on table [dbo].[OrderStatusHistory].`,
         recommendationTitle: 'Recommended Composite Index Fix (Eliminates 99.9% of Delay):',
-        recommendationText: `Create a composite nonclustered index on ([MemberId] ASC, [BranchId] ASC) to replace Clustered Index Scan with a 2-page Index Seek. Batch client lookups to eliminate 650,000 round-trips.`,
-        ddlCode: `CREATE NONCLUSTERED INDEX IX_MemberMoveHistory_MemberId_BranchId
-ON [program].[MemberMoveHistory] ([MemberId] ASC, [BranchId] ASC);`
+        recommendationText: `Create a composite nonclustered index on ([OrderId] ASC, [WarehouseId] ASC) to replace Clustered Index Scan with a 2-page Index Seek. Batch client lookups to eliminate 650,000 round-trips.`,
+        ddlCode: `CREATE NONCLUSTERED INDEX IX_OrderStatusHistory_OrderId_WarehouseId
+ON [dbo].[OrderStatusHistory] ([OrderId] ASC, [WarehouseId] ASC);`
       };
     }
 
-    if (isSavings) {
+    if (isAccountTxns) {
       return {
-        title: 'High Execution Frequency Bottleneck on SavingsTransaction',
+        title: 'High Execution Frequency Bottleneck on AccountTransactions',
         description: `High execution volume query (${parsedMetrics.execCount.toLocaleString()} calls) generating significant plan cache churn and lock overhead. Cumulative duration reached ${totals.totalWaitMinutes.toLocaleString()} minutes.`,
         recommendationTitle: 'Recommended Indexing & Caching Strategy:',
-        recommendationText: `Add covering nonclustered index on [dbo].[SavingsTransaction] and implement client-side caching to reduce round-trips to SQL Server.`,
-        ddlCode: `CREATE NONCLUSTERED INDEX IX_SavingsTransaction_Account_TxnDate
-ON [dbo].[SavingsTransaction] ([AccountId] ASC)
+        recommendationText: `Add covering nonclustered index on [dbo].[AccountTransactions] and implement client-side caching to reduce round-trips to SQL Server.`,
+        ddlCode: `CREATE NONCLUSTERED INDEX IX_AccountTransactions_Account_TxnDate
+ON [dbo].[AccountTransactions] ([AccountId] ASC)
 INCLUDE ([TxnId], [Amount], [TxnDate]);`
       };
     }
@@ -591,7 +591,7 @@ INCLUDE ([TxnId], [Amount], [TxnDate]);`
 
   // Supporting Data Dimension Sections (Databases, Users, Files, Machines, Programs)
   const supportingSections = useMemo(() => {
-    const activeDb = dbName && dbName !== 'DBPROD1' ? dbName : 'AmmsOnlineProd';
+    const activeDb = dbName && dbName !== 'DBPROD1' ? dbName : 'SalesDBProd';
     const filePath = `F:\\${activeDb}DB\\${activeDb}.mdf`;
 
     return [

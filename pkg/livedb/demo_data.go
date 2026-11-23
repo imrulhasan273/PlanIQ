@@ -1,8 +1,9 @@
 package livedb
 
 import (
-	"os"
 	"strings"
+
+	"sqlplan-advisor/pkg/sqlplan"
 )
 
 func getDemoActiveSessions() []ActiveSession {
@@ -350,8 +351,8 @@ func getDemoQueryStoreEntries() []QueryStoreEntry {
 			PlanID:             720,
 			QueryHash:          "0x91179A55E6F1",
 			PlanHash:           "0x91179A55E6F1",
-			ModuleName:         "report.ProcRptG",
-			QueryText:          "@transactionDate bigint, @branchId int SELECT g.GroupId, g.GroupName, COUNT(m.MemberId) as MemberCount FROM dbo.BranchGroups g JOIN dbo.Members m ON g.GroupId = m.GroupId WHERE g.BranchId = @branchId GROUP BY g.GroupId, g.GroupName;",
+			ModuleName:         "dbo.usp_GetRegionSalesSummary",
+			QueryText:          "@reportDate bigint, @regionId int SELECT r.RegionId, r.RegionName, COUNT(c.CustomerId) AS CustomerCount FROM dbo.Regions r JOIN dbo.Customers c ON r.RegionId = c.RegionId WHERE r.RegionId = @regionId GROUP BY r.RegionId, r.RegionName;",
 			ExecutionCount:     1620,
 			TotalCPUMs:         8721.0,
 			AvgCPUMs:           5.4,
@@ -688,11 +689,7 @@ func getDemoTempDBUsage() []LiveTempDBUsage {
 }
 
 func getDemoShowPlanXML() string {
-	bytes, err := os.ReadFile("sample_plans/explan.xml")
-	if err == nil && len(bytes) > 0 {
-		return string(bytes)
-	}
-	return ""
+	return string(sqlplan.DefaultSamplePlanXML)
 }
 
 func getDemoIdleSessions() []IdleSession {
@@ -1350,15 +1347,15 @@ func getDemoDPAPerspective(perspective string) []DPAPerspectiveItem {
 		}
 	case "databases":
 		return []DPAPerspectiveItem{
-			{Name: "AmmsOnlineProd", SessionCount: 18, WaitSec: 2140.5, CPUSec: 980.2, LogicalReads: 780000, Writes: 54000, Percentage: 68.2},
+			{Name: "SalesDBProd", SessionCount: 18, WaitSec: 2140.5, CPUSec: 980.2, LogicalReads: 780000, Writes: 54000, Percentage: 68.2},
 			{Name: "tempdb", SessionCount: 6, WaitSec: 580.4, CPUSec: 310.0, LogicalReads: 210000, Writes: 98000, Percentage: 18.5},
 			{Name: "master", SessionCount: 3, WaitSec: 280.1, CPUSec: 110.2, LogicalReads: 65000, Writes: 4200, Percentage: 8.9},
 			{Name: "msdb", SessionCount: 2, WaitSec: 140.0, CPUSec: 65.0, LogicalReads: 32000, Writes: 12000, Percentage: 4.4},
 		}
 	case "files":
 		return []DPAPerspectiveItem{
-			{Name: "AmmsOnlineProd.mdf (AmmsOnlineProd)", Secondary: "D:\\SQLData\\AmmsOnlineProd.mdf", SessionCount: 1, WaitSec: 1450.2, CPUSec: 890.1, LogicalReads: 650000, Writes: 12000, Percentage: 58.0},
-			{Name: "AmmsOnlineProd_log.ldf (AmmsOnlineProd)", Secondary: "L:\\SQLLogs\\AmmsOnlineProd_log.ldf", SessionCount: 1, WaitSec: 620.4, CPUSec: 210.0, LogicalReads: 12000, Writes: 84000, Percentage: 24.8},
+			{Name: "SalesDBProd.mdf (SalesDBProd)", Secondary: "D:\\SQLData\\SalesDBProd.mdf", SessionCount: 1, WaitSec: 1450.2, CPUSec: 890.1, LogicalReads: 650000, Writes: 12000, Percentage: 58.0},
+			{Name: "SalesDBProd_log.ldf (SalesDBProd)", Secondary: "L:\\SQLLogs\\SalesDBProd_log.ldf", SessionCount: 1, WaitSec: 620.4, CPUSec: 210.0, LogicalReads: 12000, Writes: 84000, Percentage: 24.8},
 			{Name: "tempdb.mdf (tempdb)", Secondary: "T:\\TempDB\\tempdb.mdf", SessionCount: 1, WaitSec: 430.1, CPUSec: 180.5, LogicalReads: 180000, Writes: 76000, Percentage: 17.2},
 		}
 	case "drives":

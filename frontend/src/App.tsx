@@ -235,12 +235,12 @@ export function App() {
       if (typeof window !== 'undefined' && (window as any).go?.main?.App?.LoadSamplePlan) {
         data = await LoadSamplePlan();
       } else {
-        // Running in web browser without Wails runtime -> fetch and parse sample_explan.xml
+        // Running in web browser without Wails runtime -> fetch and parse sample_plan.sqlplan
         try {
-          const resp = await fetch('/sample_explan.xml');
+          const resp = await fetch('/sample_plan.sqlplan');
           if (resp.ok) {
             const xml = await resp.text();
-            data = parseShowPlanXMLClient(xml, 'explan.xml (InsertDailyOperationalReport)');
+            data = parseShowPlanXMLClient(xml, 'sample_ecommerce.sqlplan (OrderAnalyticsReport)');
           } else {
             data = samplePlanData as unknown as PlanAnalysis;
           }

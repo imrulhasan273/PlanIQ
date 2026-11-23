@@ -139,10 +139,10 @@ const BENCHMARK_ADVISORS: PerformanceAdvisor[] = [
     title: 'Query #2589928315 accounted for high CPU execution (100% In-Memory/CPU)',
     description: 'Cumulative wait time reached 1,642.5 minutes in 24 hours. Query spins in SOS_SCHEDULER_YIELD (98.2% of wait) inside an application N+1 loop executing 649,945 times without composite index.',
     queryId: 2589928315,
-    queryText: 'SELECT DISTINCT [m].[BranchId] FROM [program].[MemberMoveHistory] AS [m] WHERE [m].[MemberId] = @memberId',
+    queryText: 'SELECT DISTINCT [o].[WarehouseId] FROM [dbo].[OrderStatusHistory] AS [o] WHERE [o].[OrderId] = @orderId',
     metricValue: '238.4 min Peak Wait (649,945 Executions)',
     timestamp: 'Today 10:00 AM',
-    recommendation: 'Create composite nonclustered index on ([MemberId] ASC, [BranchId] ASC) to replace Clustered Index Scan with 2-page Index Seek. Batch client lookups to eliminate 650,000 round-trips.'
+    recommendation: 'Create composite nonclustered index on ([OrderId] ASC, [WarehouseId] ASC) to replace Clustered Index Scan with 2-page Index Seek. Batch client lookups to eliminate 650,000 round-trips.'
   },
   {
     id: 'adv-exec-4675209948',
@@ -151,7 +151,7 @@ const BENCHMARK_ADVISORS: PerformanceAdvisor[] = [
     title: 'Query #4675209948 has high execution frequency (124,800 executions)',
     description: 'High execution volume query generating significant plan cache churn and lock overhead.',
     queryId: 4675209948,
-    queryText: 'SELECT [s].[TxnId], [s].[Amount], [s].[TxnDate] FROM [dbo].[SavingsTransaction] AS [s] WHERE [s].[AccountId] = @accountId',
+    queryText: 'SELECT [a].[TxnId], [a].[Amount], [a].[TxnDate] FROM [dbo].[AccountTransactions] AS [a] WHERE [a].[AccountId] = @accountId',
     metricValue: '42.1 min Wait (124,800 Executions)',
     timestamp: 'Today 09:00 AM',
     recommendation: 'Consider client-side caching or batching queries to reduce round-trips to SQL Server.'

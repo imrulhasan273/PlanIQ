@@ -7,7 +7,7 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "http://localhost:5173",
   "author": {
-    "name": "",
+    "name": "Md. Imrul Hasan",
     "email": ""
   }
 }
