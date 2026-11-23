@@ -398,7 +398,34 @@ export interface PgNodeInfo {
   selfBuffers: PgBufferCounters;
   ioReadMs: number;
   ioWriteMs: number;
+  sharedIoReadMs?: number;
+  sharedIoWriteMs?: number;
+  localIoReadMs?: number;
+  localIoWriteMs?: number;
+  tempIoReadMs?: number;
+  tempIoWriteMs?: number;
   hasBuffers: boolean;
+  // PostgreSQL 18+ Index Skip Scan / Multi-search count
+  indexSearches?: number;
+  // EXPLAIN (WAL) write amplification telemetry
+  walRecords?: number;
+  walFpi?: number;
+  walBytes?: number;
+  // Memoize node cache telemetry
+  cacheKey?: string;
+  cacheMode?: string;
+  cacheHits?: number;
+  cacheMisses?: number;
+  cacheEvictions?: number;
+  cacheOverflows?: number;
+  // Incremental Sort group telemetry
+  presortedKey?: string[];
+  fullSortGroups?: { groupCount?: number; sortMethodsUsed?: string[]; maxMemoryKb?: number };
+  preSortedGroups?: { groupCount?: number; sortMethodsUsed?: string[]; maxMemoryKb?: number };
+  // PG 17+ JSON_TABLE / ModifyTable MERGE metadata
+  tableFuncName?: string;
+  operation?: string;
+  sortKey?: string[];
 }
 
 export interface PgStatementInfo {
@@ -421,6 +448,23 @@ export interface PgStatementInfo {
   planningBuffers?: Partial<PgBufferCounters>;
   totalBuffers: PgBufferCounters;
   queryTextProvided: boolean;
+  // PG 17+ EXPLAIN (SERIALIZE) & EXPLAIN (MEMORY) & EXPLAIN (WAL)
+  serialization?: {
+    timeMs?: number;
+    outputVolumeBytes?: number;
+    format?: string;
+    sharedHit?: number;
+    sharedRead?: number;
+  };
+  planningMemory?: {
+    usedBytes?: number;
+    allocatedBytes?: number;
+  };
+  totalWal?: {
+    records: number;
+    fpi: number;
+    bytes: number;
+  };
 }
 
 export type PlanAnalysis = Omit<sqlplan.PlanAnalysis, 'statements'> & {

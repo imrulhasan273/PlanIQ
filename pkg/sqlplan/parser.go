@@ -354,6 +354,10 @@ func categorizeWaitType(waitType string) (string, string) {
 		return "Network / Client", "SQL Server is waiting for the client application (ORM/UI) to consume result rows."
 	case wt == "RESOURCE_SEMAPHORE":
 		return "Memory Grant", "Query is throttled waiting in queue to receive its required RAM allocation."
+	case wt == "RESOURCE_SEMAPHORE_QUERY_COMPILE":
+		return "Memory Grant", "Query is throttled waiting for compilation memory (enable OPTIMIZED_SP_EXECUTESQL in SQL Server 2025 to prevent compile storms)."
+	case strings.HasPrefix(wt, "LCK_M_S_XACT") || strings.HasPrefix(wt, "LCK_M_X_XACT"):
+		return "Lock Contention", "Waiting on a Transaction ID (TID / XACT) lock under SQL Server 2025 Optimized Locking."
 	case strings.HasPrefix(wt, "LCK_"):
 		return "Lock Contention", "Query is blocked waiting for an exclusive or shared transaction lock."
 	case strings.HasPrefix(wt, "WRITELOG"):
@@ -1664,11 +1668,15 @@ func extractCardinalityEngine(root *xmlElement) *CardinalityEstimationEngine {
 }
 
 func createCEInfo(version string) *CardinalityEstimationEngine {
-	isLegacy := version == "70" || version < "120"
+	vInt, err := strconv.Atoi(strings.TrimSpace(version))
+	isLegacy := version == "70" || (err == nil && vInt > 0 && vInt < 120)
 	var desc, remedy string
 	if isLegacy {
 		desc = fmt.Sprintf("Query compiled under Legacy Cardinality Estimator (Model Version %s). Legacy CE assumes filter predicate independence and can severely skew row estimates.", version)
 		remedy = "Evaluate running under modern CE with OPTION (USE HINT('FORCE_DEFAULT_CARDINALITY_ESTIMATION')) or database compatibility level 130+."
+	} else if version == "170" {
+		desc = "Query compiled under SQL Server 2025 Modern Cardinality Estimator (Model Version 170) with CE Feedback for Expressions and OPPO support."
+		remedy = "Leverage SQL Server 2025 CE Feedback for Expressions and Optional Parameter Plan Optimization (OPPO) under compatibility level 170."
 	} else {
 		desc = fmt.Sprintf("Query compiled under Modern Cardinality Estimator (Model Version %s).", version)
 		remedy = "Ensure table statistics have adequate sample rates for multi-column join correlation."

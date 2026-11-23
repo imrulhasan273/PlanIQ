@@ -233,6 +233,15 @@ const NON_SARGABLE_REMEDIES: Record<string, string> = {
   reverse: 'Use an indexed computed column over REVERSE(col) for suffix searches.',
   isnumeric: 'Validate at write time; avoid ISNUMERIC(col) in WHERE.',
   isdate: 'Validate at write time; avoid ISDATE(col) in WHERE.',
+  regexp_like: 'SQL Server 2025 REGEXP_LIKE on an indexed column prevents full B-tree seeks unless paired with a sargable prefix filter.',
+  regexp_replace: 'Avoid wrapping indexed columns in REGEXP_REPLACE in filter predicates.',
+  regexp_substr: 'Avoid wrapping indexed columns in REGEXP_SUBSTR in filter predicates; use an indexed computed column.',
+  regexp_instr: 'Avoid wrapping indexed columns in REGEXP_INSTR in filter predicates.',
+  regexp_count: 'Avoid wrapping indexed columns in REGEXP_COUNT in filter predicates.',
+  vector_distance: 'Exact k-NN VECTOR_DISTANCE() scans every row. In SQL Server 2025, create a DiskANN vector index (CREATE VECTOR INDEX) and use VECTOR_SEARCH() for Approximate Nearest Neighbor (ANN) seeks.',
+  json_value: 'In SQL Server 2025, use the native JSON data type with CREATE JSON INDEX (or an indexed computed column) so JSON path predicates seek instead of scanning.',
+  json_query: 'In SQL Server 2025, use the native JSON data type with CREATE JSON INDEX so JSON path predicates seek instead of scanning.',
+  json_contains: 'In SQL Server 2025, create a native JSON index (CREATE JSON INDEX) on the target JSON column so JSON_CONTAINS seeks directly.',
 };
 
 const isIdentStart = (c: string): boolean => /[A-Za-z_]/.test(c);
@@ -311,6 +320,7 @@ interface ParamAggregate {
 }
 
 function detectParamMitigation(upperText: string): string {
+  if (upperText.includes('PLAN PER VALUE') || upperText.includes('OPTIONAL_PREDICATE')) return 'PLAN PER VALUE (SQL 2025 OPPO)';
   if (upperText.includes('DISABLE_PARAMETER_SNIFFING')) return "USE HINT('DISABLE_PARAMETER_SNIFFING')";
   if (upperText.includes('OPTIMIZE FOR UNKNOWN')) return 'OPTIMIZE FOR UNKNOWN';
   if (upperText.includes('OPTIMIZE FOR')) return 'OPTIMIZE FOR (@p = value)';
@@ -355,15 +365,22 @@ export function computeExtraDiagnostics(
   const paramOrder: string[] = [];
   const mgfStatuses: string[] = [];
   const dopFeedback: string[] = [];
+  const ceFeedback: string[] = [];
   let hasInterleaved = false;
   let hasInlineUdf = false;
   let hasPsp = false;
+  let hasOppo = false;
+  let hasVectorSearch = false;
+  let hasExactVectorDistance = false;
 
   contexts.forEach((ctx) => {
     let stmtSkewed = false;
     let rowGoalSeen = false;
     const stmtSigs: string[] = [];
     const upperText = ctx.text.toUpperCase();
+    if (upperText.includes('PLAN PER VALUE') || upperText.includes('OPTIONAL_PREDICATE')) hasOppo = true;
+    if (upperText.includes('VECTOR_SEARCH')) hasVectorSearch = true;
+    if (upperText.includes('VECTOR_DISTANCE')) hasExactVectorDistance = true;
 
     walkStmt(ctx.elem, [], (el, anc) => {
       switch (nm(el)) {
@@ -371,6 +388,9 @@ export function computeExtraDiagnostics(
           if (attrTrue(el, 'ContainsInterleavedExecutionCandidates')) hasInterleaved = true;
           if (attrTrue(el, 'ContainsInlineScalarTsqlUdfs')) hasInlineUdf = true;
           if (attr(el, 'DOPFeedbackAdjusted')) dopFeedback.push(attr(el, 'DOPFeedbackAdjusted'));
+          if (attr(el, 'CardinalityFeedback')) ceFeedback.push(attr(el, 'CardinalityFeedback'));
+          if (attr(el, 'CEFeedbackAdjusted')) ceFeedback.push(attr(el, 'CEFeedbackAdjusted'));
+          if (attr(el, 'QueryVariantID') && (upperText.includes('IS NULL OR') || upperText.includes('PLAN PER VALUE'))) hasOppo = true;
           break;
         case 'MemoryGrantInfo':
           if (attr(el, 'IsMemoryGrantFeedbackAdjusted')) mgfStatuses.push(attr(el, 'IsMemoryGrantFeedbackAdjusted'));
@@ -378,6 +398,10 @@ export function computeExtraDiagnostics(
         case 'Dispatcher':
         case 'ParameterSensitivePredicate':
           hasPsp = true;
+          break;
+        case 'OptionalParameter':
+        case 'OptionalParameterPredicate':
+          hasOppo = true;
           break;
         case 'ColumnsWithNoStatistics': {
           const nodeId = anc.length > 0 ? parseInt(attr(anc[anc.length - 1], 'NodeId') || '0', 10) || 0 : 0;
@@ -462,6 +486,10 @@ export function computeExtraDiagnostics(
           break;
         }
         case 'RelOp': {
+          if (attr(el, 'CardinalityFeedback')) ceFeedback.push(attr(el, 'CardinalityFeedback'));
+          if (attr(el, 'PhysicalOp').toLowerCase().includes('vector') || attr(el, 'LogicalOp').toLowerCase().includes('vector')) {
+            hasVectorSearch = true;
+          }
           const result = analyzeRelOp(el, anc, ctx, upperText, {
             keyLookups,
             spools,
@@ -508,7 +536,20 @@ export function computeExtraDiagnostics(
 
   finalizeMissingStats(missingStatistics);
   finalizeParameterSniffing(parameterSniffing, paramByKey, paramOrder);
-  finalizeAdaptive(adaptive, ceModelVersion, scalarUdfCount, mgfStatuses, dopFeedback, hasInterleaved, hasInlineUdf, hasPsp);
+  finalizeAdaptive(
+    adaptive,
+    ceModelVersion,
+    scalarUdfCount,
+    mgfStatuses,
+    dopFeedback,
+    ceFeedback,
+    hasInterleaved,
+    hasInlineUdf,
+    hasPsp,
+    hasOppo,
+    hasVectorSearch,
+    hasExactVectorDistance
+  );
 
   keyLookups.sort((a, b) => severityRank(b.severity) - severityRank(a.severity) || b.lookupCount - a.lookupCount);
   spools.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
@@ -986,7 +1027,7 @@ function finalizeParameterSniffing(
         'This plan was compiled by sniffing the parameter values listed below and will be reused for every future execution. Capture the Actual plan to compare against runtime values.';
     }
     f.remedy =
-      'Options: OPTION (RECOMPILE) for volatile/skewed predicates; OPTION (OPTIMIZE FOR UNKNOWN) or OPTIMIZE FOR (@p = typical) for a stable generic plan; split skewed branches into separate procedures; SQL Server 2022 Parameter Sensitive Plan optimization; or force a good plan via Query Store.';
+      'Options: OPTION (RECOMPILE) for volatile/skewed predicates; OPTION (OPTIMIZE FOR UNKNOWN) or OPTIMIZE FOR (@p = typical) for a stable generic plan; split skewed branches into separate procedures; SQL Server 2022 PSP / SQL Server 2025 OPPO; or force a good plan via Query Store.';
     out.push(f);
   });
   out.sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
@@ -998,9 +1039,13 @@ function finalizeAdaptive(
   scalarUdfCount: number,
   mgf: string[],
   dop: string[],
+  ceFeedback: string[],
   interleaved: boolean,
   inlineUdf: boolean,
-  psp: boolean
+  psp: boolean,
+  oppo: boolean,
+  vectorSearch: boolean,
+  exactVectorDistance: boolean
 ): void {
   const parsed = ceModelVersion ? parseInt(ceModelVersion.trim(), 10) : NaN;
   const ceVersion = Number.isNaN(parsed) ? -1 : parsed;
@@ -1071,6 +1116,47 @@ function finalizeAdaptive(
   } else {
     const r = eligible(160, 'Automatically lowers MAXDOP for queries with inefficient parallelism (SQL Server 2022).');
     add('Degree of Parallelism Feedback', r.s, r.d);
+  }
+
+  if (oppo) {
+    add(
+      'Optional Parameter Plan Optimization (OPPO)',
+      'Active',
+      'Multi-plan OPPO variant (PLAN PER VALUE / optional_predicate) is active for optional NULL-check parameters (SQL Server 2025).'
+    );
+  } else {
+    const r = eligible(
+      170,
+      'Automatically generates multiple plan variants for optional parameter predicates (@p IS NULL OR col = @p) (SQL Server 2025).'
+    );
+    add('Optional Parameter Plan Optimization (OPPO)', r.s, r.d);
+  }
+
+  if (ceFeedback.length > 0) {
+    add('CE Feedback for Expressions', 'Active', `Cardinality Estimation Feedback reported by the engine: ${uniq(ceFeedback).join(', ')}.`);
+  } else {
+    const r = eligible(
+      170,
+      'Learns and applies alternate cardinality model assumptions for repeating subexpressions across queries (SQL Server 2025).'
+    );
+    add('CE Feedback for Expressions', r.s, r.d);
+  }
+
+  if (vectorSearch) {
+    add(
+      'Vector Index & DiskANN Search',
+      'Active',
+      'Approximate Nearest Neighbor (ANN) DiskANN vector index search is active in this plan (SQL Server 2025).'
+    );
+  } else if (exactVectorDistance) {
+    add(
+      'Vector Index & DiskANN Search',
+      'Eligible',
+      'Plan evaluates exact k-NN VECTOR_DISTANCE() row-by-row; create a DiskANN vector index (CREATE VECTOR INDEX) and use VECTOR_SEARCH() (SQL Server 2025).'
+    );
+  } else {
+    const r = eligible(170, 'Native VECTOR data type and DiskANN Approximate Nearest Neighbor (ANN) vector index search (SQL Server 2025).');
+    add('Vector Index & DiskANN Search', r.s, r.d);
   }
 
   const active = ap.features.filter((f) => f.status === 'Active').length;
@@ -1159,7 +1245,7 @@ export function buildFindingAntiPatterns(d: ExtraDiagnostics): ExtraAntiPattern[
       sev,
       'Parameter Sniffing Mismatch',
       'The plan was compiled for parameter values that differ from the runtime values.',
-      'Use OPTION (RECOMPILE), OPTIMIZE FOR UNKNOWN, split skewed paths, or SQL Server 2022 PSP optimization.',
+      'Use OPTION (RECOMPILE), OPTIMIZE FOR UNKNOWN, split skewed paths, or SQL Server 2022 PSP / SQL Server 2025 OPPO.',
       affected
     );
   }

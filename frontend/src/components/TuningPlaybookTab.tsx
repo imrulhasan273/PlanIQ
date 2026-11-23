@@ -391,6 +391,75 @@ OPTION (USE HINT('DISABLE_OPTIMIZER_ROWGOAL'));`,
     ],
     detectorKey: 'rowGoals',
     applicableHints: ["USE HINT('DISABLE_OPTIMIZER_ROWGOAL')"]
+  },
+  {
+    id: 'sql2025-oppo-and-vector',
+    title: 'SQL Server 2025: Optional Parameter (OPPO) & DiskANN Vector Search',
+    category: 'Cardinality & Statistics',
+    severity: 'INFO',
+    summary:
+      'Use SQL Server 2025 Compatibility Level 170 features: OPPO for @p IS NULL OR col = @p predicates, DiskANN indexes for VECTOR_SEARCH(), and native JSON indexes.',
+    engineMechanics:
+      'Under Compatibility Level 170, Optional Parameter Plan Optimization (OPPO) generates multiple cached plan variants (PLAN PER VALUE) for optional parameter predicates so NULL searches scan while specific values seek. Similarly, exact k-NN VECTOR_DISTANCE() scans every row unless backed by a DiskANN vector index with VECTOR_SEARCH().',
+    badSql: `-- Exact k-NN VECTOR_DISTANCE() forces a full row-by-row vector scan:
+SELECT TOP (10) ProductID, VECTOR_DISTANCE('cosine', Embedding, @QueryVec) AS Dist
+FROM dbo.ProductCatalog
+ORDER BY Dist ASC;`,
+    goodSql: `-- SQL Server 2025: DiskANN Approximate Nearest Neighbor (ANN) vector index search:
+CREATE VECTOR INDEX VIX_ProductCatalog_Embedding
+ON dbo.ProductCatalog (Embedding)
+WITH (METRIC = 'cosine', TYPE = 'DISKANN');
+
+SELECT t.ProductID, s.distance
+FROM VECTOR_SEARCH(
+    TABLE = dbo.ProductCatalog AS t,
+    COLUMN = Embedding,
+    SIMILAR_TO = @QueryVec,
+    METRIC = 'cosine',
+    TOP_N = 10
+) AS s;`,
+    remedyList: [
+      'Upgrade database compatibility level to 170 on SQL Server 2025 to unlock OPPO and CE Feedback for Expressions automatically.',
+      'Use CREATE VECTOR INDEX + VECTOR_SEARCH() instead of full-table VECTOR_DISTANCE() scans.',
+      'Use native JSON columns + CREATE JSON INDEX for high-frequency JSON path filtering.'
+    ],
+    detectorKey: 'adaptive',
+    applicableHints: ['OPTION (PLAN PER VALUE(...))', "USE HINT('ABORT_QUERY_EXECUTION')"]
+  },
+  {
+    id: 'pg19-repack-skip-scan-aio',
+    title: 'PostgreSQL 17–19: REPACK (CONCURRENTLY), B-Tree Skip Scan & Async I/O',
+    category: 'Parallelism & Concurrency',
+    severity: 'INFO',
+    summary:
+      'Eliminate table/index bloat online in PostgreSQL 19 with native REPACK (CONCURRENTLY), leverage PG 18 B-Tree Index Skip Scans & Async I/O, and capture SERIALIZE/MEMORY/WAL telemetry.',
+    engineMechanics:
+      'PostgreSQL 19 introduces native REPACK (and REPACK ... CONCURRENTLY), replacing blocking VACUUM FULL / CLUSTER and external pg_repack extensions by copying live tuples using WAL logical decoding while holding only SHARE UPDATE EXCLUSIVE during copy and a brief ACCESS EXCLUSIVE swap. PostgreSQL 18 adds B-Tree Index Skip Scan ("Index Searches") and the Asynchronous I/O subsystem (io_method = io_uring | worker), while PostgreSQL 17+ EXPLAIN (ANALYZE, BUFFERS, WAL, SERIALIZE, MEMORY, FORMAT JSON) exposes serialization, planner memory, and granular I/O timings.',
+    badSql: `-- Legacy blocking maintenance & unindexed vector/bloat anti-patterns:
+VACUUM FULL dbo_orders;   -- Holds ACCESS EXCLUSIVE lock for entire rewrite (blocks reads/writes!)
+CLUSTER dbo_orders USING idx_orders_date; -- Blocks table online traffic!
+
+-- Capturing EXPLAIN without PG 17-19 diagnostics:
+EXPLAIN (ANALYZE, FORMAT JSON)
+SELECT id, embedding <=> $1 AS dist FROM items ORDER BY dist LIMIT 10;`,
+    goodSql: `-- PostgreSQL 19 Online Table Compaction & Clustering (Zero long ACCESS EXCLUSIVE locks):
+REPACK (CONCURRENTLY) public.orders;
+REPACK (CONCURRENTLY) public.orders USING INDEX idx_orders_date;
+
+-- PostgreSQL 17-19 full EXPLAIN telemetry & pgvector HNSW indexing:
+CREATE INDEX CONCURRENTLY idx_items_embedding_hnsw
+ON public.items USING hnsw (embedding vector_cosine_ops);
+
+EXPLAIN (ANALYZE, BUFFERS, WAL, SERIALIZE, MEMORY, FORMAT JSON)
+SELECT id, embedding <=> $1 AS dist FROM public.items ORDER BY dist LIMIT 10;`,
+    remedyList: [
+      'Use REPACK (CONCURRENTLY) in PostgreSQL 19 instead of VACUUM FULL or CLUSTER to reclaim dead-tuple bloat online (requires Primary Key or UNIQUE Replica Identity and ~2x free disk space).',
+      'Note that REPACK (CONCURRENTLY) cannot run inside a transaction block and is not MVCC-safe for pre-existing long-running snapshots.',
+      'Inspect "Index Searches" on PG 18+ plans to verify B-Tree Index Skip Scan efficiency and tune work_mem when Memoize evictions or Incremental Sort disk spills occur.',
+      'Run EXPLAIN (ANALYZE, BUFFERS, WAL, SERIALIZE, MEMORY, FORMAT JSON) on PG 17–19 to measure tuple serialization CPU, planner memory, and WAL FPI write amplification.'
+    ],
+    detectorKey: 'pg19',
+    applicableHints: ['REPACK (CONCURRENTLY)', 'io_method = io_uring', 'EXPLAIN (ANALYZE, SERIALIZE, MEMORY, WAL, FORMAT JSON)']
   }
 ];
 
@@ -1019,6 +1088,20 @@ export const TuningPlaybookTab: React.FC<TuningPlaybookTabProps> = ({ plan, onNa
                   <td>Forces parallel plan creation even below Cost Threshold for Parallelism.</td>
                   <td>Testing parallel scalability on multi-core servers.</td>
                   <td>Can overwhelm CPU schedulers on busy OLTP servers.</td>
+                </tr>
+                <tr>
+                  <td><code>USE HINT('ABORT_QUERY_EXECUTION')</code></td>
+                  <td>Governance (SQL 2025)</td>
+                  <td>Query Store emergency brake that blocks future executions of a runaway query_id (Error 8778).</td>
+                  <td>Stopping known catastrophic or runaway queries immediately via Query Store without code deploys.</td>
+                  <td>Every execution fails with Error 8778 until the Query Store hint is cleared.</td>
+                </tr>
+                <tr>
+                  <td><code>OPTION (PLAN PER VALUE(...))</code></td>
+                  <td>Cardinality (SQL 2025)</td>
+                  <td>System-injected OPPO directive linking multi-plan variants for optional predicates.</td>
+                  <td>Inspecting/forcing specific QueryVariantID branches for <code>@p IS NULL OR col = @p</code> queries.</td>
+                  <td>Generated by SQL Server 2025 OPPO under compatibility level 170; verify variant plans in Query Store.</td>
                 </tr>
               </tbody>
             </table>

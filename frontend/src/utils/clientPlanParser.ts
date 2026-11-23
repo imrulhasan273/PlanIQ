@@ -1270,12 +1270,17 @@ function extractCardinalityEngineClient(xmlDoc: Document): CardinalityEstimation
   const version = elem?.getAttribute('CardinalityEstimationModelVersion');
   if (!version) return undefined;
 
-  const isLegacy = version === '70' || parseInt(version, 10) < 120;
+  const parsed = parseInt(version.trim(), 10);
+  const isLegacy = version === '70' || (!Number.isNaN(parsed) && parsed > 0 && parsed < 120);
   const desc = isLegacy
     ? `Query compiled under Legacy Cardinality Estimator (Model Version ${version}). Legacy CE assumes filter predicate independence and can severely skew row estimates.`
+    : version === '170'
+    ? 'Query compiled under SQL Server 2025 Modern Cardinality Estimator (Model Version 170) with CE Feedback for Expressions and OPPO support.'
     : `Query compiled under Modern Cardinality Estimator (Model Version ${version}).`;
   const remedy = isLegacy
     ? "Evaluate running under modern CE with OPTION (USE HINT('FORCE_DEFAULT_CARDINALITY_ESTIMATION')) or database compatibility level 130+."
+    : version === '170'
+    ? 'Leverage SQL Server 2025 CE Feedback for Expressions and Optional Parameter Plan Optimization (OPPO) under compatibility level 170.'
     : 'Ensure table statistics have adequate sample rates for multi-column join correlation.';
 
   return {

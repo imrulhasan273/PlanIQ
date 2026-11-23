@@ -276,6 +276,8 @@ type paramAggregate struct {
 // detectParamMitigation looks for query hints in the statement text that neutralize sniffing
 func detectParamMitigation(upperText string) string {
 	switch {
+	case strings.Contains(upperText, "PLAN PER VALUE") || strings.Contains(upperText, "OPTIONAL_PREDICATE"):
+		return "PLAN PER VALUE (SQL 2025 OPPO)"
 	case strings.Contains(upperText, "DISABLE_PARAMETER_SNIFFING"):
 		return "USE HINT('DISABLE_PARAMETER_SNIFFING')"
 	case strings.Contains(upperText, "OPTIMIZE FOR UNKNOWN"):
@@ -309,13 +311,24 @@ func populateExtraDiagnostics(root *xmlElement, analysis *PlanAnalysis, diag *Ad
 
 	mgfStatuses := make([]string, 0)
 	dopFeedback := make([]string, 0)
+	ceFeedback := make([]string, 0)
 	hasInterleaved, hasInlineUDF, hasPSP := false, false, false
+	hasOPPO, hasVectorSearch, hasExactVectorDistance := false, false, false
 
 	for _, ctx := range contexts {
 		stmtSkewed := false
 		var stmtSigs []string
 		rowGoalSeen := false
 		upperText := strings.ToUpper(ctx.text)
+		if strings.Contains(upperText, "PLAN PER VALUE") || strings.Contains(upperText, "OPTIONAL_PREDICATE") {
+			hasOPPO = true
+		}
+		if strings.Contains(upperText, "VECTOR_SEARCH") {
+			hasVectorSearch = true
+		}
+		if strings.Contains(upperText, "VECTOR_DISTANCE") {
+			hasExactVectorDistance = true
+		}
 
 		walkStmt(ctx.elem, nil, func(el *xmlElement, anc []*xmlElement) {
 			switch el.Name {
@@ -329,12 +342,23 @@ func populateExtraDiagnostics(root *xmlElement, analysis *PlanAnalysis, diag *Ad
 				if v := el.Attr("DOPFeedbackAdjusted"); v != "" {
 					dopFeedback = append(dopFeedback, v)
 				}
+				if v := el.Attr("CardinalityFeedback"); v != "" {
+					ceFeedback = append(ceFeedback, v)
+				}
+				if v := el.Attr("CEFeedbackAdjusted"); v != "" {
+					ceFeedback = append(ceFeedback, v)
+				}
+				if el.Attr("QueryVariantID") != "" && (strings.Contains(upperText, "IS NULL OR") || strings.Contains(upperText, "PLAN PER VALUE")) {
+					hasOPPO = true
+				}
 			case "MemoryGrantInfo":
 				if v := el.Attr("IsMemoryGrantFeedbackAdjusted"); v != "" {
 					mgfStatuses = append(mgfStatuses, v)
 				}
 			case "Dispatcher", "ParameterSensitivePredicate":
 				hasPSP = true
+			case "OptionalParameter", "OptionalParameterPredicate":
+				hasOPPO = true
 			case "ColumnsWithNoStatistics":
 				nodeID := 0
 				if len(anc) > 0 {
@@ -423,6 +447,12 @@ func populateExtraDiagnostics(root *xmlElement, analysis *PlanAnalysis, diag *Ad
 				}
 				stmtSigs = append(stmtSigs, sig)
 			case "RelOp":
+				if v := el.Attr("CardinalityFeedback"); v != "" {
+					ceFeedback = append(ceFeedback, v)
+				}
+				if strings.Contains(strings.ToLower(el.Attr("PhysicalOp")), "vector") || strings.Contains(strings.ToLower(el.Attr("LogicalOp")), "vector") {
+					hasVectorSearch = true
+				}
 				analyzeRelOp(el, anc, ctx, upperText, diag, adaptive, &stmtSkewed, &rowGoalSeen)
 			}
 		})
@@ -448,7 +478,7 @@ func populateExtraDiagnostics(root *xmlElement, analysis *PlanAnalysis, diag *Ad
 
 	finalizeMissingStats(diag)
 	finalizeParameterSniffing(diag, paramByKey, paramOrder)
-	finalizeAdaptive(diag, adaptive, mgfStatuses, dopFeedback, hasInterleaved, hasInlineUDF, hasPSP)
+	finalizeAdaptive(diag, adaptive, mgfStatuses, dopFeedback, ceFeedback, hasInterleaved, hasInlineUDF, hasPSP, hasOPPO, hasVectorSearch, hasExactVectorDistance)
 
 	sort.SliceStable(diag.KeyLookups, func(i, j int) bool {
 		a, b := diag.KeyLookups[i], diag.KeyLookups[j]
@@ -819,8 +849,17 @@ var nonSargableRemedies = map[string]string{
 	"concat":     "Compare each column separately instead of concatenating them.",
 	"stuff":      "Use an indexed computed column for the transformed value.",
 	"reverse":    "Use an indexed computed column over REVERSE(col) for suffix searches.",
-	"isnumeric":  "Validate at write time; avoid ISNUMERIC(col) in WHERE.",
-	"isdate":     "Validate at write time; avoid ISDATE(col) in WHERE.",
+	"isnumeric":       "Validate at write time; avoid ISNUMERIC(col) in WHERE.",
+	"isdate":          "Validate at write time; avoid ISDATE(col) in WHERE.",
+	"regexp_like":     "SQL Server 2025 REGEXP_LIKE on an indexed column prevents full B-tree seeks unless paired with a sargable prefix filter.",
+	"regexp_replace":  "Avoid wrapping indexed columns in REGEXP_REPLACE in filter predicates.",
+	"regexp_substr":   "Avoid wrapping indexed columns in REGEXP_SUBSTR in filter predicates; use an indexed computed column.",
+	"regexp_instr":    "Avoid wrapping indexed columns in REGEXP_INSTR in filter predicates.",
+	"regexp_count":    "Avoid wrapping indexed columns in REGEXP_COUNT in filter predicates.",
+	"vector_distance": "Exact k-NN VECTOR_DISTANCE() scans every row. In SQL Server 2025, create a DiskANN vector index (CREATE VECTOR INDEX) and use VECTOR_SEARCH() for Approximate Nearest Neighbor (ANN) seeks.",
+	"json_value":      "In SQL Server 2025, use the native JSON data type with CREATE JSON INDEX (or an indexed computed column) so JSON path predicates seek instead of scanning.",
+	"json_query":      "In SQL Server 2025, use the native JSON data type with CREATE JSON INDEX so JSON path predicates seek instead of scanning.",
+	"json_contains":   "In SQL Server 2025, create a native JSON index (CREATE JSON INDEX) on the target JSON column so JSON_CONTAINS seeks directly.",
 }
 
 func skipQuoted(s string, i int) int {
@@ -1167,7 +1206,7 @@ func finalizeParameterSniffing(diag *AdvancedDiagnostics, byKey map[string]*para
 			f.Severity = "INFO"
 			f.Description = "This plan was compiled by sniffing the parameter values listed below and will be reused for every future execution. Capture the Actual plan to compare against runtime values."
 		}
-		f.Remedy = "Options: OPTION (RECOMPILE) for volatile/skewed predicates; OPTION (OPTIMIZE FOR UNKNOWN) or OPTIMIZE FOR (@p = typical) for a stable generic plan; split skewed branches into separate procedures; SQL Server 2022 Parameter Sensitive Plan optimization; or force a good plan via Query Store."
+		f.Remedy = "Options: OPTION (RECOMPILE) for volatile/skewed predicates; OPTION (OPTIMIZE FOR UNKNOWN) or OPTIMIZE FOR (@p = typical) for a stable generic plan; split skewed branches into separate procedures; SQL Server 2022 PSP / SQL Server 2025 OPPO; or force a good plan via Query Store."
 		diag.ParameterSniffing = append(diag.ParameterSniffing, f)
 	}
 	sort.SliceStable(diag.ParameterSniffing, func(i, j int) bool {
@@ -1175,8 +1214,8 @@ func finalizeParameterSniffing(diag *AdvancedDiagnostics, byKey map[string]*para
 	})
 }
 
-func finalizeAdaptive(diag *AdvancedDiagnostics, ap *AdaptiveProcessing, mgf, dop []string,
-	interleaved, inlineUDF, psp bool) {
+func finalizeAdaptive(diag *AdvancedDiagnostics, ap *AdaptiveProcessing, mgf, dop, ceFeedback []string,
+	interleaved, inlineUDF, psp, oppo, vectorSearch, exactVectorDistance bool) {
 
 	ceVersion := -1
 	if diag.CardinalityEngine != nil {
@@ -1262,6 +1301,32 @@ func finalizeAdaptive(diag *AdvancedDiagnostics, ap *AdaptiveProcessing, mgf, do
 		add("Degree of Parallelism Feedback", s, d)
 	}
 
+	// Optional Parameter Plan Optimization (OPPO - SQL Server 2025)
+	if oppo {
+		add("Optional Parameter Plan Optimization (OPPO)", "Active", "Multi-plan OPPO variant (PLAN PER VALUE / optional_predicate) is active for optional NULL-check parameters (SQL Server 2025).")
+	} else {
+		s, d := eligible(170, "Automatically generates multiple plan variants for optional parameter predicates (@p IS NULL OR col = @p) (SQL Server 2025).")
+		add("Optional Parameter Plan Optimization (OPPO)", s, d)
+	}
+
+	// CE Feedback for Expressions (SQL Server 2025)
+	if len(ceFeedback) > 0 {
+		add("CE Feedback for Expressions", "Active", "Cardinality Estimation Feedback reported by the engine: "+strings.Join(uniqueStrings(ceFeedback), ", ")+".")
+	} else {
+		s, d := eligible(170, "Learns and applies alternate cardinality model assumptions for repeating subexpressions across queries (SQL Server 2025).")
+		add("CE Feedback for Expressions", s, d)
+	}
+
+	// Vector Index & DiskANN Search (SQL Server 2025)
+	if vectorSearch {
+		add("Vector Index & DiskANN Search", "Active", "Approximate Nearest Neighbor (ANN) DiskANN vector index search is active in this plan (SQL Server 2025).")
+	} else if exactVectorDistance {
+		add("Vector Index & DiskANN Search", "Eligible", "Plan evaluates exact k-NN VECTOR_DISTANCE() row-by-row; create a DiskANN vector index (CREATE VECTOR INDEX) and use VECTOR_SEARCH() (SQL Server 2025).")
+	} else {
+		s, d := eligible(170, "Native VECTOR data type and DiskANN Approximate Nearest Neighbor (ANN) vector index search (SQL Server 2025).")
+		add("Vector Index & DiskANN Search", s, d)
+	}
+
 	active := 0
 	for _, f := range ap.Features {
 		if f.Status == "Active" {
@@ -1345,7 +1410,7 @@ func appendFindingAntiPatterns(analysis *PlanAnalysis, diag *AdvancedDiagnostics
 	}
 	add("PARAMETER_SNIFFING", psSeverity, "Parameter Sniffing Mismatch",
 		"The plan was compiled for parameter values that differ from the runtime values.",
-		"Use OPTION (RECOMPILE), OPTIMIZE FOR UNKNOWN, split skewed paths, or SQL Server 2022 PSP optimization.", psAffected)
+		"Use OPTION (RECOMPILE), OPTIMIZE FOR UNKNOWN, split skewed paths, or SQL Server 2022 PSP / SQL Server 2025 OPPO.", psAffected)
 
 	// Non-sargable
 	var nsAffected []string

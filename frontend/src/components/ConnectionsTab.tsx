@@ -263,7 +263,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
           updatedAt: new Date().toISOString(),
         };
         const updated = [...profiles.filter((p) => p.id !== saved.id), saved];
-        localStorage.setItem('planiq_saved_conns', JSON.stringify(updated));
+        localStorage.setItem('planiq_saved_conns', JSON.stringify(updated.map((p) => ({ ...p, password: '' }))));
       }
 
       showBanner('success', `Saved connection "${saved.name}".`);
@@ -290,7 +290,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
         await DeleteDBConnection(id);
       } else {
         const updated = profiles.filter((p) => p.id !== id);
-        localStorage.setItem('planiq_saved_conns', JSON.stringify(updated));
+        localStorage.setItem('planiq_saved_conns', JSON.stringify(updated.map((p) => ({ ...p, password: '' }))));
       }
       showBanner('success', `Deleted profile "${name}".`);
       await loadProfiles();
@@ -307,7 +307,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
         await SetDefaultDBConnection(id);
       } else {
         const updated = profiles.map((p) => ({ ...p, isDefault: p.id === id }));
-        localStorage.setItem('planiq_saved_conns', JSON.stringify(updated));
+        localStorage.setItem('planiq_saved_conns', JSON.stringify(updated.map((p) => ({ ...p, password: '' }))));
       }
       showBanner('success', 'Default connection updated.');
       await loadProfiles(id);

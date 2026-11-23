@@ -75,6 +75,41 @@ export interface RawPgNode {
   'Temp Written Blocks'?: number;
   'I/O Read Time'?: number;
   'I/O Write Time'?: number;
+  'Shared I/O Read Time'?: number;
+  'Shared I/O Write Time'?: number;
+  'Local I/O Read Time'?: number;
+  'Local I/O Write Time'?: number;
+  'Temp I/O Read Time'?: number;
+  'Temp I/O Write Time'?: number;
+  // PG 18+ B-Tree Index Skip Scan / search counter
+  'Index Searches'?: number;
+  // EXPLAIN (WAL) counters
+  'WAL Records'?: number;
+  'WAL FPI'?: number;
+  'WAL Bytes'?: number;
+  // Memoize node metrics
+  'Cache Key'?: string;
+  'Cache Mode'?: string;
+  'Cache Hits'?: number;
+  'Cache Misses'?: number;
+  'Cache Evictions'?: number;
+  'Cache Overflows'?: number;
+  // Incremental Sort metrics
+  'Presorted Key'?: string[];
+  'Full-sort Groups'?: {
+    'Group Count'?: number;
+    'Sort Methods Used'?: string[];
+    'Sort Space Memory'?: { 'Maximum Space Used'?: number; 'Average Sort Space Used'?: number };
+  };
+  'Pre-sorted Groups'?: {
+    'Group Count'?: number;
+    'Sort Methods Used'?: string[];
+    'Sort Space Memory'?: { 'Maximum Space Used'?: number; 'Average Sort Space Used'?: number };
+  };
+  // PG 17+ JSON_TABLE / ModifyTable MERGE
+  'Table Function Name'?: string;
+  Operation?: string;
+  'Sort Key'?: string[];
   Plans?: RawPgNode[];
   [key: string]: any;
 }
@@ -83,7 +118,22 @@ export interface RawPgExplainRoot {
   Plan: RawPgNode;
   'Planning Time'?: number;
   'Execution Time'?: number;
-  'Planning'?: any;
+  Planning?: {
+    Memory?: {
+      Used?: number;
+      Allocated?: number;
+    };
+    [key: string]: any;
+  };
+  Serialization?: {
+    Time?: number;
+    'Output Volume'?: number;
+    Bytes?: number;
+    Format?: string;
+    'Shared Hit Blocks'?: number;
+    'Shared Read Blocks'?: number;
+    [key: string]: any;
+  };
   Triggers?: Array<{
     'Trigger Name': string;
     Constraint?: string;
@@ -300,6 +350,25 @@ function subtractBuffers(a: PgBufferCounters, b: PgBufferCounters): PgBufferCoun
   };
 }
 
+function formatPgBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+function hasVectorDistanceOp(text: string): boolean {
+  if (!text) return false;
+  return /<->|<=>|<#>|<~>|<\+>|<%>/i.test(text);
+}
+
+function getPgVectorOpClass(text: string): string {
+  if (text.includes('<=>')) return 'vector_cosine_ops';
+  if (text.includes('<#>')) return 'vector_ip_ops';
+  if (text.includes('<~>')) return 'bit_hamming_ops';
+  return 'vector_l2_ops';
+}
+
 /** Parse PostgreSQL EXPLAIN (FORMAT JSON) into standard PlanIQ PlanAnalysis */
 export function parsePgExplainJson(jsonContent: string, planName: string = 'PostgreSQL Execution Plan'): PlanAnalysis {
   let parsed: any;
@@ -341,12 +410,22 @@ export function parsePgExplainJson(jsonContent: string, planName: string = 'Post
       tempWritten: 0,
     };
 
+    // Global WAL accumulator (EXPLAIN WAL)
+    const stmtWal = { records: 0, fpi: 0, bytes: 0 };
+
     // Recursive node converter
     const convertNode = (raw: RawPgNode): PlanNode => {
       const curId = nextNodeId++;
       const nodeType = raw['Node Type'] || 'Result';
       const strategy = raw.Strategy;
-      const physicalOp = strategy ? `${nodeType} (${strategy})` : nodeType;
+      const operation = raw.Operation;
+      const tableFuncName = raw['Table Function Name'];
+      let physicalOp = strategy ? `${nodeType} (${strategy})` : nodeType;
+      if (nodeType === 'ModifyTable' && operation) {
+        physicalOp = `${nodeType} (${operation})`;
+      } else if (nodeType === 'Table Function Scan' && tableFuncName) {
+        physicalOp = `${nodeType} (${tableFuncName})`;
+      }
       const logicalOp = raw['Join Type'] ? `${raw['Join Type']} Join` : physicalOp;
       const loops = Math.max(1, raw['Actual Loops'] || 1);
       const rowsPerLoop = raw['Actual Rows'] ?? 0;
@@ -360,6 +439,22 @@ export function parsePgExplainJson(jsonContent: string, planName: string = 'Post
 
       const nodeBuffers = extractBuffers(raw);
       stmtBuffers = addBuffers(stmtBuffers, nodeBuffers);
+
+      const walRecords = raw['WAL Records'] || 0;
+      const walFpi = raw['WAL FPI'] || 0;
+      const walBytes = raw['WAL Bytes'] || 0;
+      stmtWal.records += walRecords;
+      stmtWal.fpi += walFpi;
+      stmtWal.bytes += walBytes;
+
+      const sharedIoReadMs = raw['Shared I/O Read Time'];
+      const sharedIoWriteMs = raw['Shared I/O Write Time'];
+      const localIoReadMs = raw['Local I/O Read Time'];
+      const localIoWriteMs = raw['Local I/O Write Time'];
+      const tempIoReadMs = raw['Temp I/O Read Time'];
+      const tempIoWriteMs = raw['Temp I/O Write Time'];
+      const ioReadMs = raw['I/O Read Time'] ?? ((sharedIoReadMs || 0) + (localIoReadMs || 0) + (tempIoReadMs || 0));
+      const ioWriteMs = raw['I/O Write Time'] ?? ((sharedIoWriteMs || 0) + (localIoWriteMs || 0) + (tempIoWriteMs || 0));
 
       // Process children first to calculate self/exclusive time and child buffers
       const rawChildren = raw.Plans || [];
@@ -418,6 +513,19 @@ export function parsePgExplainJson(jsonContent: string, planName: string = 'Post
       const childTotalCost = (raw.Plans || []).reduce((acc, c) => acc + (c['Total Cost'] || 0), 0);
       const ownCost = Math.max(0, raw['Total Cost'] - childTotalCost);
 
+      // Predicates & Sort Keys
+      const filter = raw.Filter || raw['Join Filter'] || '';
+      const indexCond = raw['Index Cond'] || raw['Recheck Cond'] || '';
+      const sortKey = Array.isArray(raw['Sort Key']) ? raw['Sort Key'] : undefined;
+      const vectorText = [filter, indexCond, ...(sortKey || [])].join(' ');
+      const usesVectorOp = hasVectorDistanceOp(vectorText);
+
+      // Target table/relation
+      const relation = raw['Relation Name'] || '';
+      const schema = raw.Schema || 'public';
+      const indexName = raw['Index Name'] || '';
+      const opLower = physicalOp.toLowerCase();
+
       // Badges
       const badges: PgNodeBadge[] = [];
       if (raw['Sort Method']) {
@@ -428,11 +536,52 @@ export function parsePgExplainJson(jsonContent: string, planName: string = 'Post
           title: `Sort Method: ${raw['Sort Method']}, Space: ${raw['Sort Space Used']} KB (${raw['Sort Space Type']})`,
         });
       }
+      if (raw['Full-sort Groups'] || raw['Pre-sorted Groups']) {
+        const fullCount = raw['Full-sort Groups']?.['Group Count'] || 0;
+        const preCount = raw['Pre-sorted Groups']?.['Group Count'] || 0;
+        const methods = raw['Full-sort Groups']?.['Sort Methods Used'] || [];
+        const hasDiskGroup = methods.some((m) => m.toLowerCase().includes('external'));
+        badges.push({
+          label: `Groups: ${fullCount + preCount}${hasDiskGroup ? ' (Disk Spill)' : ''}`,
+          tone: hasDiskGroup ? 'bad' : 'info',
+          title: `Incremental Sort: ${fullCount} full-sort group(s), ${preCount} pre-sorted group(s)`,
+        });
+      }
       if (raw['Hash Batches'] && raw['Hash Batches'] > 1) {
         badges.push({
           label: `Hash Spilled (${raw['Hash Batches']} batches)`,
           tone: 'bad',
           title: `Hash join spilled to disk into ${raw['Hash Batches']} batches (original: ${raw['Original Hash Batches'] || 1})`,
+        });
+      }
+      if (nodeType === 'Memoize') {
+        const hits = raw['Cache Hits'] || 0;
+        const misses = raw['Cache Misses'] || 0;
+        const evictions = raw['Cache Evictions'] || 0;
+        const overflows = raw['Cache Overflows'] || 0;
+        if (evictions > 0 || overflows > 0) {
+          badges.push({
+            label: `Memoize Evictions (${evictions + overflows})`,
+            tone: 'warn',
+            title: `Memoize cache had ${evictions} evictions and ${overflows} overflows. Increase work_mem or hash_mem_multiplier.`,
+          });
+        } else if (hits + misses > 0) {
+          const hitRate = Math.round((hits / (hits + misses)) * 100);
+          badges.push({
+            label: `Memoize Hit ${hitRate}%`,
+            tone: hitRate >= 70 ? 'good' : 'info',
+            title: `Memoize Cache: ${hits.toLocaleString()} hits / ${misses.toLocaleString()} misses (${raw['Cache Mode'] || 'binary'} mode)`,
+          });
+        }
+      }
+      if (raw['Index Searches'] !== undefined && raw['Index Searches'] > 1) {
+        const isArrayCond = /ANY\s*\(|IN\s*\(/i.test(indexCond);
+        badges.push({
+          label: !isArrayCond
+            ? `Skip Scan (${raw['Index Searches'].toLocaleString()} searches)`
+            : `Index Searches: ${raw['Index Searches'].toLocaleString()}`,
+          tone: raw['Index Searches'] > 500 ? 'warn' : 'info',
+          title: `PG 18+ performed ${raw['Index Searches'].toLocaleString()} B-tree index descents (Index Skip Scan or multi-probe).`,
         });
       }
       if (raw['Lossy Heap Blocks'] && raw['Lossy Heap Blocks'] > 0) {
@@ -446,8 +595,19 @@ export function parsePgExplainJson(jsonContent: string, planName: string = 'Post
         badges.push({
           label: `${raw['Heap Fetches'].toLocaleString()} Heap Fetches`,
           tone: 'warn',
-          title: `Index Only Scan had to fetch ${raw['Heap Fetches'].toLocaleString()} heap pages because visibility map is stale. Run VACUUM.`,
+          title: `Index Only Scan fetched ${raw['Heap Fetches'].toLocaleString()} heap pages (stale visibility map / bloat). Run VACUUM or PostgreSQL 19: REPACK (CONCURRENTLY) ${schema}.${relation};`,
         });
+      }
+      if (opLower.includes('seq scan') && relation) {
+        const scannedPages = nodeBuffers.sharedHit + nodeBuffers.sharedRead;
+        const rowsExamined = totalActualRows + (raw['Rows Removed by Filter'] || 0);
+        if (scannedPages > 500 && rowsExamined > 0 && scannedPages > rowsExamined * 2) {
+          badges.push({
+            label: `Table Bloat (${scannedPages.toLocaleString()} pages)`,
+            tone: 'warn',
+            title: `Seq Scan read ${scannedPages.toLocaleString()} pages for only ${rowsExamined.toLocaleString()} rows. Run PostgreSQL 19 online compaction: REPACK (CONCURRENTLY) ${schema}.${relation};`,
+          });
+        }
       }
       if (raw['Rows Removed by Filter'] && raw['Rows Removed by Filter'] > 5000) {
         badges.push({
@@ -463,16 +623,39 @@ export function parsePgExplainJson(jsonContent: string, planName: string = 'Post
           title: `Planned ${raw['Workers Planned']} parallel workers, but only ${raw['Workers Launched'] || 0} launched. max_parallel_workers exhausted.`,
         });
       }
-
-      // Target table/relation
-      const relation = raw['Relation Name'] || '';
-      const schema = raw.Schema || 'public';
-      const indexName = raw['Index Name'] || '';
+      if (walBytes > 0) {
+        badges.push({
+          label: `WAL ${formatPgBytes(walBytes)}`,
+          tone: walFpi > 100 ? 'warn' : 'info',
+          title: `Generated ${walRecords.toLocaleString()} WAL records (${walFpi.toLocaleString()} FPIs, ${formatPgBytes(walBytes)}).`,
+        });
+      }
+      if (usesVectorOp) {
+        if (opLower.includes('seq scan') || opLower.includes('sort')) {
+          badges.push({
+            label: 'Exact Vector Distance Scan',
+            tone: 'bad',
+            title: 'Exact vector distance scan (<-> / <=> / <#>) without HNSW or IVFFlat pgvector index.',
+          });
+        } else if (opLower.includes('index')) {
+          badges.push({
+            label: 'ANN Vector Index Scan',
+            tone: 'good',
+            title: 'Approximate Nearest Neighbor vector search using pgvector index.',
+          });
+        }
+      }
+      if (nodeType === 'Table Function Scan' && tableFuncName) {
+        badges.push({
+          label: `PG 17+ ${tableFuncName}()`,
+          tone: 'info',
+          title: `SQL/JSON table function scan: ${tableFuncName}`,
+        });
+      }
 
       // Pain points
       let isPainPoint = false;
       let painReason = '';
-      const opLower = physicalOp.toLowerCase();
       if (opLower.includes('seq scan') && totalActualRows > 5000) {
         isPainPoint = true;
         painReason = `Sequential Scan on ${relation} processed ${totalActualRows.toLocaleString()} rows. Consider adding an index.`;
@@ -486,10 +669,6 @@ export function parsePgExplainJson(jsonContent: string, planName: string = 'Post
         isPainPoint = true;
         painReason = `High subtree cost (${costPercentage.toFixed(1)}% of query cost).`;
       }
-
-      // Predicates
-      const filter = raw.Filter || raw['Join Filter'] || '';
-      const indexCond = raw['Index Cond'] || raw['Recheck Cond'] || '';
 
       // Output columns
       const outputCols: string[] = raw.Output || [];
@@ -546,19 +725,58 @@ export function parsePgExplainJson(jsonContent: string, planName: string = 'Post
         joinFilter: raw['Join Filter'],
         buffers: nodeBuffers,
         selfBuffers,
-        ioReadMs: raw['I/O Read Time'] || 0,
-        ioWriteMs: raw['I/O Write Time'] || 0,
+        ioReadMs,
+        ioWriteMs,
+        sharedIoReadMs,
+        sharedIoWriteMs,
+        localIoReadMs,
+        localIoWriteMs,
+        tempIoReadMs,
+        tempIoWriteMs,
         hasBuffers: (nodeBuffers.sharedHit + nodeBuffers.sharedRead + nodeBuffers.tempRead + nodeBuffers.tempWritten) > 0,
+        indexSearches: raw['Index Searches'],
+        walRecords: raw['WAL Records'],
+        walFpi: raw['WAL FPI'],
+        walBytes: raw['WAL Bytes'],
+        cacheKey: raw['Cache Key'],
+        cacheMode: raw['Cache Mode'],
+        cacheHits: raw['Cache Hits'],
+        cacheMisses: raw['Cache Misses'],
+        cacheEvictions: raw['Cache Evictions'],
+        cacheOverflows: raw['Cache Overflows'],
+        presortedKey: raw['Presorted Key'],
+        fullSortGroups: raw['Full-sort Groups'] ? {
+          groupCount: raw['Full-sort Groups']['Group Count'],
+          sortMethodsUsed: raw['Full-sort Groups']['Sort Methods Used'],
+          maxMemoryKb: raw['Full-sort Groups']['Sort Space Memory']?.['Maximum Space Used'],
+        } : undefined,
+        preSortedGroups: raw['Pre-sorted Groups'] ? {
+          groupCount: raw['Pre-sorted Groups']['Group Count'],
+          sortMethodsUsed: raw['Pre-sorted Groups']['Sort Methods Used'],
+          maxMemoryKb: raw['Pre-sorted Groups']['Sort Space Memory']?.['Maximum Space Used'],
+        } : undefined,
+        tableFuncName,
+        operation,
+        sortKey,
       };
 
       // Built-in PG Property list for the inspector
       const pgProps: PgNodeProp[] = [
-        { name: 'Node Type', value: nodeType },
+        { name: 'Node Type', value: physicalOp },
         { name: 'Total Cost', value: `${raw['Total Cost'].toFixed(2)} (${costPercentage.toFixed(1)}%)`, highlight: costPercentage > 35 ? 'cost' : 'normal' },
         { name: 'Startup Cost', value: (raw['Startup Cost'] || 0).toFixed(2) },
         { name: 'Estimated Rows', value: planRows.toLocaleString(), highlight: hasCardinalitySkew ? 'skew' : 'normal' },
         { name: 'Actual Rows', value: hasActualRows ? `${totalActualRows.toLocaleString()} (${loops} loop${loops > 1 ? 's' : ''})` : 'N/A' },
         ...(hasActualRows ? [{ name: 'Actual Total Time', value: `${cumElapsedMs.toFixed(3)} ms (${selfElapsedMs.toFixed(3)} ms self)` }] : []),
+        ...(raw['Index Searches'] !== undefined ? [{ name: 'Index Searches (PG 18+)', value: raw['Index Searches'].toLocaleString() }] : []),
+        ...(nodeType === 'Memoize' && (raw['Cache Hits'] !== undefined || raw['Cache Misses'] !== undefined)
+          ? [{
+              name: 'Memoize Cache',
+              value: `Hits: ${(raw['Cache Hits'] || 0).toLocaleString()}, Misses: ${(raw['Cache Misses'] || 0).toLocaleString()}, Evictions: ${(raw['Cache Evictions'] || 0).toLocaleString()}`,
+              highlight: ((raw['Cache Evictions'] || 0) > 0 ? 'warn' : 'good') as 'warn' | 'good',
+            }]
+          : []),
+        ...(walBytes > 0 || walRecords > 0 ? [{ name: 'WAL Telemetry', value: `${walRecords.toLocaleString()} records, ${walFpi.toLocaleString()} FPI, ${formatPgBytes(walBytes)}` }] : []),
         ...(nodeBuffers.sharedHit > 0 ? [{ name: 'Shared Hit Blocks (RAM)', value: `${nodeBuffers.sharedHit.toLocaleString()} (${((nodeBuffers.sharedHit * 8) / 1024).toFixed(2)} MB)` }] : []),
         ...(nodeBuffers.sharedRead > 0 ? [{ name: 'Shared Read Blocks (Disk)', value: `${nodeBuffers.sharedRead.toLocaleString()} (${((nodeBuffers.sharedRead * 8) / 1024).toFixed(2)} MB)` }] : []),
         ...(nodeBuffers.tempRead > 0 || nodeBuffers.tempWritten > 0 ? [{ name: 'Temp Blocks (Spill)', value: `Read: ${nodeBuffers.tempRead}, Written: ${nodeBuffers.tempWritten}` }] : []),
@@ -677,6 +895,18 @@ export function parsePgExplainJson(jsonContent: string, planName: string = 'Post
         queryId: rootItem['Query Identifier'] ? String(rootItem['Query Identifier']) : undefined,
         totalBuffers: stmtBuffers,
         queryTextProvided: !!effectiveQuery,
+        serialization: rootItem.Serialization ? {
+          timeMs: rootItem.Serialization.Time,
+          outputVolumeBytes: rootItem.Serialization['Output Volume'] ?? rootItem.Serialization.Bytes,
+          format: rootItem.Serialization.Format,
+          sharedHit: rootItem.Serialization['Shared Hit Blocks'],
+          sharedRead: rootItem.Serialization['Shared Read Blocks'],
+        } : undefined,
+        planningMemory: rootItem.Planning?.Memory ? {
+          usedBytes: rootItem.Planning.Memory.Used,
+          allocatedBytes: rootItem.Planning.Memory.Allocated,
+        } : undefined,
+        totalWal: (stmtWal.bytes > 0 || stmtWal.records > 0) ? stmtWal : undefined,
       },
     } as unknown as StatementAnalysis;
 
@@ -777,10 +1007,28 @@ function detectPgMissingIndexes(statements: StatementAnalysis[]): any[] {
     const walk = (node: PlanNode | undefined) => {
       if (!node) return;
       const op = node.physicalOp.toLowerCase();
-      if (op.includes('seq scan') && node.table && (node.actualRows || node.estimateRows) > 2000) {
+      if (op.includes('seq scan') && node.table) {
         const filter = node.predicate || '';
         const removed = (node.pg?.rowsRemovedByFilter || 0);
-        if (filter || removed > 1000) {
+        const sortKeys = (node.pg?.sortKey || []).join(' ');
+        const vectorText = `${filter} ${sortKeys}`;
+        if (hasVectorDistanceOp(vectorText)) {
+          const cols = extractFilterColumns(vectorText);
+          const colName = cols[0] || 'embedding';
+          const opClass = getPgVectorOpClass(vectorText);
+          const idxName = `idx_${node.table.toLowerCase()}_${colName}_hnsw`;
+          missing.push({
+            statementId: stmt.statementId,
+            impact: 95,
+            database: 'postgres',
+            schema: node.schema || 'public',
+            table: node.table,
+            equalityColumns: [colName],
+            inequalityColumns: [],
+            includeColumns: [],
+            suggestedDdl: `CREATE INDEX CONCURRENTLY ${idxName} ON ${node.schema || 'public'}.${node.table} USING hnsw (${colName} ${opClass});`,
+          });
+        } else if ((node.actualRows || node.estimateRows) > 2000 && (filter || removed > 1000)) {
           // Extract column candidates from filter
           const cols = extractFilterColumns(filter);
           const colList = cols.length > 0 ? cols : ['id'];
@@ -997,8 +1245,25 @@ function generatePgDiagnostics(statements: StatementAnalysis[], missingIndexes: 
     const walk = (n: PlanNode | undefined) => {
       if (!n) return;
 
-      // Filter predicate warnings (non-sargable / scan with filter)
-      if (n.predicate && n.physicalOp.toLowerCase().includes('seq scan')) {
+      // Filter predicate warnings (non-sargable / scan with filter / vector / bloat)
+      const sortKeyStr = (n.pg?.sortKey || []).join(' ');
+      if (hasVectorDistanceOp(`${n.predicate || ''} ${sortKeyStr}`) && (n.physicalOp.toLowerCase().includes('seq scan') || n.physicalOp.toLowerCase().includes('sort'))) {
+        nonSargable.push({
+          statementId: stmt.statementId,
+          nodeId: n.nodeId,
+          physicalOp: n.physicalOp,
+          table: n.table || 'vector_table',
+          index: '',
+          functions: ['pgvector_distance'],
+          leadingWildcard: false,
+          predicate: n.predicate || sortKeyStr,
+          tableCardinality: n.tableCardinality,
+          costPercent: n.costPercentage,
+          severity: 'CRITICAL',
+          description: `Exact vector distance computation (<-> / <=> / <#>) without an HNSW or IVFFlat pgvector index on ${n.table || 'table'}.`,
+          remedy: `Create a pgvector ANN index: CREATE INDEX CONCURRENTLY ON ${n.schema || 'public'}.${n.table || 'table'} USING hnsw (embedding vector_cosine_ops);`,
+        });
+      } else if (n.predicate && n.physicalOp.toLowerCase().includes('seq scan')) {
         nonSargable.push({
           statementId: stmt.statementId,
           nodeId: n.nodeId,
@@ -1016,9 +1281,78 @@ function generatePgDiagnostics(statements: StatementAnalysis[], missingIndexes: 
         });
       }
 
-      // Spool / Materialize / Sort Spills
+      // Visibility map / Table bloat detection -> PostgreSQL 19 REPACK (CONCURRENTLY)
+      const heapFetches = n.pg?.heapFetches || 0;
+      const scannedPages = (n.pg?.buffers?.sharedHit || 0) + (n.pg?.buffers?.sharedRead || 0);
+      const examinedRows = n.actualRows + (n.pg?.rowsRemovedByFilter || 0);
+      if (heapFetches > 1000 && n.table) {
+        keyLookups.push({
+          statementId: stmt.statementId,
+          nodeId: n.nodeId,
+          lookupKind: 'Heap Fetches (Visibility Bloat)',
+          schema: n.schema || 'public',
+          table: n.table,
+          lookupIndex: n.index || 'heap',
+          seekIndex: n.index || '',
+          estimateRows: n.estimateRows,
+          lookupCount: heapFetches,
+          hasActualRows: true,
+          costPercent: n.costPercentage,
+          fetchedColumns: [],
+          includeClause: '',
+          severity: heapFetches > 10000 ? 'CRITICAL' : 'HIGH',
+          description: `Index Only Scan on ${n.table} performed ${heapFetches.toLocaleString()} heap fetches due to stale visibility map or table bloat.`,
+          remedy: `Run VACUUM (ANALYZE) ${n.schema || 'public'}.${n.table}; or compact online in PostgreSQL 19: REPACK (CONCURRENTLY) ${n.schema || 'public'}.${n.table}${n.index ? ` USING INDEX ${n.index}` : ''};`,
+        });
+      } else if (n.physicalOp.toLowerCase().includes('seq scan') && scannedPages > 500 && examinedRows > 0 && scannedPages > examinedRows * 2 && n.table) {
+        keyLookups.push({
+          statementId: stmt.statementId,
+          nodeId: n.nodeId,
+          lookupKind: 'Table Bloat (Low Tuple Density)',
+          schema: n.schema || 'public',
+          table: n.table,
+          lookupIndex: 'heap',
+          seekIndex: '',
+          estimateRows: n.estimateRows,
+          lookupCount: scannedPages,
+          hasActualRows: n.hasActualRows,
+          costPercent: n.costPercentage,
+          fetchedColumns: [],
+          includeClause: '',
+          severity: 'HIGH',
+          description: `Seq Scan read ${scannedPages.toLocaleString()} pages (${((scannedPages * 8) / 1024).toFixed(1)} MB) to inspect only ${examinedRows.toLocaleString()} live rows — severe dead-tuple bloat.`,
+          remedy: `Run PostgreSQL 19 online compaction without ACCESS EXCLUSIVE downtime: REPACK (CONCURRENTLY) ${n.schema || 'public'}.${n.table};`,
+        });
+      }
+
+      // Memoize cache evictions / work_mem spills
+      if (n.pg?.nodeType === 'Memoize' && ((n.pg.cacheEvictions || 0) > 0 || (n.pg.cacheOverflows || 0) > 0)) {
+        spools.push({
+          statementId: stmt.statementId,
+          nodeId: n.nodeId,
+          physicalOp: n.physicalOp,
+          logicalOp: n.logicalOp,
+          kind: 'Memoize Cache Eviction',
+          purpose: 'Memoize result cache exceeded work_mem / hash_mem_multiplier budget',
+          table: n.table || 'memoize_cache',
+          estimateRows: n.estimateRows,
+          estimateRebinds: 0,
+          estimateRewinds: 0,
+          actualRows: n.actualRows,
+          actualRebinds: n.pg.cacheHits || 0,
+          actualRewinds: n.pg.cacheMisses || 0,
+          hasActualRows: n.hasActualRows,
+          costPercent: n.costPercentage,
+          severity: 'HIGH',
+          description: `Memoize suffered ${(n.pg.cacheEvictions || 0).toLocaleString()} cache evictions and ${(n.pg.cacheOverflows || 0).toLocaleString()} overflows (${(n.pg.cacheHits || 0).toLocaleString()} hits / ${(n.pg.cacheMisses || 0).toLocaleString()} misses).`,
+          remedy: 'Increase work_mem or hash_mem_multiplier so Memoize retains hot parameterized lookup keys.',
+        });
+      }
+
+      // Spool / Materialize / Sort / Incremental Sort Spills
       if (n.physicalOp.toLowerCase().includes('materialize') || n.physicalOp.toLowerCase().includes('sort')) {
-        const isSpill = (n.pg?.sortSpaceType || '').toLowerCase().includes('disk') || ((n.pg?.hashBatches || 0) > 1);
+        const incDisk = (n.pg?.fullSortGroups?.sortMethodsUsed || []).some((m) => m.toLowerCase().includes('external'));
+        const isSpill = (n.pg?.sortSpaceType || '').toLowerCase().includes('disk') || ((n.pg?.hashBatches || 0) > 1) || incDisk;
         spools.push({
           statementId: stmt.statementId,
           nodeId: n.nodeId,

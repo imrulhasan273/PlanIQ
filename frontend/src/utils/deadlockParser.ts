@@ -283,14 +283,21 @@ function parseSingleDeadlock(dlNode: Element, index: number, rawXml: string): De
       const pageId = r.getAttribute('pageid') || '';
       const slotId = r.getAttribute('slotid') || '';
       const hobtid = r.getAttribute('hobtid') || r.getAttribute('associatedObjectId') || '';
+      const transactionId = r.getAttribute('transactionid') || r.getAttribute('xactid') || '';
+      const nodeId = r.getAttribute('nodeid') || '';
 
       const typeLower = type.toLowerCase();
       let lockGranularity: DeadlockResource['lockGranularity'] = 'Metadata Lock';
-      if (typeLower.includes('page')) lockGranularity = 'Page Lock';
+      if (typeLower.includes('tid') || typeLower.includes('xact') || subresource.toLowerCase() === 'xact') {
+        lockGranularity = 'Transaction (TID) Lock';
+      } else if (typeLower.includes('page')) lockGranularity = 'Page Lock';
       else if (typeLower.includes('key') || typeLower.includes('row') || typeLower.includes('rid')) lockGranularity = 'Row / Key Lock';
       else if (typeLower.includes('object') || typeLower.includes('table')) lockGranularity = 'Table / Object Lock';
       else if (typeLower.includes('extent')) lockGranularity = 'Extent Lock';
       else if (typeLower.includes('exchange')) lockGranularity = 'Exchange Event';
+
+      const displayObjectName =
+        objectname || (lockGranularity === 'Transaction (TID) Lock' ? `XACT (TID: ${transactionId || associatedObjectId || id})` : '');
 
       // Owners
       const owners: ResourceLockHolder[] = [];
@@ -327,7 +334,7 @@ function parseSingleDeadlock(dlNode: Element, index: number, rawXml: string): De
         id,
         type,
         database,
-        objectname,
+        objectname: displayObjectName,
         indexname,
         mode,
         associatedObjectId,
@@ -336,6 +343,8 @@ function parseSingleDeadlock(dlNode: Element, index: number, rawXml: string): De
         pageId,
         slotId,
         hobtid,
+        transactionId,
+        nodeId,
         lockGranularity,
         owners,
         waiters,
@@ -385,6 +394,7 @@ function parseSingleDeadlock(dlNode: Element, index: number, rawXml: string): De
   // 6. Deep Root Cause Classification
   const hasExchange = resources.some((r) => r.type.toLowerCase().includes('exchange'));
   const hasPageLocks = resources.some((r) => r.lockGranularity === 'Page Lock');
+  const hasOptimizedLocking = resources.some((r) => r.lockGranularity === 'Transaction (TID) Lock');
   const hasBulkInsert = processes.some((p) => p.inputbuf.toLowerCase().includes('bulk') || p.inputbuf.toLowerCase().includes('bcp'));
   const hasNestedTransactions = processes.some((p) => (p.tranCount || 0) > 1);
   const hasKeyLookupConversion = resources.some(
@@ -412,6 +422,11 @@ function parseSingleDeadlock(dlNode: Element, index: number, rawXml: string): De
     deadlockType = 'Bookmark / Conversion Deadlock';
     summary = 'Sessions concurrently held Shared (S) locks on an index while performing Bookmark/Key Lookups, and both subsequently attempted to upgrade/convert to Exclusive (X) locks on the same resource.';
     remedy = 'Add INCLUDE columns to the nonclustered index to make it fully covering. This eliminates the Key Lookup step, avoiding the initial Shared lock acquisition on the clustered index.';
+  } else if (hasOptimizedLocking) {
+    deadlockType = 'Optimized Locking Transaction (TID) Deadlock';
+    summary = `SQL Server 2025 Optimized Locking detected (<tidlock> / XACT lock). Concurrent transactions (${processes.map((p) => `SPID #${p.spid}`).join(', ')}) modified overlapping rows and deadlocked waiting on Transaction ID (TID) locks (LCK_M_S_XACT_MODIFY) rather than individual row/page locks.`;
+    remedy =
+      '1. Standardize the row/table update order across concurrent transactions so batches touch primary keys in deterministic ascending order.\n2. Keep write transactions short and commit promptly to release XACT/TID locks.\n3. Verify RCSI and ADR are enabled so Lock After Qualification (LAQ) avoids premature U-locks, and remove explicit TABLOCK/HOLDLOCK hints that force legacy locking.';
   } else if (distinctObjects.size >= 2) {
     deadlockType = 'Reverse Order Lock Acquisition';
     summary = `Sessions accessed multiple tables or objects (${objList}) in reverse or inconsistent sequential order within transactions. Session A locked Object 1 and waited for Object 2, while Session B locked Object 2 and waited for Object 1.`;
@@ -497,6 +512,7 @@ function parseSingleDeadlock(dlNode: Element, index: number, rawXml: string): De
     hasPageLocks,
     hasBulkInsert,
     hasNestedTransactions,
+    hasOptimizedLocking,
     timeline,
     processes,
     resources,

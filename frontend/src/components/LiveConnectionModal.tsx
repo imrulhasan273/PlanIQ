@@ -47,6 +47,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
+        parsed.password = '';
         if (defaultUsername && (!parsed.username || parsed.username === 'sa' || parsed.username === 'postgres')) {
           parsed.username = defaultUsername;
         }
@@ -161,7 +162,8 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
 
   const handleSaveConfig = (cfg: ConnectionConfig) => {
     setConfig(cfg);
-    localStorage.setItem('planiq_live_conn', JSON.stringify(cfg));
+    const key = isPg ? 'planiq_live_conn_pg' : 'planiq_live_conn';
+    localStorage.setItem(key, JSON.stringify({ ...cfg, password: '' }));
   };
 
   const handleConnect = async () => {

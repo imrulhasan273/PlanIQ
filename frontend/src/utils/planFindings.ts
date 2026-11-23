@@ -355,6 +355,18 @@ function statementFindings(stmt: any, out: PlanFinding[]) {
       });
     }
   }
+
+  // Rule 31: Exact Vector Distance Scan (SQL Server 2025)
+  if (/\bVECTOR_DISTANCE\s*\(/i.test(text) && !/\bVECTOR_SEARCH\s*\(/i.test(text)) {
+    add({
+      ruleNumber: 31,
+      type: 'Exact Vector Distance Scan',
+      severity: 'Warning',
+      message:
+        'Query uses exact k-NN VECTOR_DISTANCE() without VECTOR_SEARCH(). On SQL Server 2025, create a DiskANN vector index (CREATE VECTOR INDEX) and switch to VECTOR_SEARCH() for Approximate Nearest Neighbor (ANN) index lookups.',
+      maxBenefitPercent: null,
+    });
+  }
 }
 
 /** Run all rules, attach `findings` to each statement, enrich wait stats, return flat list. */

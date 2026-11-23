@@ -53,7 +53,9 @@ export interface DeadlockResource {
   pageId?: string;
   slotId?: string;
   hobtid?: string;
-  lockGranularity: 'Page Lock' | 'Row / Key Lock' | 'Table / Object Lock' | 'Extent Lock' | 'Exchange Event' | 'Metadata Lock';
+  transactionId?: string;
+  nodeId?: string;
+  lockGranularity: 'Page Lock' | 'Row / Key Lock' | 'Table / Object Lock' | 'Extent Lock' | 'Exchange Event' | 'Transaction (TID) Lock' | 'Metadata Lock';
   owners: ResourceLockHolder[];
   waiters: ResourceLockHolder[];
 }
@@ -88,6 +90,7 @@ export interface DeadlockGraph {
     | 'Parallelism Exchange Deadlock (CXPACKET)'
     | 'Serializable Range Escalation'
     | 'Page Lock Contention on Bulk Insert'
+    | 'Optimized Locking Transaction (TID) Deadlock'
     | 'Circular Lock Contention';
   summary: string;
   remedy: string;
@@ -96,6 +99,7 @@ export interface DeadlockGraph {
   hasPageLocks?: boolean;
   hasBulkInsert?: boolean;
   hasNestedTransactions?: boolean;
+  hasOptimizedLocking?: boolean;
   timeline: DeadlockTimelineEvent[];
   processes: DeadlockProcess[];
   resources: DeadlockResource[];

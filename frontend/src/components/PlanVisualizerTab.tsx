@@ -93,6 +93,15 @@ const OPERATOR_DESCRIPTIONS: Record<string, string> = {
   'Materialize': 'Cache the output of an inner plan in memory or on disk to allow fast repeated scans in nested loop joins.',
   'Hash': 'Construct an in-memory hash table of join keys for Hash Join probing.',
   'Memoize': 'Cache results of parameterized inner scans to avoid re-evaluating the same outer join key.',
+  'Incremental Sort': 'Sort input rows that are already pre-sorted on a leading prefix of keys, sorting only within tie groups.',
+  'Table Function Scan': 'Execute a set-returning table function (including PostgreSQL 17+ SQL/JSON JSON_TABLE) row-by-row.',
+  'ModifyTable': 'Apply INSERT, UPDATE, DELETE, or PostgreSQL 15–18 MERGE (with RETURNING) modifications to target relations.',
+  'Custom Scan': 'Execute a custom scan provider (such as columnar, vectorized, or extension-backed index scans).',
+  'Foreign Scan': 'Read data remotely via a Foreign Data Wrapper (FDW) or external storage engine.',
+  'Append': 'Concatenate rows sequentially from multiple subplans (such as partitioned tables or UNION ALL branches).',
+  'Merge Append': 'Merge pre-sorted streams from multiple subplans or partitions while maintaining overall sort order.',
+  'BitmapAnd': 'Intersect multiple Bitmap Index Scans in memory before reading matching heap blocks.',
+  'BitmapOr': 'Union multiple Bitmap Index Scans in memory before reading matching heap blocks.',
   'Subquery Scan': 'Evaluate an unflattened subquery as a streaming relational input.',
   'Result': 'Evaluate constant expressions or project scalar values without accessing storage relations.'
 };
@@ -197,8 +206,47 @@ function getPgProperties(
 
   if (pg?.strategy) items.push({ name: 'Execution Strategy', value: pg.strategy, category: 'operator' });
   if (pg?.parentRelationship) items.push({ name: 'Parent Relationship', value: pg.parentRelationship, category: 'operator' });
+  if (pg?.operation) items.push({ name: 'DML Operation', value: pg.operation, category: 'operator' });
+  if (pg?.tableFuncName) items.push({ name: 'Table Function', value: pg.tableFuncName, category: 'operator' });
   if (pg?.scanDirection) items.push({ name: 'Scan Direction', value: pg.scanDirection, category: 'operator' });
   if (pg?.subplanName) items.push({ name: 'SubPlan Identifier', value: pg.subplanName, category: 'operator' });
+  if (pg?.indexSearches !== undefined) {
+    items.push({
+      name: 'Index Searches (PG 18+ Skip Scan)',
+      value: `${pg.indexSearches.toLocaleString()} descent${pg.indexSearches === 1 ? '' : 's'}`,
+      highlight: pg.indexSearches > 500 ? 'warn' : 'normal',
+      category: 'operator'
+    });
+  }
+  if (pg?.cacheHits !== undefined || pg?.cacheMisses !== undefined) {
+    const hits = pg.cacheHits ?? 0;
+    const misses = pg.cacheMisses ?? 0;
+    const evictions = pg.cacheEvictions ?? 0;
+    const overflows = pg.cacheOverflows ?? 0;
+    const hitRate = hits + misses > 0 ? ((hits / (hits + misses)) * 100).toFixed(1) : '0.0';
+    items.push({
+      name: 'Memoize Cache Telemetry',
+      value: `${hitRate}% hit (${hits.toLocaleString()} hits, ${misses.toLocaleString()} misses, ${evictions.toLocaleString()} evictions, ${overflows.toLocaleString()} overflows)`,
+      highlight: evictions > 0 || overflows > 0 ? 'warn' : 'good',
+      category: 'operator'
+    });
+  }
+  if (pg?.presortedKey && pg.presortedKey.length > 0) {
+    items.push({
+      name: 'Incremental Sort Presorted Key',
+      value: pg.presortedKey.join(', '),
+      category: 'operator'
+    });
+  }
+  if (pg?.fullSortGroups || pg?.preSortedGroups) {
+    const fullG = pg.fullSortGroups?.groupCount ?? 0;
+    const preG = pg.preSortedGroups?.groupCount ?? 0;
+    items.push({
+      name: 'Incremental Sort Groups',
+      value: `Full-sort: ${fullG.toLocaleString()}, Pre-sorted: ${preG.toLocaleString()}`,
+      category: 'operator'
+    });
+  }
   items.push({ name: 'Execution Loops', value: `${pg?.loops ?? 1}`, category: 'operator' });
 
   if (pg?.workersPlanned !== undefined) {
@@ -361,8 +409,19 @@ function getPgProperties(
     if (pg.heapFetches !== undefined) {
       items.push({
         name: 'Heap Fetches (Index-Only Scan)',
-        value: pg.heapFetches.toLocaleString(),
+        value: pg.heapFetches > 500
+          ? `${pg.heapFetches.toLocaleString()} (Run VACUUM or PG 19 REPACK (CONCURRENTLY))`
+          : pg.heapFetches.toLocaleString(),
         highlight: pg.heapFetches > 500 ? 'warn' : 'normal',
+        category: 'actual_stats'
+      });
+    }
+    if ((pg.walRecords ?? 0) > 0 || (pg.walBytes ?? 0) > 0) {
+      const walKb = ((pg.walBytes ?? 0) / 1024).toFixed(1);
+      items.push({
+        name: 'WAL Write Amplification (EXPLAIN WAL)',
+        value: `${(pg.walRecords ?? 0).toLocaleString()} records, ${(pg.walFpi ?? 0).toLocaleString()} FPIs, ${walKb} KB`,
+        highlight: (pg.walFpi ?? 0) > 100 ? 'warn' : 'normal',
         category: 'actual_stats'
       });
     }
@@ -436,6 +495,14 @@ function getPgProperties(
     items.push({
       name: 'I/O Read / Write Timing',
       value: `Read: ${(pg?.ioReadMs ?? 0).toFixed(2)} ms, Write: ${(pg?.ioWriteMs ?? 0).toFixed(2)} ms`,
+      category: 'actual_timing'
+    });
+  }
+  if ((pg?.sharedIoReadMs ?? 0) > 0 || (pg?.tempIoReadMs ?? 0) > 0 || (pg?.tempIoWriteMs ?? 0) > 0) {
+    items.push({
+      name: 'PG 17–19 Granular I/O Timings',
+      value: `Shared R/W: ${(pg?.sharedIoReadMs ?? 0).toFixed(2)}/${(pg?.sharedIoWriteMs ?? 0).toFixed(2)} ms • Temp R/W: ${(pg?.tempIoReadMs ?? 0).toFixed(2)}/${(pg?.tempIoWriteMs ?? 0).toFixed(2)} ms`,
+      highlight: (pg?.tempIoReadMs ?? 0) > 10 || (pg?.tempIoWriteMs ?? 0) > 10 ? 'warn' : 'normal',
       category: 'actual_timing'
     });
   }
@@ -513,6 +580,33 @@ function getPgProperties(
     items.push({
       name: 'JIT Compilation',
       value: `Functions: ${stmtPg.jit.functions ?? 0}, Inlining: ${(stmtPg.jit.inliningMs ?? 0).toFixed(1)} ms, Optimization: ${(stmtPg.jit.optimizationMs ?? 0).toFixed(1)} ms, Emission: ${(stmtPg.jit.emissionMs ?? 0).toFixed(1)} ms`,
+      category: 'statement'
+    });
+  }
+  if (stmtPg?.planningMemory) {
+    const usedKb = ((stmtPg.planningMemory.usedBytes ?? 0) / 1024).toFixed(1);
+    const allocKb = ((stmtPg.planningMemory.allocatedBytes ?? 0) / 1024).toFixed(1);
+    items.push({
+      name: 'Planner Memory (PG 17+ EXPLAIN MEMORY)',
+      value: `Used: ${usedKb} KB, Allocated: ${allocKb} KB`,
+      category: 'statement'
+    });
+  }
+  if (stmtPg?.serialization) {
+    const volKb = ((stmtPg.serialization.outputVolumeBytes ?? 0) / 1024).toFixed(1);
+    items.push({
+      name: 'Output Serialization (PG 17+ EXPLAIN SERIALIZE)',
+      value: `${(stmtPg.serialization.timeMs ?? 0).toFixed(3)} ms (${volKb} KB, format: ${stmtPg.serialization.format || 'text'})`,
+      highlight: (stmtPg.serialization.timeMs ?? 0) > 50 ? 'warn' : 'normal',
+      category: 'statement'
+    });
+  }
+  if (stmtPg?.totalWal) {
+    const walMb = (stmtPg.totalWal.bytes / (1024 * 1024)).toFixed(2);
+    items.push({
+      name: 'Total Statement WAL (EXPLAIN WAL)',
+      value: `${stmtPg.totalWal.records.toLocaleString()} records, ${stmtPg.totalWal.fpi.toLocaleString()} FPIs (${walMb} MB)`,
+      highlight: stmtPg.totalWal.fpi > 200 ? 'warn' : 'normal',
       category: 'statement'
     });
   }

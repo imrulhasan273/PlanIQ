@@ -5,8 +5,8 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat&logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6+-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org/)
 [![Wails](https://img.shields.io/badge/Wails-v2-DF105A?style=flat&logo=wails)](https://wails.io/)
-[![SQL Server](https://img.shields.io/badge/SQL%20Server-2016%20--%202022-CC292B?style=flat&logo=microsoftsqlserver)](https://www.microsoft.com/sql-server)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-EXPLAIN%20JSON-336791?style=flat&logo=postgresql)](https://www.postgresql.org/)
+[![SQL Server](https://img.shields.io/badge/SQL%20Server-2016%20--%202025-CC292B?style=flat&logo=microsoftsqlserver)](https://www.microsoft.com/sql-server)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12%20--%2019%20(EXPLAIN%20JSON)-336791?style=flat&logo=postgresql)](https://www.postgresql.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **PlanIQ** is a high-performance execution plan visualizer, root-cause diagnostic engine, and AI-powered query tuning copilot for **Microsoft SQL Server** (`.sqlplan` / `.xml` / `.xdl`) and **PostgreSQL** (`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` `.json`).
@@ -25,9 +25,9 @@ While traditional tools like SQL Server Management Studio (SSMS) simply render r
   - **Non-Sargable Implicit Conversions:** Identifies `CONVERT_IMPLICIT` warnings on join/filter predicates preventing index seeks.
   - **Scalar UDF (RBAR) Penalty:** Highlights row-by-agonizing-row scalar functions executing in relational pipelines.
   - **Parallelism Skew:** Identifies thread workload imbalances and single-threaded MaxDOP bottlenecks.
-- **🔒 Deadlock Graph Viewer (.xdl):** 100% offline interactive SQL Server deadlock visualizer. Highlights directed wait-for cycles, marks killed victim SPIDs, parses full `inputbuf` queries, displays execution call stacks, and prescribes T-SQL error 1205 retry patterns.
+- **🔒 Deadlock Graph Viewer (.xdl):** 100% offline interactive SQL Server deadlock visualizer (including **SQL Server 2025 Optimized Locking** `<tidlock>` / `XACT` transaction locks). Highlights directed wait-for cycles, marks killed victim SPIDs, parses full `inputbuf` queries, displays execution call stacks, and prescribes T-SQL error 1205 retry patterns.
 - **🎛️ Parameter Sniffing & Runtime Variable Inspector:** Detects divergence between `<ParameterList>` Compiled (cached) and Runtime (executed) values, evaluates cardinality estimate skew, and provides 4 ready-to-copy T-SQL remedies (`OPTION (RECOMPILE)`, `OPTIMIZE FOR UNKNOWN`, value pinning, local variable masking).
-- **⚡ Adaptive Joins & Batch Mode on Rowstore (SQL 2019/2022 IQP):** Analyzes dynamic join inflection thresholds, shows whether the engine chose Nested Loops or Hash Match at runtime, and tracks CPU vectorization gains on rowstore tables.
+- **⚡ Intelligent Query Processing (SQL 2017–2025 IQP):** Analyzes Adaptive Joins, Batch Mode on Rowstore, Memory Grant Feedback, DOP Feedback, and **SQL Server 2025 (Compat Level 170)** features—**Optional Parameter Plan Optimization (OPPO)**, **CE Feedback for Expressions**, **DiskANN Vector Search** (`VECTOR_SEARCH` vs. `VECTOR_DISTANCE`), and **RegEx / JSON Index** sargability.
 - **📸 High-Res Export (PDF / PNG / SVG & Offline HTML Sharing):** Export plan trees to High-Res PNG or vector SVG with a single click, or generate a standalone, self-contained interactive HTML diagnostic report that opens in any browser on air-gapped corporate networks without dependencies.
 - **⏱️ Batch Flow & TempDB Lifecycle Visualizer:** Sequential statement execution waterfall, cumulative subtree cost progression tracker, `#temp` table lifecycle matrix (Creation &rarr; Ingestion &rarr; Reads &rarr; Indexes &rarr; Drops), and TempDB worktable disk spill alerts.
 - **⏳ Wait Statistics & Resource Bottlenecks Deep-Dive:** Comprehensive physical wait event analyzer (Disk I/O, Parallelism, Memory Grants, Schedulers) with category distribution bars, ranked wait events, operator correlations, and built-in 12-wait DBA reference handbook.
@@ -35,7 +35,7 @@ While traditional tools like SQL Server Management Studio (SSMS) simply render r
 - **🧩 Smart Missing Index Consolidator:** Deduplicates and merges overlapping equality, inequality, and include columns into clean composite covering indexes (e.g. consolidates 13 raw hints down to 5 covering indexes).
 - **🤖 Deterministic DBA Engine & AI Query Rewriter:** Generates production-ready T-SQL rewrites (pre-creating `#temp` tables with clustered PKs, sargable date bounds) with an interactive **Monaco Side-by-Side Diff Viewer**.
 - **⚖️ Side-by-Side Plan Comparator:** Compare baseline and optimized `.sqlplan` or PostgreSQL `.json` files with cost reduction diffs and missing index resolution metrics.
-- **🐘 PostgreSQL EXPLAIN JSON Support:** Dedicated engine switcher dropdown with interactive tree visualization, shared/temp buffer hit/read/spill block metrics, parallel worker planned vs. launched tracking, Index-Only Scan heap fetch analysis, rows removed by filter alerts, and A/B plan comparison.
+- **🐘 PostgreSQL EXPLAIN JSON Support (PostgreSQL 12 – 19):** Dedicated engine switcher dropdown with interactive tree visualization, shared/temp buffer hit/read/spill block metrics, parallel worker planned vs. launched tracking, **PG 17–19 `EXPLAIN (SERIALIZE, MEMORY, WAL)`**, **PG 18 B-Tree Index Skip Scan (`Index Searches`)**, granular Asynchronous I/O (`Shared`/`Local`/`Temp`) timings, `Memoize` cache hit/eviction analysis, `pgvector` HNSW/IVFFlat detection, Index-Only Scan heap fetch & **PostgreSQL 19 `REPACK (CONCURRENTLY)`** online bloat remediation, and A/B plan comparison.
 - **📡 Live Radar & Query Store Studio (Optional SQL Server Mode):** Read-only DPA-style wait trend charts, active/blocking session trees, buffer pool & PLE monitoring, TempDB usage inspection, Query Store top-query analysis, and local SQLite connection profile storage (`planiq_config.db`).
 - **🔒 Offline-First & Private by Design:** All plan/deadlock parsing, root-cause diagnostics, deterministic tuning rules, and HTML/PNG/SVG report exports run locally with zero database connection required; Live Radar and cloud LLM providers are strictly opt-in.
 

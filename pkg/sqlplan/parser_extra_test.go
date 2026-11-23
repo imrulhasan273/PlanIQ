@@ -263,3 +263,67 @@ func TestHardwareMetricsAndClassification(t *testing.T) {
 	}
 	t.Logf("Statement #1 Classification: %s (%s)", stmt.ExecutionClassification, stmt.ExecutionClassificationReason)
 }
+
+func TestSQLServer2025Features(t *testing.T) {
+	xmlPlan := `<?xml version="1.0" encoding="utf-8"?>
+<ShowPlanXML xmlns="http://schemas.microsoft.com/sqlserver/2004/07/showplan" Version="1.5" Build="17.0.1000.7">
+ <BatchSequence><Batch><Statements>
+  <StmtSimple StatementId="1" StatementText="SELECT TOP 10 o.OrderID FROM dbo.Orders o WHERE (@Region IS NULL OR o.Region = @Region) AND REGEXP_LIKE(o.Code, '^ORD-[0-9]+') ORDER BY VECTOR_DISTANCE('cosine', o.Embedding, @q)" StatementType="SELECT" StatementSubTreeCost="25" StatementEstRows="10" StatementOptmLevel="FULL" CardinalityEstimationModelVersion="170">
+   <QueryPlan CachedPlanSize="64" CardinalityFeedback="Yes" QueryVariantID="2">
+    <OptionalParameter />
+    <WaitStats>
+     <Wait WaitType="LCK_M_S_XACT_MODIFY" WaitTimeMs="120" WaitCount="4" />
+    </WaitStats>
+    <RelOp NodeId="0" PhysicalOp="Index Scan" LogicalOp="Index Scan" EstimateRows="10" EstimatedTotalSubtreeCost="25" TableCardinality="200000">
+     <IndexScan>
+      <Object Database="[SalesDB]" Schema="[dbo]" Table="[Orders]" Index="[IX_Orders_Region]" IndexKind="NonClustered" />
+      <Predicate>
+       <ScalarOperator ScalarString="REGEXP_LIKE([o].[Code],N'^ORD-[0-9]+')=(1) AND VECTOR_DISTANCE('cosine',[o].[Embedding],[@q])&lt;(0.5)" />
+      </Predicate>
+     </IndexScan>
+    </RelOp>
+   </QueryPlan>
+  </StmtSimple>
+ </Statements></Batch></BatchSequence>
+</ShowPlanXML>`
+
+	plan, err := ParseXML(xmlPlan, "sql2025.sqlplan")
+	if err != nil {
+		t.Fatalf("ParseXML failed: %v", err)
+	}
+	if plan.Diagnostics == nil {
+		t.Fatal("expected Diagnostics")
+	}
+	ce := plan.Diagnostics.CardinalityEngine
+	if ce == nil || ce.ModelVersion != "170" || ce.IsLegacy {
+		t.Fatalf("expected Modern CE 170, got %+v", ce)
+	}
+	if len(plan.Diagnostics.NonSargable) != 1 {
+		t.Fatalf("expected 1 non-sargable finding, got %d", len(plan.Diagnostics.NonSargable))
+	}
+	funcs := strings.Join(plan.Diagnostics.NonSargable[0].Functions, ",")
+	if !strings.Contains(funcs, "REGEXP_LIKE") || !strings.Contains(funcs, "VECTOR_DISTANCE") {
+		t.Errorf("expected REGEXP_LIKE and VECTOR_DISTANCE in non-sargable functions, got %q", funcs)
+	}
+
+	if plan.Diagnostics.Adaptive == nil {
+		t.Fatal("expected Adaptive IQP diagnostics")
+	}
+	statusByFeature := make(map[string]string)
+	for _, f := range plan.Diagnostics.Adaptive.Features {
+		statusByFeature[f.Name] = f.Status
+	}
+	if statusByFeature["Optional Parameter Plan Optimization (OPPO)"] != "Active" {
+		t.Errorf("expected OPPO Active, got %q", statusByFeature["Optional Parameter Plan Optimization (OPPO)"])
+	}
+	if statusByFeature["CE Feedback for Expressions"] != "Active" {
+		t.Errorf("expected CE Feedback Active, got %q", statusByFeature["CE Feedback for Expressions"])
+	}
+	if statusByFeature["Vector Index & DiskANN Search"] != "Eligible" {
+		t.Errorf("expected Vector Index & DiskANN Search Eligible for exact VECTOR_DISTANCE, got %q", statusByFeature["Vector Index & DiskANN Search"])
+	}
+
+	if len(plan.WaitStats) != 1 || plan.WaitStats[0].Category != "Lock Contention" || !strings.Contains(plan.WaitStats[0].Description, "Optimized Locking") {
+		t.Errorf("unexpected SQL 2025 Optimized Locking wait categorization: %+v", plan.WaitStats)
+	}
+}

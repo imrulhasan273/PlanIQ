@@ -337,6 +337,34 @@ const WAIT_REFERENCE_LIBRARY: WaitReferenceItem[] = [
       'Review memory grant requirements and reduce oversized row estimates.',
       'Check server Max Server Memory setting and page life expectancy.'
     ]
+  },
+  {
+    waitType: 'LCK_M_S_XACT_MODIFY',
+    category: 'Lock Contention',
+    severity: 'HIGH',
+    shortDesc: 'Waiting on a Transaction ID (TID / XACT) lock under SQL Server 2025 Optimized Locking.',
+    internalMechanics:
+      'With Optimized Locking enabled (ADR + RCSI), modifying sessions stamp rows with a Transaction ID and hold a single XACT lock rather than thousands of row/key locks. Concurrent writers touching the same modified rows wait on LCK_M_S_XACT_MODIFY until the owning transaction commits.',
+    correlatedOperators: 'Clustered Index Update, Table Update, Clustered Index Delete, Merge.',
+    dbaPrescription: [
+      'Keep write transactions short and commit promptly to release TID/XACT locks.',
+      'Order batch updates consistently by primary key across concurrent workers.',
+      'Avoid explicit TABLOCK or HOLDLOCK hints that disable Lock After Qualification (LAQ).'
+    ]
+  },
+  {
+    waitType: 'RESOURCE_SEMAPHORE_QUERY_COMPILE',
+    category: 'Memory / Grant',
+    severity: 'HIGH',
+    shortDesc: 'Query compilation throttled waiting for optimizer compile memory gateway.',
+    internalMechanics:
+      'Occurs during compilation storms when many concurrent ad-hoc or dynamic SQL queries (e.g., unparameterized or frequent sp_executesql calls) request optimizer compile memory simultaneously.',
+    correlatedOperators: 'High CompileMemoryKB / CompileTimeMS, ad-hoc SQL batches.',
+    dbaPrescription: [
+      'On SQL Server 2025, enable ALTER DATABASE SCOPED CONFIGURATION SET OPTIMIZED_SP_EXECUTESQL = ON to serialize duplicate dynamic SQL compilations.',
+      'Parameterize queries and avoid gratuitous OPTION (RECOMPILE) on high-frequency OLTP calls.',
+      'Enable Forced Parameterization if ad-hoc literal churn dominates the plan cache.'
+    ]
   }
 ];
 
