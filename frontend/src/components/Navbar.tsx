@@ -44,8 +44,6 @@ interface NavbarProps {
   onResetPlan: () => void;
   onOpenFile: () => void;
   onOpenPasteModal: () => void;
-  onLoadSample?: () => void;
-  onLoadPgSample?: () => void;
   onOpenSettings: () => void;
   onOpenLiveModal: () => void;
   liveStatus: ConnectionStatus | null;
@@ -65,8 +63,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onResetPlan,
   onOpenFile,
   onOpenPasteModal,
-  onLoadSample,
-  onLoadPgSample,
   onOpenSettings,
   onOpenLiveModal,
   liveStatus,
@@ -619,36 +615,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <RotateCcw size={12} color="#f59e0b" />
                       <span>Reset to First (Start Screen)</span>
                     </button>
-
-                    {onLoadSample && (
-                      <button
-                        type="button"
-                        className="nav-engine-action-btn"
-                        onClick={() => {
-                          setIsEngineDropdownOpen(false);
-                          onLoadSample();
-                        }}
-                        title="Load SQL Server Sample Plan"
-                      >
-                        <Sparkles size={12} color="#818cf8" />
-                        <span>Load SQL Server Sample</span>
-                      </button>
-                    )}
-
-                    {onLoadPgSample && (
-                      <button
-                        type="button"
-                        className="nav-engine-action-btn"
-                        onClick={() => {
-                          setIsEngineDropdownOpen(false);
-                          onLoadPgSample();
-                        }}
-                        title="Load PostgreSQL Sample Plan"
-                      >
-                        <Sparkles size={12} color="#38bdf8" />
-                        <span>Load PostgreSQL Sample</span>
-                      </button>
-                    )}
                   </div>
                 </div>
               )}

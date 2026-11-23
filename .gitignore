@@ -3,21 +3,19 @@ build/bin
 *.exe
 dist
 frontend/dist
+frontend/.test-dist
+frontend/package.json.md5
 
 # Dependencies
 node_modules
 frontend/node_modules
 
-# Private / internal / local-only directories (excluded from GitHub)
-reports/
-docs/
-sample_plans/
-scratch/
-
-# Local databases, logs & OS metadata
+# Local databases, environment files, logs & OS metadata
 *.db
 *.db-wal
 *.db-shm
 *.log
+.env
+.env.*
 .DS_Store
 Thumbs.db

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"sqlplan-advisor/pkg/sqlplan"
+	"github.com/imrulhasan273/PlanIQ/pkg/sqlplan"
 )
 
 func TestGenerateAdvice_OfflineDeterministicEngine(t *testing.T) {

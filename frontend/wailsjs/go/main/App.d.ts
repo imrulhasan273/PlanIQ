@@ -70,8 +70,6 @@ export function GetRadarPagePollingConfig():Promise<Record<string, boolean>>;
 
 export function GetSavedDBConnections():Promise<Array<configdb.DBConnectionProfile>>;
 
-export function LoadSamplePlan():Promise<sqlplan.PlanAnalysis>;
-
 export function OpenFileAndParse():Promise<sqlplan.PlanAnalysis>;
 
 export function OpenFilePicker():Promise<main.SelectedPlanFile>;

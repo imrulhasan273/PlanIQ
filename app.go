@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-	"sqlplan-advisor/pkg/advisor"
-	"sqlplan-advisor/pkg/configdb"
-	"sqlplan-advisor/pkg/livedb"
-	"sqlplan-advisor/pkg/sqlplan"
+	"github.com/imrulhasan273/PlanIQ/pkg/advisor"
+	"github.com/imrulhasan273/PlanIQ/pkg/configdb"
+	"github.com/imrulhasan273/PlanIQ/pkg/livedb"
+	"github.com/imrulhasan273/PlanIQ/pkg/sqlplan"
 )
 
 // App struct
@@ -40,11 +40,6 @@ func (a *App) ParsePlan(xmlContent string, planName string) (*sqlplan.PlanAnalys
 		planName = "Execution Plan"
 	}
 	return sqlplan.ParseXML(xmlContent, planName)
-}
-
-// LoadSamplePlan loads the embedded synthetic sample execution plan
-func (a *App) LoadSamplePlan() (*sqlplan.PlanAnalysis, error) {
-	return sqlplan.ParseBytes(sqlplan.DefaultSamplePlanXML, sqlplan.DefaultSamplePlanName)
 }
 
 // OpenFileAndParse opens a native file dialog, parses the plan directly on disk,

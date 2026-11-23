@@ -272,7 +272,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                     Connected to {status.serverName}
                   </div>
                   <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-                    Database: <strong style={{ color: '#cbd5e1' }}>{status.databaseName}</strong> • Latency: {status.latencyMs}ms {status.isDemo ? '(Demo Mode)' : ''}
+                    Database: <strong style={{ color: '#cbd5e1' }}>{status.databaseName}</strong> • Latency: {status.latencyMs}ms
                   </div>
                 </div>
               </div>

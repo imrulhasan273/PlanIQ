@@ -1,5 +1,8 @@
 import { PlanAnalysis } from '../types/plan';
 import { toPng, toSvg } from 'html-to-image';
+import { escapeHtml } from './htmlEscape';
+
+export { escapeHtml };
 
 /**
  * Export any HTML element (like the Execution Plan tree canvas) to a High-Resolution PNG image
@@ -35,22 +38,23 @@ export async function exportElementToSvg(element: HTMLElement, filename: string)
 export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
   const verdict = plan.executiveVerdict;
   const diag = plan.diagnostics;
-  const now = new Date().toLocaleString();
+  const now = escapeHtml(new Date().toLocaleString());
+  const safePlanName = escapeHtml(plan.planName);
 
   const missingIndexesHtml = plan.allMissingIndexes
     .map(
       (idx, i) => `
     <div class="card index-card">
       <div class="card-header">
-        <span class="badge badge-success">#${i + 1} - ${idx.table}</span>
+        <span class="badge badge-success">#${i + 1} - ${escapeHtml(idx.table)}</span>
         <span class="impact-badge">Impact: ${idx.impact.toFixed(1)}%</span>
       </div>
       <p style="margin: 6px 0; color: #94a3b8; font-size: 13px;">
-        <strong>Equality:</strong> ${idx.equalityColumns.join(', ') || 'None'} | 
-        <strong>Inequality:</strong> ${idx.inequalityColumns.join(', ') || 'None'} | 
-        <strong>Include:</strong> ${idx.includeColumns.join(', ') || 'None'}
+        <strong>Equality:</strong> ${escapeHtml(idx.equalityColumns.join(', ') || 'None')} | 
+        <strong>Inequality:</strong> ${escapeHtml(idx.inequalityColumns.join(', ') || 'None')} | 
+        <strong>Include:</strong> ${escapeHtml(idx.includeColumns.join(', ') || 'None')}
       </p>
-      <pre><code>${idx.suggestedDdl}</code></pre>
+      <pre><code>${escapeHtml(idx.suggestedDdl)}</code></pre>
     </div>
   `
     )
@@ -58,18 +62,21 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
 
   const antiPatternsHtml = plan.antiPatterns
     .map(
-      (ap) => `
-    <div class="card ap-card severity-${ap.severity}">
+      (ap) => {
+        const sevClass = ap.severity.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+        return `
+    <div class="card ap-card severity-${sevClass}">
       <div class="card-header">
-        <span class="badge badge-${ap.severity.toLowerCase()}">${ap.severity.toUpperCase()}</span>
-        <strong style="font-size: 14px;">${ap.title} (${(ap.affectedStatements || []).join(', ')})</strong>
+        <span class="badge badge-${sevClass}">${escapeHtml(ap.severity.toUpperCase())}</span>
+        <strong style="font-size: 14px;">${escapeHtml(ap.title)} (${escapeHtml((ap.affectedStatements || []).join(', '))})</strong>
       </div>
-      <p style="margin: 8px 0; color: #e2e8f0; font-size: 13px;">${ap.description}</p>
+      <p style="margin: 8px 0; color: #e2e8f0; font-size: 13px;">${escapeHtml(ap.description)}</p>
       <div style="background: rgba(56, 189, 248, 0.1); border-left: 3px solid #38bdf8; padding: 8px 12px; border-radius: 4px; font-size: 13px; color: #bae6fd;">
-        <strong>Fix:</strong> ${ap.recommendation}
+        <strong>Fix:</strong> ${escapeHtml(ap.recommendation)}
       </div>
     </div>
-  `
+  `;
+      }
     )
     .join('');
 
@@ -77,8 +84,8 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
     .map(
       (ws) => `
     <tr>
-      <td><code>${ws.waitType}</code></td>
-      <td><span class="badge badge-info">${ws.category}</span></td>
+      <td><code>${escapeHtml(ws.waitType)}</code></td>
+      <td><span class="badge badge-info">${escapeHtml(ws.category)}</span></td>
       <td style="text-align: right; font-weight: 600;">${ws.waitTimeMs.toLocaleString()} ms</td>
       <td style="text-align: right;">${ws.waitCount.toLocaleString()}</td>
     </tr>
@@ -108,11 +115,11 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
             .map(
               (p) => `
             <tr>
-              <td><code>${p.name}</code></td>
-              <td><code>${p.dataType}</code></td>
-              <td><code>${p.compiledValue}</code></td>
+              <td><code>${escapeHtml(p.name)}</code></td>
+              <td><code>${escapeHtml(p.dataType)}</code></td>
+              <td><code>${escapeHtml(p.compiledValue)}</code></td>
               <td style="color: ${p.mismatch ? '#f43f5e' : '#34d399'}; font-weight: 700;">
-                <code>${p.hasRuntime ? p.runtimeValue : 'Not recorded'}</code>
+                <code>${p.hasRuntime ? escapeHtml(p.runtimeValue) : 'Not recorded'}</code>
               </td>
               <td>
                 <span class="badge ${p.mismatch ? 'badge-critical' : 'badge-success'}">
@@ -151,11 +158,11 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
             .map(
               (aj) => `
             <tr>
-              <td><strong>#${aj.nodeId}</strong></td>
-              <td>#${aj.statementId}</td>
+              <td><strong>#${escapeHtml(aj.nodeId)}</strong></td>
+              <td>#${escapeHtml(aj.statementId)}</td>
               <td style="color: #fbbf24; font-weight: 700;">${aj.hasThreshold ? aj.thresholdRows.toLocaleString() : 'Dynamic'}</td>
               <td><strong>${aj.hasActualRows ? aj.actualRows.toLocaleString() : 'N/A'}</strong></td>
-              <td><span class="badge badge-info">${aj.actualJoinType || 'Adaptive'}</span></td>
+              <td><span class="badge badge-info">${escapeHtml(aj.actualJoinType || 'Adaptive')}</span></td>
             </tr>
           `
             )
@@ -170,13 +177,13 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
     .map(
       (s) => `
     <tr>
-      <td style="font-weight: 600;">#${s.statementId}</td>
+      <td style="font-weight: 600;">#${escapeHtml(s.statementId)}</td>
       <td style="text-align: right; font-weight: 700; color: ${s.statementSubTreeCost > 10 ? '#f43f5e' : '#38bdf8'};">
         ${s.statementSubTreeCost.toFixed(2)}
       </td>
       <td style="text-align: right;">${s.costPercentage.toFixed(1)}%</td>
       <td style="font-size: 12px; color: #94a3b8; max-width: 450px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-        ${s.statementText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+        ${escapeHtml(s.statementText)}
       </td>
     </tr>
   `
@@ -187,7 +194,7 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>PlanIQ Diagnostic Report - ${plan.planName}</title>
+  <title>PlanIQ Diagnostic Report - ${safePlanName}</title>
   <style>
     :root {
       --bg: #090d16;
@@ -314,11 +321,11 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
   <div class="header">
     <div class="title-row">
       <h1>PlanIQ Executive Diagnostic Report</h1>
-      <div class="subtitle">Execution Plan Analysis & AI Root Cause Audit • <code>${plan.planName}</code></div>
+      <div class="subtitle">Execution Plan Analysis & AI Root Cause Audit • <code>${safePlanName}</code></div>
     </div>
     <div class="meta-box">
       <div>Generated: <strong>${now}</strong></div>
-      <div>Engine: <strong>PlanIQ v2.0 (${plan.engine === 'postgresql' ? 'PostgreSQL' : 'SQL Server'})</strong></div>
+      <div>Engine: <strong>PlanIQ (${plan.engine === 'postgresql' ? 'PostgreSQL' : 'SQL Server'})</strong></div>
       <button class="btn-print" onclick="window.print()">Print / Save as PDF</button>
     </div>
   </div>
@@ -328,10 +335,10 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
       ? `
   <div class="verdict-banner">
     <div class="verdict-tag">⚡ 10-Second Executive Root Cause Verdict</div>
-    <div class="verdict-headline">${verdict.headline}</div>
-    <div class="verdict-summary">${verdict.summary}</div>
+    <div class="verdict-headline">${escapeHtml(verdict.headline)}</div>
+    <div class="verdict-summary">${escapeHtml(verdict.summary)}</div>
     <div class="verdict-fix">
-      <strong>Actionable Resolution:</strong> ${verdict.actionableFix}
+      <strong>Actionable Resolution:</strong> ${escapeHtml(verdict.actionableFix)}
     </div>
   </div>
   `
@@ -353,7 +360,7 @@ export function exportDiagnosticReportHTML(plan: PlanAnalysis): void {
     </div>
     <div class="metric-card">
       <div class="metric-label">Health Score</div>
-      <div class="metric-val" style="color: var(--amber);">${diag ? diag.healthScore + '/100 [' + diag.scoreGrade + ']' : 'N/A'}</div>
+      <div class="metric-val" style="color: var(--amber);">${diag ? diag.healthScore + '/100 [' + escapeHtml(diag.scoreGrade) + ']' : 'N/A'}</div>
     </div>
   </div>
 

@@ -22,20 +22,21 @@ Thank you for your interest in improving **PlanIQ**!
   ```
 
 ### Running Checks Before Opening a PR
-1. Backend checks & unit tests:
+1. Backend checks & race-enabled unit tests:
    ```bash
-   go vet ./...
-   go test -v ./...
+   go vet ./pkg/...
+   go test -race -v ./pkg/...
    ```
-2. Frontend type-check & production bundle:
+2. Frontend unit tests, type-check & production bundle:
    ```bash
    cd frontend
+   npm test
    npm run build
    ```
 
-## Privacy & Sample Data Rules (Strictly Enforced)
+## Privacy & Data Hygiene Rules (Strictly Enforced)
 - **NEVER commit real production `.sqlplan`, `.xml`, `.xdl`, or `.json` files**, internal database schemas, hostnames, connection strings, or API keys.
-- Use minimal synthetic plans (such as `pkg/sqlplan/sample_plan.sqlplan` and `frontend/src/sample_pg_plan.json`) when adding tests or examples.
+- Use inline minimal synthetic test fixtures inside unit tests (`*_test.go`) when adding tests or examples.
 
 ## Pull Request Guidelines
 - Keep changes focused and modular.

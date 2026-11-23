@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { Copy, Check, AlertTriangle, CheckCircle2, Info, FileText } from 'lucide-react';
 
 /* ============================================================================
-   Content below is traced to the user's PDF "SQL Server: Performance Improvements"
-   (23 pages). Each correction quotes the PDF and states the engine reality.
+   SQL Server Tuning Myths vs. Modern Engine Reality
+   Each entry contrasts a common legacy claim with modern SQL Server behavior.
    ============================================================================ */
 
 export interface DocCorrection {
@@ -97,7 +97,7 @@ export const CORRECTIONS: DocCorrection[] = [
     topic: 'IN evaluates the whole list, EXISTS short-circuits',
     quote: 'the IN and NOT IN operators may need to evaluate the entire list of values before returning the result.',
     reality:
-      'IN (subquery) and EXISTS are both planned as semi-joins and usually give identical plans. The real difference is NULL semantics: NOT IN returns no rows if the subquery produces even one NULL. Prefer NOT EXISTS for anti-joins. The EXISTS vs COUNT(*) advice in your PDF is correct.'
+      'IN (subquery) and EXISTS are both planned as semi-joins and usually give identical plans. The real difference is NULL semantics: NOT IN returns no rows if the subquery produces even one NULL. Prefer NOT EXISTS for anti-joins, and prefer EXISTS over COUNT(*) for existence checks.'
   },
   {
     id: 'locking',
@@ -124,7 +124,7 @@ export const CORRECTIONS: DocCorrection[] = [
     topic: 'CXPACKET includes the coordinator wait',
     quote: 'Parallel operations are taking place … 1 Co-ordinate threads and 4 workers threads. In that case only co ordinate threads is the root cause.',
     reality:
-      'Your analysis of which thread to inspect is correct. Since SQL Server 2016 SP2 and 2017 CU3, the benign consumer-side wait was split out into CXCONSUMER, so CXPACKET is a stronger skew signal than before. The advice not to set server MAXDOP to 1 stands.'
+      'Inspecting which thread is stalled is the right approach. Since SQL Server 2016 SP2 and 2017 CU3, the benign consumer-side wait was split out into CXCONSUMER, so CXPACKET is a stronger skew signal than before. Avoid setting server-wide MAXDOP to 1.'
   },
   {
     id: 'readunc',
@@ -133,7 +133,7 @@ export const CORRECTIONS: DocCorrection[] = [
     topic: 'Read Uncommitted and locking hints to stop blocking',
     quote: 'Different isolation level (Read Uncommited); Locking hints',
     reality:
-      'READ UNCOMMITTED (NOLOCK) avoids blocking but can return dirty, duplicated or missing rows and can fail mid-scan. Your own first suggestion, snapshot isolation (readers do not block writers), is the right fix. Prefer RCSI. Treat NOLOCK as a last resort for approximate reporting only.'
+      'READ UNCOMMITTED (NOLOCK) avoids blocking but can return dirty, duplicated or missing rows and can fail mid-scan. Snapshot isolation (RCSI — readers do not block writers) is the right fix. Treat NOLOCK as a last resort for approximate reporting only.'
   },
   {
     id: 'raid6',
@@ -142,7 +142,7 @@ export const CORRECTIONS: DocCorrection[] = [
     topic: 'RAID 6 divisor is (disks − 2)',
     quote: 'RAID 6: I/Os per disk = (Reads + 6 × Writes) / (Number of disks in the array − 2) … = 3300 / 6 = 550',
     reality:
-      'Parity is spread across all disks, so back-end I/O is divided by all N disks, not N−2. The correct figure for that example is (300 + 3000) / 8 = 412.5 IOPS per disk. Your RAID 0, 1, 5 and 10 formulas and worked examples are correct. The calculator on the Process page shows both numbers.'
+      'Parity is spread across all disks, so back-end I/O is divided by all N disks, not N−2. For 300 reads + 500 writes across 8 disks, the correct figure is (300 + 3000) / 8 = 412.5 IOPS per disk. RAID 0, 1, 5, and 10 formulas follow the same per-disk model.'
   },
   {
     id: 'iscsi',
@@ -170,7 +170,7 @@ export const CORRECTIONS: DocCorrection[] = [
     quote:
       'IO_COMPLETION … can occur when reading or writing data from disk, network communication … LOGMGR … writing or flushing of transaction log … PAGEIOLATCH … waiting for a latch on a data page to be released',
     reality:
-      'Network waits are ASYNC_NETWORK_IO, not IO_COMPLETION. LOGMGR is mostly the log manager waiting for outstanding log I/O while closing a database. Log flush waits are WRITELOG. PAGEIOLATCH means a page is being read from disk into the buffer pool while its latch is held (your later section defines it correctly).'
+      'Network waits are ASYNC_NETWORK_IO, not IO_COMPLETION. LOGMGR is mostly the log manager waiting for outstanding log I/O while closing a database. Log flush waits are WRITELOG. PAGEIOLATCH means a page is being read from disk into the buffer pool while its latch is held.'
   },
   {
     id: 'affinity',
@@ -188,7 +188,7 @@ export const CORRECTIONS: DocCorrection[] = [
     topic: 'Database Mirroring and SQL Server Profiler',
     quote: 'Database Mirroring or Always on Availability Groups … Use SQL Server Profiler or Extended Events',
     reality:
-      'Database Mirroring has been deprecated since SQL Server 2012, so use Always On Availability Groups. SQL Server Profiler and SQL Trace are deprecated, so use Extended Events (the lighter replacement you also mention).'
+      'Database Mirroring has been deprecated since SQL Server 2012, so use Always On Availability Groups. SQL Server Profiler and SQL Trace are deprecated, so use Extended Events instead.'
   },
   {
     id: 'indexmaint',
@@ -206,16 +206,16 @@ export const CORRECTIONS: DocCorrection[] = [
     topic: 'The 31/32 outstanding log write limit',
     quote: 'If constantly 31/32 then the internal limit has been reached for outstanding transaction log writes for a single database',
     reality:
-      'This limit was 32 in older builds. It was raised to 112 per database on 64-bit starting with SQL Server 2012. Check your version before using 32 as the threshold. The rest of that section (do not add log files, batch commits, remove unused indexes) is correct.'
+      'This limit was 32 in older builds. It was raised to 112 per database on 64-bit starting with SQL Server 2012. Check your SQL Server version before using 32 as the threshold; the core mitigations (do not add log files, batch commits, remove unused indexes) still apply.'
   },
   {
     id: 'pgcomp',
     area: 'Development / Compression',
     status: 'nuance',
-    topic: 'PostgreSQL pg_compression / pg_zstd',
-    quote: 'The "pg_compression" and "pg_zstd" extensions, for example, provide compression capabilities for PostgreSQL tables.',
+    topic: 'PostgreSQL table compression (TOAST)',
+    quote: 'External extensions such as "pg_compression" or "pg_zstd" are required for PostgreSQL table compression.',
     reality:
-      'I could not verify extensions with those names. PostgreSQL compresses large values through TOAST (pglz, and LZ4 from version 14). Verify this line before sharing the document. It is not SQL Server specific.'
+      'PostgreSQL compresses oversized values natively via TOAST (pglz, and LZ4 since PostgreSQL 14) without requiring third-party compression extensions.'
   }
 ];
 
@@ -307,11 +307,11 @@ export const CorrectionsGrid: React.FC = () => {
             </div>
             <div className="correction-body">
               <div className="correction-old">
-                <span className="tag-old">From your PDF</span>
+                <span className="tag-old">Common Myth / Legacy Claim</span>
                 <p>"{c.quote}"</p>
               </div>
               <div className="correction-new">
-                <span className="tag-new">Engine reality</span>
+                <span className="tag-new">Modern Engine Reality</span>
                 <p>{c.reality}</p>
               </div>
             </div>
@@ -322,7 +322,7 @@ export const CorrectionsGrid: React.FC = () => {
       <div className="verified-box">
         <div className="verified-title">
           <CheckCircle2 size={15} color="#34d399" />
-          <span>Checked and correct in your PDF ({VERIFIED_CORRECT.length})</span>
+          <span>Verified Engine Fundamentals ({VERIFIED_CORRECT.length})</span>
         </div>
         <div className="verified-chips">
           {VERIFIED_CORRECT.map((v) => (
@@ -347,13 +347,13 @@ const CoverageHeader: React.FC<{ title: string; note: string }> = ({ title, note
 );
 
 /* ---------------------------------------------------------------------------
-   Level 1 extras (PDF: NULL handling, EXISTS/IN, caching, sargable table)
+   Level 1 extras (NULL handling, EXISTS/IN, plan caching, sargability)
 --------------------------------------------------------------------------- */
 export const Level1Extras: React.FC<CopyProps> = (p) => (
   <div className="methodology-section glass-panel">
     <CoverageHeader
-      title="More from your Development Level section"
-      note="Topics in the PDF that were not on the page before: NULL handling, EXISTS vs IN, plan cache and sargability."
+      title="Development Level Deep Dive"
+      note="Essential query semantics: NULL handling, EXISTS vs IN, plan cache behavior, and sargable predicate rewrites."
     />
     <div className="cards-two-col">
       <div className="methodology-card">
@@ -362,7 +362,7 @@ export const Level1Extras: React.FC<CopyProps> = (p) => (
           <h4>Properly Handle NULL Values</h4>
         </div>
         <p className="card-desc">
-          Your PDF says to handle NULL in JOIN and WHERE (for example with COALESCE). Two traps matter most:
+          Handling NULLs safely in JOIN and WHERE predicates avoids silent bugs and full scans. Three rules matter most:
         </p>
         <ul className="bullet-feature-list">
           <li>
@@ -398,8 +398,8 @@ WHERE NOT EXISTS (SELECT 1 FROM dbo.Orders o WHERE o.CustomerID = c.CustomerID);
           <table className="sargable-table">
             <thead>
               <tr>
-                <th>Claim in PDF</th>
-                <th>Verdict</th>
+                <th>Common Claim</th>
+                <th>Engine Verdict</th>
               </tr>
             </thead>
             <tbody>
@@ -449,7 +449,7 @@ WHERE NOT EXISTS (SELECT 1 FROM dbo.Orders o WHERE o.CustomerID = c.CustomerID);
     <div className="methodology-card">
       <div className="card-top-head">
         <Info size={16} color="#38bdf8" />
-        <h4>Sargable vs Non-sargable patterns (extended from your table)</h4>
+        <h4>Sargable vs Non-Sargable Predicate Patterns</h4>
       </div>
       <div className="sargable-table-wrap">
         <table className="sargable-table">
@@ -462,7 +462,7 @@ WHERE NOT EXISTS (SELECT 1 FROM dbo.Orders o WHERE o.CustomerID = c.CustomerID);
           <tbody>
             <tr>
               <td>
-                <code>WHERE CAST(Salary AS INT) &gt; 50000</code> (your example)
+                <code>WHERE CAST(Salary AS INT) &gt; 50000</code>
               </td>
               <td>
                 <code>WHERE Salary &gt; 50000</code> (match the column's type)
@@ -508,19 +508,19 @@ WHERE NOT EXISTS (SELECT 1 FROM dbo.Orders o WHERE o.CustomerID = c.CustomerID);
 );
 
 /* ---------------------------------------------------------------------------
-   Level 2 extras (PDF: procedure checklist, preserve table, error handling)
+   Level 2 extras (procedure checklist, incremental loads, error handling)
 --------------------------------------------------------------------------- */
 export const Level2Extras: React.FC<CopyProps> = (p) => (
   <div className="methodology-section glass-panel">
     <CoverageHeader
-      title="More from your Procedural Level section"
-      note="The PDF's procedure checklist turned into a template: incremental load, TRY/CATCH, short transactions, no chatty PRINT."
+      title="Procedural Level Checklist & Template"
+      note="Production stored procedure patterns: incremental loads, TRY/CATCH, short transactions, and avoiding chatty PRINT output."
     />
     <div className="cards-two-col">
       <div className="methodology-card">
         <div className="card-top-head">
           <CheckCircle2 size={16} color="#34d399" />
-          <h4>Your procedure checklist</h4>
+          <h4>Stored Procedure Checklist</h4>
         </div>
         <ul className="bullet-feature-list">
           <li>Use parameterized procedures, which reuse plans and cut compile cost.</li>
@@ -571,7 +571,7 @@ END;`}
 );
 
 /* ---------------------------------------------------------------------------
-   Level 3 extras (PDF: the big DBA list)
+   Level 3 extras (Architecture / DBA checklist)
 --------------------------------------------------------------------------- */
 const DBA_TOPICS: { t: string; doc: string; note: string }[] = [
   { t: 'Database design and indexing', doc: 'Normalize; index WHERE/JOIN/ORDER BY columns.', note: 'Also drop duplicate and unused indexes. Every index taxes writes.' },
@@ -597,14 +597,14 @@ const DBA_TOPICS: { t: string; doc: string; note: string }[] = [
 export const Level3Extras: React.FC<CopyProps> = (p) => (
   <div className="methodology-section glass-panel">
     <CoverageHeader
-      title="Your full Architecture / DBA checklist, with modern notes"
-      note="Every DBA-level item from your PDF is listed here with the updated guidance."
+      title="Architecture & DBA Operational Checklist"
+      note="Core SQL Server administration pillars paired with modern engine best practices."
     />
     <div className="dba-topic-grid">
       {DBA_TOPICS.map((d) => (
         <div className="dba-topic" key={d.t}>
           <strong>{d.t}</strong>
-          <span className="dba-doc">PDF: {d.doc}</span>
+          <span className="dba-doc">Focus: {d.doc}</span>
           <span className="dba-note">{d.note}</span>
         </div>
       ))}
@@ -641,13 +641,13 @@ ORDER BY vlf_count DESC;
 );
 
 /* ---------------------------------------------------------------------------
-   Level 4 extras (PDF: pillars, storage, bottleneck resolutions)
+   Level 4 extras (hardware pillars, storage, bottleneck resolutions)
 --------------------------------------------------------------------------- */
 export const Level4Extras: React.FC<CopyProps> = (p) => (
   <div className="methodology-section glass-panel">
     <CoverageHeader
-      title="Your Hardware Level section, with corrections"
-      note="The four pillars, the disk-bottleneck list, and the notes on affinity, cooling and interconnects."
+      title="Hardware & Storage Bottleneck Checklist"
+      note="The four hardware resource pillars, disk-bottleneck mitigations, and per-file I/O latency diagnostics."
     />
     <div className="four-pillars">
       {[
@@ -670,7 +670,7 @@ export const Level4Extras: React.FC<CopyProps> = (p) => (
       <div className="methodology-card">
         <div className="card-top-head">
           <CheckCircle2 size={16} color="#34d399" />
-          <h4>Disk bottleneck resolutions (your 11 items)</h4>
+          <h4>Disk Bottleneck Resolutions</h4>
         </div>
         <ul className="bullet-feature-list">
           <li>Use a faster I/O path (controllers, HBAs, NVMe).</li>
@@ -705,14 +705,14 @@ ORDER BY avg_read_ms DESC;
 );
 
 /* ---------------------------------------------------------------------------
-   Finding costly queries (PDF p.14)
+   Finding costly queries (Extended Events, Query Store, DMVs)
 --------------------------------------------------------------------------- */
 export const CostlyQueriesSection: React.FC<CopyProps> = (p) => {
   const [tab, setTab] = useState<'xe' | 'qs' | 'dmv'>('xe');
   return (
     <div className="methodology-section glass-panel">
       <CoverageHeader
-        title="Finding Costly Queries: three methods from your PDF"
+        title="Finding Costly Queries: Three Production Methods"
         note="Extended Events (rpc_completed), Query Store, and sys.dm_exec_procedure_stats, with ready scripts."
       />
       <div className="wait-pill-tabs">

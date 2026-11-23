@@ -24,9 +24,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { PlanAnalysis, StatementAnalysis } from './types/plan';
 import { DeadlockGraph } from './types/deadlock';
 import { ConnectionStatus, WindowsUserInfo } from './types/livedb';
-import { SAMPLE_DEADLOCK_XDL, isDeadlockXML, parseDeadlockXML, readFileAsDecodedText } from './utils/deadlockParser';
+import { isDeadlockXML, parseDeadlockXML, readFileAsDecodedText } from './utils/deadlockParser';
 import {
-  LoadSamplePlan,
   OpenFileAndParse,
   OpenFilePicker,
   ParsePlan,
@@ -41,9 +40,6 @@ import { isPgExplainJson, parsePgExplainJson } from './utils/pgPlanParser';
 import { sanitizePlan } from './utils/sanitizePlan';
 import { Loader2, Database, Upload, FileCode2, ShieldAlert, Zap, Code2 } from 'lucide-react';
 import './App.css';
-
-import samplePlanData from './sample_plan.json';
-import samplePgPlanData from './sample_pg_plan.json';
 
 export type TabType =
   | 'overview'
@@ -217,63 +213,6 @@ export function App() {
     }
   }, []);
 
-  const handleLoadSample = async () => {
-    if (activeTab === 'deadlock') {
-      try {
-        const deadlocks = parseDeadlockXML(SAMPLE_DEADLOCK_XDL);
-        setDeadlockGraphs(deadlocks);
-      } catch (err: any) {
-        console.error('Failed to parse sample deadlock:', err);
-      }
-      return;
-    }
-
-    setIsLoading(true);
-    setErrorMessage(null);
-    try {
-      let data: PlanAnalysis;
-      if (typeof window !== 'undefined' && (window as any).go?.main?.App?.LoadSamplePlan) {
-        data = await LoadSamplePlan();
-      } else {
-        // Running in web browser without Wails runtime -> fetch and parse sample_plan.sqlplan
-        try {
-          const resp = await fetch('/sample_plan.sqlplan');
-          if (resp.ok) {
-            const xml = await resp.text();
-            data = parseShowPlanXMLClient(xml, 'sample_ecommerce.sqlplan (OrderAnalyticsReport)');
-          } else {
-            data = samplePlanData as unknown as PlanAnalysis;
-          }
-        } catch {
-          data = samplePlanData as unknown as PlanAnalysis;
-        }
-      }
-      const sanitized = sanitizePlan(data);
-      setPlan(sanitized);
-      setSelectedEngine('sqlserver');
-      localStorage.setItem('planiq_engine', 'sqlserver');
-      if (typeof window !== 'undefined' && (window as any).go?.main?.App?.SetActiveEngine) {
-        (window as any).go.main.App.SetActiveEngine('sqlserver').catch(() => {});
-      }
-      if (sanitized.statements && sanitized.statements.length > 0) {
-        setSelectedStatement(sanitized.statements[0]); // top cost statement
-      }
-      setActiveTab('overview');
-    } catch (err: any) {
-      console.warn('Wails backend LoadSamplePlan not reached, using bundled fallback:', err);
-      const fallbackData = sanitizePlan(samplePlanData as unknown as PlanAnalysis);
-      setPlan(fallbackData);
-      setSelectedEngine('sqlserver');
-      localStorage.setItem('planiq_engine', 'sqlserver');
-      if (fallbackData.statements && fallbackData.statements.length > 0) {
-        setSelectedStatement(fallbackData.statements[0]);
-      }
-      setActiveTab('overview');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const parsePlanSafely = async (content: string, planName: string): Promise<PlanAnalysis> => {
     const isJson = planName.toLowerCase().endsWith('.json') || isPgExplainJson(content);
     if (isJson || selectedEngine === 'postgresql') {
@@ -289,33 +228,6 @@ export function App() {
       return await ParsePlan(content, planName);
     }
     return parseShowPlanXMLClient(content, planName);
-  };
-
-  const handleLoadPgSample = () => {
-    setIsLoading(true);
-    setErrorMessage(null);
-    try {
-      const data = parsePgExplainJson(
-        JSON.stringify(samplePgPlanData),
-        'PostgreSQL Analytics Query (Orders Join Customers)'
-      );
-      const sanitized = sanitizePlan(data);
-      setPlan(sanitized);
-      setSelectedEngine('postgresql');
-      localStorage.setItem('planiq_engine', 'postgresql');
-      if (typeof window !== 'undefined' && (window as any).go?.main?.App?.SetActiveEngine) {
-        (window as any).go.main.App.SetActiveEngine('postgresql').catch(() => {});
-      }
-      if (sanitized.statements && sanitized.statements.length > 0) {
-        setSelectedStatement(sanitized.statements[0]);
-      }
-      setActiveTab('overview');
-    } catch (err: any) {
-      console.error('Failed to load sample PG plan:', err);
-      setErrorMessage(err?.message || 'Failed to load PostgreSQL sample plan');
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   const handleOpenFile = async () => {
@@ -471,8 +383,6 @@ export function App() {
         onResetPlan={handleResetPlan}
         onOpenFile={handleOpenFile}
         onOpenPasteModal={() => setIsPasteOpen(true)}
-        onLoadSample={handleLoadSample}
-        onLoadPgSample={handleLoadPgSample}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenLiveModal={() => setIsLiveConnOpen(true)}
         liveStatus={liveStatus}
@@ -709,15 +619,6 @@ export function App() {
 
                   <button
                     className="btn btn-secondary btn-lg"
-                    onClick={handleLoadPgSample}
-                    style={{ borderColor: 'rgba(56, 189, 248, 0.5)' }}
-                  >
-                    <Database size={18} color="#38bdf8" />
-                    <span>Try PostgreSQL Sample Plan</span>
-                  </button>
-
-                  <button
-                    className="btn btn-secondary btn-lg"
                     onClick={() => setIsPasteOpen(true)}
                     style={{ borderColor: 'rgba(56, 189, 248, 0.4)' }}
                   >
@@ -735,11 +636,11 @@ export function App() {
 
                   <button
                     className="btn btn-secondary btn-lg"
-                    onClick={handleLoadSample}
+                    onClick={() => setIsPasteOpen(true)}
                     style={{ borderColor: 'rgba(129, 140, 248, 0.5)' }}
                   >
-                    <Database size={18} color="#818cf8" />
-                    <span>Try SQL Server Sample Plan</span>
+                    <FileCode2 size={18} color="#818cf8" />
+                    <span>Paste ShowPlan XML</span>
                   </button>
 
                   <button

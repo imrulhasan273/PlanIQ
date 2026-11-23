@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"sqlplan-advisor/pkg/sqlplan"
+	"github.com/imrulhasan273/PlanIQ/pkg/sqlplan"
 )
 
 // AIRequest represents the input parameters for the AI Advisor

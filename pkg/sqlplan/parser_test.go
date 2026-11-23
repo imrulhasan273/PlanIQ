@@ -1,86 +1,81 @@
 package sqlplan_test
 
 import (
-	"os"
+	"bytes"
+	"encoding/binary"
 	"testing"
-	"time"
+	"unicode/utf16"
 
-	"sqlplan-advisor/pkg/sqlplan"
+	"github.com/imrulhasan273/PlanIQ/pkg/sqlplan"
 )
 
-func TestParseDefaultSamplePlan(t *testing.T) {
-	analysis, err := sqlplan.ParseBytes(sqlplan.DefaultSamplePlanXML, sqlplan.DefaultSamplePlanName)
-	if err != nil {
-		t.Fatalf("ParseBytes failed for embedded default sample plan: %v", err)
-	}
+const testMinimalShowPlanXML = `<?xml version="1.0" encoding="utf-8"?>
+<ShowPlanXML xmlns="http://schemas.microsoft.com/sqlserver/2004/07/showplan" Version="1.5" Build="15.0.2000.5">
+  <BatchSequence>
+    <Batch>
+      <Statements>
+        <StmtSimple StatementId="1" StatementCompId="1" StatementText="SELECT o.OrderID FROM dbo.Orders o WHERE o.CustomerID = @CustomerID" StatementType="SELECT" StatementSubTreeCost="12.5" StatementEstRows="500" StatementOptmLevel="FULL" CardinalityEstimationModelVersion="150">
+          <QueryPlan CachedPlanSize="64" CompileTime="12" CompileCPU="10" CompileMemory="1024">
+            <MissingIndexes>
+              <MissingIndexGroup Impact="72.5">
+                <MissingIndex Database="[AppDB]" Schema="[dbo]" Table="[Orders]">
+                  <ColumnGroup Usage="EQUALITY">
+                    <Column Name="[CustomerID]" ColumnId="2" />
+                  </ColumnGroup>
+                </MissingIndex>
+              </MissingIndexGroup>
+            </MissingIndexes>
+            <WaitStats>
+              <Wait WaitType="PAGEIOLATCH_SH" WaitTimeMs="120" WaitCount="15" />
+            </WaitStats>
+            <RelOp NodeId="0" PhysicalOp="Clustered Index Scan" LogicalOp="Clustered Index Scan" EstimateRows="500" EstimatedRowsRead="50000" EstimateIO="10.0" EstimateCPU="2.5" EstimatedTotalSubtreeCost="12.5" TableCardinality="50000" ExecutionMode="Row">
+              <IndexScan Ordered="0">
+                <Object Database="[AppDB]" Schema="[dbo]" Table="[Orders]" Index="[PK_Orders]" IndexKind="Clustered" />
+              </IndexScan>
+            </RelOp>
+            <ParameterList>
+              <ColumnReference Column="@CustomerID" ParameterDataType="int" ParameterCompiledValue="(10)" ParameterRuntimeValue="(99999)" />
+            </ParameterList>
+          </QueryPlan>
+        </StmtSimple>
+      </Statements>
+    </Batch>
+  </BatchSequence>
+</ShowPlanXML>`
 
-	if analysis.TotalStatements != 3 {
-		t.Fatalf("expected 3 statements in sample plan, got %d", analysis.TotalStatements)
-	}
-	if len(analysis.AllMissingIndexes) < 2 {
-		t.Errorf("expected at least 2 missing indexes, got %d", len(analysis.AllMissingIndexes))
-	}
-	if len(analysis.WaitStats) == 0 {
-		t.Errorf("expected wait stats in sample plan")
-	}
-	if analysis.Diagnostics == nil {
-		t.Fatalf("expected diagnostics to be populated")
-	}
-	if len(analysis.Diagnostics.ParameterSniffing) == 0 {
-		t.Errorf("expected parameter sniffing finding in sample plan")
-	}
-	if len(analysis.Diagnostics.KeyLookups) == 0 {
-		t.Errorf("expected key lookup finding in sample plan")
-	}
-	if len(analysis.Diagnostics.Spools) == 0 {
-		t.Errorf("expected spool finding in sample plan")
-	}
-	if analysis.Diagnostics.Adaptive == nil || len(analysis.Diagnostics.Adaptive.AdaptiveJoins) == 0 {
-		t.Errorf("expected adaptive join finding in sample plan")
-	}
-}
-
-func TestParseExplanXML(t *testing.T) {
-	const path = "../../sample_plans/explan.xml"
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		t.Skip("optional local sample file not present")
-	}
-
-	bytes, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("failed to read sample explan.xml: %v", err)
-	}
-
-	start := time.Now()
-	analysis, err := sqlplan.ParseXML(string(bytes), "explan.xml (local)")
-	elapsed := time.Since(start)
-
+func TestParseShowPlanXML(t *testing.T) {
+	analysis, err := sqlplan.ParseXML(testMinimalShowPlanXML, "test-plan")
 	if err != nil {
 		t.Fatalf("ParseXML failed: %v", err)
 	}
 
-	t.Logf("SUCCESS: Parsed plan in %v (Statements: %d, Cost: %0.2f)", elapsed, analysis.TotalStatements, analysis.TotalSubTreeCost)
-	if analysis.TotalStatements == 0 {
-		t.Errorf("expected statements, got 0")
+	if analysis.TotalStatements != 1 {
+		t.Fatalf("expected 1 statement, got %d", analysis.TotalStatements)
+	}
+	if len(analysis.AllMissingIndexes) != 1 {
+		t.Errorf("expected 1 missing index, got %d", len(analysis.AllMissingIndexes))
+	}
+	if len(analysis.WaitStats) == 0 {
+		t.Errorf("expected wait stats to be parsed")
+	}
+	if analysis.Diagnostics == nil || len(analysis.Diagnostics.ParameterSniffing) == 0 {
+		t.Errorf("expected parameter sniffing finding for divergent compiled/runtime values")
 	}
 }
 
-func TestParseKycSqlplan(t *testing.T) {
-	const path = "../../sample_plans/kyc.sqlplan"
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		t.Skip("optional local sample file not present")
+func TestParseShowPlanUTF16LE(t *testing.T) {
+	u16 := utf16.Encode([]rune(testMinimalShowPlanXML))
+	var buf bytes.Buffer
+	buf.Write([]byte{0xFF, 0xFE}) // UTF-16LE BOM
+	for _, r := range u16 {
+		_ = binary.Write(&buf, binary.LittleEndian, r)
 	}
 
-	start := time.Now()
-	analysis, err := sqlplan.ParseFile(path, "kyc.sqlplan")
-	elapsed := time.Since(start)
-
+	analysis, err := sqlplan.ParseBytes(buf.Bytes(), "utf16-plan")
 	if err != nil {
-		t.Fatalf("ParseFile for kyc.sqlplan failed: %v", err)
+		t.Fatalf("ParseBytes failed for UTF-16LE plan: %v", err)
 	}
-
-	t.Logf("SUCCESS: Parsed UTF-16 plan in %v (Statements: %d, Cost: %0.2f)", elapsed, analysis.TotalStatements, analysis.TotalSubTreeCost)
-	if analysis.TotalStatements == 0 {
-		t.Errorf("expected statements, got 0")
+	if analysis.TotalStatements != 1 {
+		t.Fatalf("expected 1 statement in UTF-16LE plan, got %d", analysis.TotalStatements)
 	}
 }

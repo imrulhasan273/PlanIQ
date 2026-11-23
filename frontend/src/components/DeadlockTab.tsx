@@ -35,8 +35,6 @@ import {
   DeadlockResource,
 } from '../types/deadlock';
 import {
-  SAMPLE_DEADLOCK_XDL,
-  SAMPLE_DEADLOCK_PG,
   parseDeadlockXML,
   parsePgDeadlockLog,
   isPgDeadlockLog,
@@ -49,7 +47,6 @@ interface DeadlockTabProps {
   initialDeadlocks?: DeadlockGraph[];
   engine?: 'sqlserver' | 'postgresql';
   onOpenXdlFile?: () => void;
-  onLoadSample?: () => void;
   onNavigateToLiveRadar?: () => void;
 }
 
@@ -57,7 +54,6 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
   initialDeadlocks,
   engine = 'sqlserver',
   onOpenXdlFile,
-  onLoadSample,
   onNavigateToLiveRadar,
 }) => {
   const isPg = engine === 'postgresql';
@@ -107,19 +103,6 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
       navigator.clipboard.writeText(text);
       setCopiedKey(key);
       setTimeout(() => setCopiedKey(null), 2000);
-    }
-  };
-
-  const handleLoadSample = () => {
-    try {
-      const parsed = isPg ? [SAMPLE_DEADLOCK_PG] : parseDeadlockXML(SAMPLE_DEADLOCK_XDL);
-      setDeadlocks(parsed);
-      setActiveIdx(0);
-      if (onLoadSample) {
-        onLoadSample();
-      }
-    } catch (e) {
-      console.error(e);
     }
   };
 
@@ -253,16 +236,6 @@ export const DeadlockTab: React.FC<DeadlockTabProps> = ({
             >
               <Upload size={16} />
               <span>{isPg ? 'Open Deadlock Log / Plan' : 'Open .xdl File'}</span>
-            </button>
-
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handleLoadSample}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 24px', fontSize: '13px', fontWeight: 600, borderColor: isPg ? 'rgba(56, 189, 248, 0.4)' : undefined }}
-            >
-              <Sparkles size={16} color={isPg ? '#38bdf8' : '#818cf8'} />
-              <span>{isPg ? 'Try PostgreSQL Deadlock Sample' : 'Load SQL Server Sample'}</span>
             </button>
 
             {isPg && onNavigateToLiveRadar && (

@@ -18,7 +18,6 @@ import {
   ArrowRight,
   Eye,
   EyeOff,
-  Cpu,
   Activity,
   HardDrive,
   KeyRound,
@@ -677,7 +676,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                         <span>{p.database}</span>
                       </div>
                       <span className={`conn-auth-badge auth-${p.authType}`}>
-                        {p.authType === 'windows' ? (isCardPg ? 'Peer' : 'Windows') : p.authType === 'demo' ? 'Demo' : 'Password'}
+                        {p.authType === 'windows' ? (isCardPg ? 'Peer' : 'Windows') : 'Password'}
                       </span>
                     </div>
 
@@ -872,20 +871,6 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                         .\\SQLEXPRESS
                       </button>
                     )}
-                    <button
-                      type="button"
-                      className="conn-chip demo-chip"
-                      onClick={() =>
-                        setFormData({
-                          ...formData,
-                          server: 'demo',
-                          authType: 'demo',
-                          database: isPg ? 'dvdrental' : 'AmmisOnlineProd',
-                        })
-                      }
-                    >
-                      Demo Cluster
-                    </button>
                   </div>
                 </div>
 
@@ -949,32 +934,13 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     <span className="conn-auth-title">
                       {isPg ? 'Local / OS Peer Security' : 'Windows Authentication'}
                     </span>
-                    <span className="conn-auth-desc">
-                      Integrated security ({windowsUser?.username || 'Current User'})
-                    </span>
+                      <span className="conn-auth-desc">
+                        Integrated security ({windowsUser?.username || 'Current User'})
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                <div
-                  className={`conn-auth-tab ${formData.authType === 'demo' ? 'active' : ''}`}
-                  onClick={() =>
-                    setFormData({
-                      ...formData,
-                      authType: 'demo',
-                      server: 'demo',
-                      database: isPg ? 'dvdrental' : 'AmmisOnlineProd',
-                    })
-                  }
-                >
-                  <Cpu size={14} />
-                  <div>
-                    <span className="conn-auth-title">Demo Showcase</span>
-                    <span className="conn-auth-desc">Simulated telemetry cluster</span>
-                  </div>
-                </div>
-              </div>
-
-              {formData.authType !== 'demo' && (
                 <div className="conn-form-row" style={{ marginTop: '14px' }}>
                   <div className="conn-input-group flex-1">
                     <div className="conn-label-row">
@@ -1022,8 +988,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     </div>
                   )}
                 </div>
-              )}
-            </div>
+              </div>
 
             {/* SECTION 3: TLS & Network Configuration */}
             <div className="conn-form-section">

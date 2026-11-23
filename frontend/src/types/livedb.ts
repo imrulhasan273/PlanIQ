@@ -2,7 +2,7 @@ export interface ConnectionConfig {
   server: string;
   port: number;
   database: string;
-  authType: 'sql' | 'windows' | 'demo';
+  authType: 'sql' | 'windows';
   username?: string;
   password?: string;
   encrypt?: boolean;

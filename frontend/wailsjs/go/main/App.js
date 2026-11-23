@@ -130,10 +130,6 @@ export function GetSavedDBConnections() {
   return window['go']['main']['App']['GetSavedDBConnections']();
 }
 
-export function LoadSamplePlan() {
-  return window['go']['main']['App']['LoadSamplePlan']();
-}
-
 export function OpenFileAndParse() {
   return window['go']['main']['App']['OpenFileAndParse']();
 }

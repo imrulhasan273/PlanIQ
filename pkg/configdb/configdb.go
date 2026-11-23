@@ -50,8 +50,10 @@ func GetDB() (*Store, error) {
 			baseDir = "."
 		}
 		dir := filepath.Join(baseDir, "PlanIQ")
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0700); err != nil {
 			dir = "."
+		} else {
+			_ = os.Chmod(dir, 0700)
 		}
 
 		dbPath := filepath.Join(dir, "planiq_config.db")
@@ -66,6 +68,7 @@ func GetDB() (*Store, error) {
 			initErr = fmt.Errorf("failed to ping sqlite config db: %w", err)
 			return
 		}
+		_ = os.Chmod(dbPath, 0600)
 
 		_, _ = db.Exec(`PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;`)
 

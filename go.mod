@@ -1,4 +1,4 @@
-module sqlplan-advisor
+module github.com/imrulhasan273/PlanIQ
 
 go 1.26.0
 
