@@ -17,6 +17,9 @@ func (c *Client) GetServerVitals(ctx context.Context) (*ServerVitals, error) {
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
 	}
+	if c.isPostgres() {
+		return c.pgGetServerVitals(ctx)
+	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
@@ -109,6 +112,9 @@ func (c *Client) GetMissingIndexes(ctx context.Context, limit int) ([]LiveMissin
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
 	}
+	if c.isPostgres() {
+		return c.pgGetMissingIndexes(ctx, limit)
+	}
 
 	if limit <= 0 {
 		limit = 30
@@ -182,6 +188,9 @@ func (c *Client) GetBufferPoolUsage(ctx context.Context, limit int) ([]BufferPoo
 
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
+	}
+	if c.isPostgres() {
+		return c.pgGetBufferPoolUsage(ctx, limit)
 	}
 
 	if limit <= 0 {
@@ -273,6 +282,9 @@ func (c *Client) GetUnusedIndexes(ctx context.Context, limit int) ([]UnusedIndex
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
 	}
+	if c.isPostgres() {
+		return c.pgGetUnusedIndexes(ctx, limit)
+	}
 
 	if limit <= 0 {
 		limit = 30
@@ -349,6 +361,9 @@ func (c *Client) GetDuplicateIndexes(ctx context.Context) ([]DuplicateIndex, err
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
 	}
+	if c.isPostgres() {
+		return c.pgGetDuplicateIndexes(ctx)
+	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
@@ -418,6 +433,9 @@ func (c *Client) GetEngineInternals(ctx context.Context) (*EngineInternalsReport
 
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
+	}
+	if c.isPostgres() {
+		return c.pgGetEngineInternals(ctx)
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -720,7 +738,10 @@ func (c *Client) GetPLEReport(ctx context.Context) (*PLEReport, error) {
 	defer c.mu.Unlock()
 
 	if !c.status.Connected || c.db == nil {
-		return nil, fmt.Errorf("not connected to live SQL Server")
+		return nil, fmt.Errorf("not connected to live database")
+	}
+	if c.isPostgres() {
+		return c.pgGetPLEReport(ctx)
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 6*time.Second)

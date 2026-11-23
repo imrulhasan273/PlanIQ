@@ -83,6 +83,8 @@ import {
 import { DPAWaitAnalyzer } from './DPAWaitAnalyzer';
 import { DPAQueryWaitChart } from './DPAQueryWaitChart';
 import { QueryStoreStudio } from './QueryStoreStudio';
+import { PgSharedBuffersView } from './pg/PgSharedBuffersView';
+import { PgVitalsView } from './pg/PgVitalsView';
 import { formatAdvisorMetricString } from '../utils/durationFormatter';
 
 interface LiveRadarTabProps {
@@ -2310,7 +2312,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                 <option value="CPU/Memory">CPU / Memory</option>
                 <option value="Executions">Executions</option>
                 <option value="Plan Regression">Plan Regression</option>
-                <option value="TempDB Spill">TempDB Spill</option>
+                <option value="TempDB Spill">{isPg ? 'Temp File Spill (pgsql_tmp)' : 'TempDB Spill'}</option>
                 <option value="Tuning Advice">Tuning Advice</option>
                 <option value="Blocking">Blocking</option>
               </select>
@@ -2898,7 +2900,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                                     border: '1px solid rgba(251, 191, 36, 0.4)',
                                     fontWeight: 700
                                   }}
-                                  title={`SPID #${s.spid} is blocking other sessions`}
+                                  title={`${isPg ? 'PID' : 'SPID'} #${s.spid} is blocking other sessions`}
                                 >
                                   BLOCKER
                                 </span>
@@ -3314,10 +3316,14 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
             <div>
               <h3 style={{ fontSize: '14px', fontWeight: 700, margin: '0 0 2px', color: '#f1f5f9' }}>
-                Head-Blocker Hierarchy & Lock Wait Analysis
+                {isPg ? 'PostgreSQL Blocking Tree & Lock Wait Analysis' : 'Head-Blocker Hierarchy & Lock Wait Analysis'}
               </h3>
               <p style={{ margin: 0, fontSize: '11.5px', color: '#94a3b8' }}>
-                Extracted from <code>sys.dm_os_waiting_tasks</code> and <code>sys.dm_tran_locks</code>. Identifies root blocker SPID and victim cascade.
+                {isPg ? (
+                  <>Extracted from <code>pg_stat_activity</code>, <code>pg_blocking_pids()</code>, and <code>pg_locks</code>. Identifies root blocker PID and blocked backends.</>
+                ) : (
+                  <>Extracted from <code>sys.dm_os_waiting_tasks</code> and <code>sys.dm_tran_locks</code>. Identifies root blocker SPID and victim cascade.</>
+                )}
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -3586,7 +3592,9 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
         <div className="section-block radar-subtab-section">
           <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', flexShrink: 0 }}>
             <span style={{ fontSize: '13px', fontWeight: 600, color: '#f1f5f9' }}>
-              Recent Deadlocks from `system_health` Extended Events Buffer (Showing {deadlocks.length})
+              {isPg
+                ? `PostgreSQL Deadlock Monitor (pg_stat_database & Error 40P01 Logs) — Showing ${deadlocks.length}`
+                : `Recent Deadlocks from \`system_health\` Extended Events Buffer (Showing ${deadlocks.length})`}
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {renderPagePollingToggle('deadlocks')}
@@ -3629,10 +3637,12 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
             <div className="glass-panel" style={{ padding: '32px', textAlign: 'center', borderRadius: '10px' }}>
               <CheckCircle2 size={32} color="#34d399" style={{ margin: '0 auto 12px' }} />
               <h3 style={{ fontSize: '15px', color: '#e2e8f0', margin: '0 0 6px' }}>
-                Zero Deadlocks in system_health Buffer
+                {isPg ? 'No Live Deadlock Graphs Captured' : 'Zero Deadlocks in system_health Buffer'}
               </h3>
               <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>
-                No deadlock events found in the ring buffer target for the active session window.
+                {isPg
+                  ? 'PostgreSQL writes detailed deadlock cycle graphs to server logs (enable log_lock_waits = on). Open a PostgreSQL deadlock log in the PG Deadlocks tab to visualize lock cycles.'
+                  : 'No deadlock events found in the ring buffer target for the active session window.'}
               </p>
             </div>
           ) : (
@@ -3662,7 +3672,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                           fontWeight: 700,
                         }}
                       >
-                        Victim SPID #{dl.victimSpid}
+                        {isPg ? `Victim PID #${dl.victimSpid}` : `Victim SPID #${dl.victimSpid}`}
                       </span>
                       <span style={{ fontSize: '12px', color: '#38bdf8', fontWeight: 600 }}>
                         {dl.deadlockType || 'Reverse Order Lock Acquisition'}
@@ -3702,7 +3712,17 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           - Feature A: "PLE Crash Correlator" (Timeline + Culprit Attribution)
           - Cache Resident Tables & Indexes
           ======================================================== */}
-      {activeSubTab === 'bufferpool' && (
+      {activeSubTab === 'bufferpool' && isPg && (
+        <PgSharedBuffersView
+          pleReport={pleReport}
+          bufferPool={bufferPool}
+          isLoading={isLoading}
+          onRefresh={() => fetchData(true)}
+          pollingToggle={renderPagePollingToggle('bufferpool')}
+        />
+      )}
+
+      {activeSubTab === 'bufferpool' && !isPg && (
         <div className="section-block radar-subtab-section">
           {/* Top Header & Sub-View Switcher */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px', flexShrink: 0 }}>
@@ -4768,10 +4788,14 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px', flexShrink: 0 }}>
             <div>
               <h3 style={{ fontSize: '15px', fontWeight: 800, margin: '0 0 2px', color: '#f1f5f9' }}>
-                Index Hygiene & Waste Engine
+                {isPg ? 'PostgreSQL Index Hygiene & Waste Analyzer' : 'Index Hygiene & Waste Engine'}
               </h3>
               <p style={{ margin: 0, fontSize: '11.5px', color: '#94a3b8' }}>
-                Comprehensive multi-dimensional analysis: Missing indexes, write-burden unused indexes, and duplicate indexes.
+                {isPg ? (
+                  <>Harvested from <code>pg_stat_user_tables</code>, <code>pg_stat_user_indexes</code>, and <code>pg_index</code>: High seq-scan candidates, unused indexes, and duplicate indexes.</>
+                ) : (
+                  <>Comprehensive multi-dimensional analysis: Missing indexes, write-burden unused indexes, and duplicate indexes.</>
+                )}
               </p>
             </div>
 
@@ -5148,7 +5172,15 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
       {/* ========================================================
           PAGE 8: SERVER VITALS & DEEP ENGINE INTERNALS (DARLING PARITY)
           ======================================================== */}
-      {activeSubTab === 'vitals' && (
+      {activeSubTab === 'vitals' && isPg && (
+        <PgVitalsView
+          vitals={vitals}
+          engineInternals={engineInternals}
+          pollingToggle={renderPagePollingToggle('vitals')}
+        />
+      )}
+
+      {activeSubTab === 'vitals' && !isPg && (
         <div className="section-block radar-subtab-section">
           {/* Header & Sub-Navigation */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px', flexShrink: 0 }}>

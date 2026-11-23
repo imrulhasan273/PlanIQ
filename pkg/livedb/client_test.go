@@ -17,6 +17,61 @@ func TestGetClientDefaultsToReadOnlyDisconnected(t *testing.T) {
 	}
 }
 
+func TestResolveEngine(t *testing.T) {
+	if got := resolveEngine(ConnectionConfig{Engine: "postgresql", Port: 15432}); got != "postgresql" {
+		t.Errorf("expected postgresql, got %q", got)
+	}
+	if got := resolveEngine(ConnectionConfig{Engine: "sqlserver", Port: 1433}); got != "sqlserver" {
+		t.Errorf("expected sqlserver, got %q", got)
+	}
+	if got := resolveEngine(ConnectionConfig{Port: 5432, Database: "appdb"}); got != "postgresql" {
+		t.Errorf("expected port 5432 to infer postgresql, got %q", got)
+	}
+	if got := resolveEngine(ConnectionConfig{Port: 1433, Database: "master"}); got != "sqlserver" {
+		t.Errorf("expected port 1433 to infer sqlserver, got %q", got)
+	}
+}
+
+func TestBuildPostgresConnStr(t *testing.T) {
+	dsn := buildPostgresConnStr(ConnectionConfig{
+		Engine:                 "postgresql",
+		Server:                 "localhost",
+		Port:                   5432,
+		Database:               "Pls",
+		AuthType:               "sql",
+		Username:               "imrul",
+		Password:               "p@ss:word",
+		Encrypt:                false,
+		TrustServerCertificate: true,
+		TimeoutSeconds:         4,
+	}, "PlanIQ-Test-Connection")
+
+	if !strings.HasPrefix(dsn, "postgres://imrul:p%40ss%3Aword@localhost:5432/Pls?") {
+		t.Errorf("unexpected postgres URI prefix: %s", dsn)
+	}
+	if !strings.Contains(dsn, "default_transaction_read_only=on") {
+		t.Errorf("expected read-only transaction enforcement in DSN: %s", dsn)
+	}
+	if !strings.Contains(dsn, "sslmode=disable") {
+		t.Errorf("expected sslmode=disable when Encrypt=false: %s", dsn)
+	}
+
+	tlsDsn := buildPostgresConnStr(ConnectionConfig{
+		Engine:                 "postgresql",
+		Server:                 "pg.example.com",
+		Port:                   5432,
+		Database:               "analytics",
+		AuthType:               "sql",
+		Username:               "reader",
+		Password:               "secret",
+		Encrypt:                true,
+		TrustServerCertificate: true,
+	}, "PlanIQ-Live-Radar")
+	if !strings.Contains(tlsDsn, "sslmode=require") {
+		t.Errorf("expected sslmode=require when Encrypt=true & TrustServerCertificate=true: %s", tlsDsn)
+	}
+}
+
 func TestConnectRejectsDemoMode(t *testing.T) {
 	c := &Client{}
 	_, err := c.Connect(context.Background(), ConnectionConfig{

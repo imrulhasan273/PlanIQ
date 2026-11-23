@@ -252,6 +252,9 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
   const [isPerspectiveLoading, setIsPerspectiveLoading] = useState<boolean>(false);
 
   // Active host/database title
+  const isPg = status?.serverType === 'postgresql';
+  const pidLabel = isPg ? 'PID' : 'SPID';
+  const dbEngineLabel = isPg ? 'PostgreSQL' : 'SQL Server';
   const hostName = status?.serverName || '';
   const dbName = status?.databaseName || '';
 
@@ -388,9 +391,9 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
           else if (activePerspective === 'databases') key = s.databaseName || dbName;
           else if (activePerspective === 'dbusers') key = s.loginName || 'Unknown Login';
           else if (activePerspective === 'machines') key = s.hostName || 'Localhost';
-          else if (activePerspective === 'sessions') key = `SPID #${s.spid} (${s.loginName || 'Session'})`;
+          else if (activePerspective === 'sessions') key = `${pidLabel} #${s.spid} (${s.loginName || 'Session'})`;
           else if (activePerspective === 'blockers') {
-            if (s.blockingSpid > 0) key = `Victim SPID #${s.spid} (Blocked by #${s.blockingSpid})`;
+            if (s.blockingSpid > 0) key = `Victim ${pidLabel} #${s.spid} (Blocked by #${s.blockingSpid})`;
           } else if (activePerspective === 'plans') {
             if (s.hasPlan || s.planHandle) key = `Plan 0x${s.planHandle?.slice(0, 12)} (${s.command || 'Query'})`;
           }
@@ -493,7 +496,7 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
     if (activeSessions && activeSessions.some(s => s.queryText && s.queryText.trim().length > 5)) {
       const activeWithQueries = activeSessions.filter(s => s.queryText && s.queryText.trim().length > 5);
       const mapped = activeWithQueries.slice(0, 15).map((s, idx) => {
-        let procName = `SPID #${s.spid} (${s.command || 'Query'})`;
+        let procName = `${pidLabel} #${s.spid} (${s.command || 'Query'})`;
         const text = s.queryText || '';
         const fromMatch = text.match(/(?:FROM|INTO|UPDATE)\s+([a-zA-Z0-9_.\[\]]+)/i);
         if (fromMatch && fromMatch[1]) {
@@ -743,10 +746,16 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
               gap: '6px',
               opacity: isSyncing ? 0.7 : 1
             }}
-            title="Harvest the past 7 days of wait history from Query Store and deadlocks from system_health into local SQLite"
+            title={isPg
+              ? 'Capture a live PostgreSQL wait snapshot from pg_stat_activity & pg_stat_statements'
+              : 'Harvest the past 7 days of wait history from Query Store and deadlocks from system_health into local SQLite'}
           >
             <Sparkles size={12} className={isSyncing ? 'spin' : ''} />
-            <span>{isSyncing ? 'Harvesting 7 Days...' : '⚡ Sync 7 Days (Query Store)'}</span>
+            <span>
+              {isSyncing
+                ? (isPg ? 'Capturing Snapshot...' : 'Harvesting 7 Days...')
+                : (isPg ? '⚡ Sync Snapshot (pg_stat_activity)' : '⚡ Sync 7 Days (Query Store)')}
+            </span>
           </button>
           <span className="badge badge-neutral" style={{ fontSize: '10.5px', padding: '3px 8px' }} title="Rolling 7-day snapshots cached in local workstation SQLite (%AppData%/PlanIQ/planiq_config.db)">
             💾 SQLite Cache
@@ -1104,7 +1113,7 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
               No Significant Query Wait Delays
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '520px', margin: '0 auto' }}>
-              No bottleneck wait stats were recorded on {hostName} ({dbName}). The SQL Server database is operating smoothly with minimal resource contention.
+              No bottleneck wait stats were recorded on {hostName} ({dbName}). The {dbEngineLabel} database is operating smoothly with minimal resource contention.
             </div>
           </div>
         ) : (() => {
@@ -1118,8 +1127,10 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
           if (!currentWait) return null;
           const waitDef = (WAIT_DEFINITIONS[currentWait.name]) || {
             desc: `Active engine wait state in category ${currentWait.category || 'General'}.`,
-            cause: 'Query or thread execution contention requiring SQL Server resource acquisition.',
-            fix: 'Review top queries consuming this wait state in the Query Store and Plan IQ Advisor tabs.'
+            cause: `Query or backend execution contention requiring ${dbEngineLabel} resource acquisition.`,
+            fix: isPg
+              ? 'Review top queries consuming this wait event in Statements (pg_stat_statements) and PG Advisors.'
+              : 'Review top queries consuming this wait state in the Query Store and Plan IQ Advisor tabs.'
           };
 
         return (
@@ -1373,7 +1384,9 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
             <div style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--text-muted)', fontSize: '12px', background: 'var(--bg-canvas)', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
               <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)', marginBottom: '6px' }}>No Queries With Measurable Wait Time</div>
               <div style={{ maxWidth: '520px', margin: '0 auto' }}>
-                Query Store and DMV plan cache on {hostName} ({dbName}) have not captured queries with wait delays in this time window ({selectedTimeRange}). As workload runs on your database, top queries will appear here automatically.
+                {isPg
+                  ? `pg_stat_statements and pg_stat_activity on ${hostName} (${dbName}) have not captured queries with wait delays in this window (${selectedTimeRange}). As workload runs on PostgreSQL, top queries will appear here automatically.`
+                  : `Query Store and DMV plan cache on ${hostName} (${dbName}) have not captured queries with wait delays in this time window (${selectedTimeRange}). As workload runs on your database, top queries will appear here automatically.`}
               </div>
             </div>
           ) : (
@@ -1440,7 +1453,7 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
 
           {isPerspectiveLoading ? (
             <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontSize: '12px' }}>
-              Loading live SQL Server telemetry for {activePerspective}...
+              Loading live {dbEngineLabel} telemetry for {activePerspective}...
             </div>
           ) : perspectiveItems.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontSize: '12px', background: 'var(--bg-canvas)', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
@@ -1642,7 +1655,7 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {blockingSessions.slice(0, 3).map((blk, i) => (
                   <p key={i} style={{ margin: 0, fontSize: '11.5px', color: 'var(--text-main)', lineHeight: 1.5 }}>
-                    Session <strong>SPID #{blk.blockedSpid}</strong> ({blk.blockedProgram || blk.blockedLogin || 'Client'}) was blocked for <strong>{blk.blockedWaitTimeMs.toLocaleString()} ms</strong> on resource <code>{blk.lockResource || blk.blockedWaitType || 'Exclusive Lock'}</code> held by root blocker <strong>SPID #{blk.rootBlockerSpid}</strong> ({blk.rootBlockerProgram || blk.rootBlockerLogin || 'Head Blocker'}).
+                    Session <strong>{pidLabel} #{blk.blockedSpid}</strong> ({blk.blockedProgram || blk.blockedLogin || 'Client'}) was blocked for <strong>{blk.blockedWaitTimeMs.toLocaleString()} ms</strong> on resource <code>{blk.lockResource || blk.blockedWaitType || 'Exclusive Lock'}</code> held by root blocker <strong>{pidLabel} #{blk.rootBlockerSpid}</strong> ({blk.rootBlockerProgram || blk.rootBlockerLogin || 'Head Blocker'}).
                   </p>
                 ))}
               </div>
@@ -1650,7 +1663,7 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {activeSessions.filter(s => s.blockingSpid > 0).slice(0, 3).map((s, i) => (
                   <p key={i} style={{ margin: 0, fontSize: '11.5px', color: 'var(--text-main)', lineHeight: 1.5 }}>
-                    Session <strong>SPID #{s.spid}</strong> ({s.programName || s.loginName || 'Worker'}) is waiting for <strong>{(s.waitTimeMs).toLocaleString()} ms</strong> ({s.waitType || 'LCK_M_X'}) blocked by <strong>SPID #{s.blockingSpid}</strong>.
+                    Session <strong>{pidLabel} #{s.spid}</strong> ({s.programName || s.loginName || 'Worker'}) is waiting for <strong>{(s.waitTimeMs).toLocaleString()} ms</strong> ({s.waitType || (isPg ? 'Lock' : 'LCK_M_X')}) blocked by <strong>{pidLabel} #{s.blockingSpid}</strong>.
                   </p>
                 ))}
               </div>
@@ -1685,7 +1698,7 @@ export const DPAWaitAnalyzer: React.FC<DPAWaitAnalyzerProps> = ({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {deadlocks.slice(0, 2).map((d, i) => (
                   <p key={i} style={{ margin: 0, fontSize: '11.5px', color: 'var(--text-main)', lineHeight: 1.5 }}>
-                    Deadlock event recorded at <strong>{d.timestamp}</strong> with victim <strong>SPID #{d.victimSpid}</strong> across {d.processCount} concurrent processes and {d.lockedResourceCount} contested resources. {d.summary && <span>({d.summary})</span>}
+                    Deadlock event recorded at <strong>{d.timestamp}</strong> with victim <strong>{pidLabel} #{d.victimSpid}</strong> across {d.processCount} concurrent processes and {d.lockedResourceCount} contested resources. {d.summary && <span>({d.summary})</span>}
                   </p>
                 ))}
               </div>

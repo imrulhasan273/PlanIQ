@@ -173,7 +173,10 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
 
     try {
       if (typeof window !== 'undefined' && (window as any).go?.main?.App?.ConnectLiveDB) {
-        const res = await ConnectLiveDB(config as any);
+        const res = await ConnectLiveDB({
+          ...config,
+          engine: isPg ? 'postgresql' : 'sqlserver',
+        } as any);
         onStatusChange(res);
         setSuccessMsg(`Successfully connected to ${res.serverName} (${res.databaseName})`);
         handleSaveConfig(config);

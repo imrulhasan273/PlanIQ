@@ -55,6 +55,7 @@ export const QueryStoreStudio: React.FC<QueryStoreStudioProps> = ({
   onTogglePolling
 }) => {
   // --- Controls State ---
+  const isPg = status?.serverType === 'postgresql';
   const [selectedHours, setSelectedHours] = useState<number>(4);
   const [topN, setTopN] = useState<number>(25);
   const [sortBy, setSortBy] = useState<string>('Total CPU');
@@ -908,7 +909,7 @@ export const QueryStoreStudio: React.FC<QueryStoreStudioProps> = ({
                 <option value="Physical Reads">Physical Reads</option>
                 <option value="Memory MB">Total Memory (MB)</option>
                 <option value="Executions">Executions</option>
-                <option value="Spills">TempDB Spills</option>
+                <option value="Spills">{isPg ? 'Temp File Spills (pgsql_tmp)' : 'TempDB Spills'}</option>
               </select>
             </div>
 
@@ -1083,7 +1084,7 @@ export const QueryStoreStudio: React.FC<QueryStoreStudioProps> = ({
                   onChange={(e) => setSpillsOnly(e.target.checked)}
                   style={{ accentColor: '#38bdf8', cursor: 'pointer' }}
                 />
-                <span>TempDB Spills Only (&gt; 0 MB)</span>
+                <span>{isPg ? 'Temp File Spills Only (> 0 MB)' : 'TempDB Spills Only (> 0 MB)'}</span>
               </label>
             </div>
           )}
@@ -1525,7 +1526,7 @@ export const QueryStoreStudio: React.FC<QueryStoreStudioProps> = ({
         </table>
 
         {groupedRows.length === 0 && (
-          <QueryStoreDiagPanel hours={selectedHours} onRefetch={() => handleFetch()} />
+          <QueryStoreDiagPanel hours={selectedHours} isPg={isPg} onRefetch={() => handleFetch()} />
         )}
       </div>
     </div>
@@ -1547,7 +1548,7 @@ interface DiagResult {
   sqlServerVersion: string;
 }
 
-const QueryStoreDiagPanel: React.FC<{ hours: number; onRefetch: () => void }> = ({ hours, onRefetch }) => {
+const QueryStoreDiagPanel: React.FC<{ hours: number; isPg?: boolean; onRefetch: () => void }> = ({ hours, isPg = false, onRefetch }) => {
   const [diag, setDiag] = useState<DiagResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1626,22 +1627,22 @@ const QueryStoreDiagPanel: React.FC<{ hours: number; onRefetch: () => void }> = 
               🔬 Server Probe Results
             </div>
             {pill('Connected Database', diag.currentDb, '#e2e8f0')}
-            {pill('SQL Server Version', diag.sqlServerVersion, '#94a3b8')}
-            {pill('Query Store State', `${diag.qsDesiredState} / ${diag.qsActualState}`, diag.isQueryStoreOn ? '#34d399' : '#f43f5e')}
+            {pill(isPg ? 'PostgreSQL Version' : 'SQL Server Version', diag.sqlServerVersion, '#94a3b8')}
+            {pill(isPg ? 'pg_stat_statements' : 'Query Store State', `${diag.qsDesiredState} / ${diag.qsActualState}`, diag.isQueryStoreOn ? '#34d399' : '#f43f5e')}
 
             <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', margin: '8px 0' }} />
             <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#94a3b8', marginBottom: '4px' }}>
-              sys.query_store_runtime_stats
+              {isPg ? 'pg_stat_statements' : 'sys.query_store_runtime_stats'}
             </div>
-            {pill('Total rows (all time)', diag.isQueryStoreOn ? diag.qsRuntimeStatsRows.toLocaleString() : 'N/A (QS disabled)', diag.qsRuntimeStatsRows > 0 ? '#34d399' : '#f43f5e')}
+            {pill('Total rows (all time)', diag.isQueryStoreOn ? diag.qsRuntimeStatsRows.toLocaleString() : (isPg ? 'N/A (extension not installed)' : 'N/A (QS disabled)'), diag.qsRuntimeStatsRows > 0 ? '#34d399' : '#f43f5e')}
             {pill(`Rows in ${hours}h window`, diag.isQueryStoreOn ? diag.qsWindowRows.toLocaleString() : 'N/A', diag.qsWindowRows > 0 ? '#34d399' : '#f59e0b')}
             {diag.qsError && <div style={{ fontSize: '10px', color: '#f43f5e', marginTop: '4px' }}>⚠ {diag.qsError}</div>}
 
             <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', margin: '8px 0' }} />
             <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#94a3b8', marginBottom: '4px' }}>
-              sys.dm_exec_query_stats (Plan Cache)
+              {isPg ? 'pg_stat_activity (Active Backends)' : 'sys.dm_exec_query_stats (Plan Cache)'}
             </div>
-            {pill('Total rows (plan cache)', diag.dmvPlanCacheRows.toLocaleString(), diag.dmvPlanCacheRows > 0 ? '#34d399' : '#f43f5e')}
+            {pill(isPg ? 'Active / recent sessions' : 'Total rows (plan cache)', diag.dmvPlanCacheRows.toLocaleString(), diag.dmvPlanCacheRows > 0 ? '#34d399' : '#f43f5e')}
             {pill(`Rows in ${hours}h window`, diag.dmvWindowRows.toLocaleString(), diag.dmvWindowRows > 0 ? '#34d399' : '#f59e0b')}
             {diag.dmvError && <div style={{ fontSize: '10px', color: '#f43f5e', marginTop: '4px' }}>⚠ {diag.dmvError}</div>}
 
@@ -1650,25 +1651,37 @@ const QueryStoreDiagPanel: React.FC<{ hours: number; onRefetch: () => void }> = 
             <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#94a3b8', marginBottom: '6px' }}>💡 Recommendations</div>
             {!diag.isQueryStoreOn && (
               <div style={{ fontSize: '11px', color: '#fbbf24', marginBottom: '4px' }}>
-                • Query Store is <strong>OFF</strong> on <code>{diag.currentDb}</code>. Enable it: <code style={{ fontSize: '10px' }}>ALTER DATABASE [{diag.currentDb}] SET QUERY_STORE = ON;</code>
+                {isPg ? (
+                  <>• <code>pg_stat_statements</code> is not installed on <code>{diag.currentDb}</code>. Enable it: <code style={{ fontSize: '10px' }}>CREATE EXTENSION IF NOT EXISTS pg_stat_statements;</code> (requires <code>shared_preload_libraries = &apos;pg_stat_statements&apos;</code>).</>
+                ) : (
+                  <>• Query Store is <strong>OFF</strong> on <code>{diag.currentDb}</code>. Enable it: <code style={{ fontSize: '10px' }}>ALTER DATABASE [{diag.currentDb}] SET QUERY_STORE = ON;</code></>
+                )}
               </div>
             )}
             {diag.isQueryStoreOn && diag.qsRuntimeStatsRows === 0 && (
               <div style={{ fontSize: '11px', color: '#fbbf24', marginBottom: '4px' }}>
-                • Query Store has 0 rows. It may have been recently enabled or flushed. Wait for SQL Server to populate it, or force flush: <code style={{ fontSize: '10px' }}>EXEC sp_query_store_flush_db;</code>
+                {isPg ? (
+                  <>• <code>pg_stat_statements</code> has 0 rows for <code>{diag.currentDb}</code>. Run queries on this database or verify permissions (<code>pg_read_all_stats</code> role).</>
+                ) : (
+                  <>• Query Store has 0 rows. It may have been recently enabled or flushed. Wait for SQL Server to populate it, or force flush: <code style={{ fontSize: '10px' }}>EXEC sp_query_store_flush_db;</code></>
+                )}
               </div>
             )}
             {diag.isQueryStoreOn && diag.qsRuntimeStatsRows > 0 && diag.qsWindowRows === 0 && (
               <div style={{ fontSize: '11px', color: '#fbbf24', marginBottom: '4px' }}>
-                • QS has {diag.qsRuntimeStatsRows.toLocaleString()} rows but <strong>none in the {hours}h window</strong>. Try widening the window (e.g. 7d) or check QS cleanup policy.
+                • {isPg ? 'pg_stat_statements' : 'QS'} has {diag.qsRuntimeStatsRows.toLocaleString()} rows but <strong>none in the {hours}h window</strong>. Try widening the window (e.g. 7d).
               </div>
             )}
             {diag.dmvPlanCacheRows === 0 && (
               <div style={{ fontSize: '11px', color: '#fbbf24', marginBottom: '4px' }}>
-                • Plan cache (dm_exec_query_stats) is <strong>empty</strong>. This suggests the connection account may lack <code>VIEW SERVER STATE</code> permission, or the cache was recently cleared.
+                {isPg ? (
+                  <>• <code>pg_stat_activity</code> shows no other active backends right now. Grant <code>pg_read_all_stats</code> to see queries from other database roles.</>
+                ) : (
+                  <>• Plan cache (dm_exec_query_stats) is <strong>empty</strong>. This suggests the connection account may lack <code>VIEW SERVER STATE</code> permission, or the cache was recently cleared.</>
+                )}
               </div>
             )}
-            {diag.dmvPlanCacheRows > 0 && diag.dmvWindowRows === 0 && (
+            {!isPg && diag.dmvPlanCacheRows > 0 && diag.dmvWindowRows === 0 && (
               <div style={{ fontSize: '11px', color: '#fbbf24', marginBottom: '4px' }}>
                 • Plan cache has {diag.dmvPlanCacheRows.toLocaleString()} entries but none in {hours}h window. All cached queries pre-date the window — try widening to 7d or 30d.
               </div>

@@ -1,11 +1,12 @@
 package livedb
 
-// ConnectionConfig defines parameters for connecting to SQL Server
+// ConnectionConfig defines parameters for connecting to SQL Server or PostgreSQL
 type ConnectionConfig struct {
+	Engine                 string `json:"engine,omitempty"` // "sqlserver" or "postgresql"
 	Server                 string `json:"server"`
 	Port                   int    `json:"port"`
 	Database               string `json:"database"`
-	AuthType               string `json:"authType"` // "sql", "windows", "demo"
+	AuthType               string `json:"authType"` // "sql" or "windows"
 	Username               string `json:"username"`
 	Password               string `json:"password"`
 	Encrypt                bool   `json:"encrypt"`

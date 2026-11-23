@@ -352,6 +352,7 @@ export namespace livedb {
 	    }
 	}
 	export class ConnectionConfig {
+	    engine?: string;
 	    server: string;
 	    port: number;
 	    database: string;
@@ -369,6 +370,7 @@ export namespace livedb {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.engine = source["engine"];
 	        this.server = source["server"];
 	        this.port = source["port"];
 	        this.database = source["database"];

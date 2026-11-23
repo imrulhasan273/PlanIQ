@@ -18,7 +18,10 @@ func (c *Client) GetActiveSessions(ctx context.Context, limit int) ([]ActiveSess
 	defer c.mu.RUnlock()
 
 	if !c.status.Connected || c.db == nil {
-		return nil, fmt.Errorf("not connected to SQL Server")
+		return nil, fmt.Errorf("not connected to database")
+	}
+	if c.isPostgres() {
+		return c.pgGetActiveSessions(ctx, limit)
 	}
 
 	if limit <= 0 {
@@ -127,6 +130,9 @@ func (c *Client) GetSessionPlan(ctx context.Context, planHandleHex string) (stri
 
 	if !c.status.Connected || c.db == nil {
 		return "", fmt.Errorf("not connected to database")
+	}
+	if c.isPostgres() {
+		return c.pgGetSessionPlan(ctx, planHandleHex)
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -362,6 +368,9 @@ func (c *Client) GetLiveDeadlocks(ctx context.Context, limit int) ([]LiveDeadloc
 		}
 		return nil, fmt.Errorf("not connected and no local deadlock history available")
 	}
+	if c.isPostgres() {
+		return c.pgGetLiveDeadlocks(ctx, limit)
+	}
 
 	if limit <= 0 || limit > 25 {
 		limit = 15
@@ -488,6 +497,9 @@ func (c *Client) GetBlockingSessions(ctx context.Context) ([]LiveBlockingSession
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
 	}
+	if c.isPostgres() {
+		return c.pgGetBlockingSessions(ctx)
+	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
@@ -561,6 +573,9 @@ func (c *Client) GetTempDBUsage(ctx context.Context, limit int) ([]LiveTempDBUsa
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
 	}
+	if c.isPostgres() {
+		return c.pgGetTempDBUsage(ctx, limit)
+	}
 
 	if limit <= 0 {
 		limit = 100
@@ -630,6 +645,9 @@ func (c *Client) GetIdleSessions(ctx context.Context, limit int) ([]IdleSession,
 
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
+	}
+	if c.isPostgres() {
+		return c.pgGetIdleSessions(ctx, limit)
 	}
 
 	if limit <= 0 {

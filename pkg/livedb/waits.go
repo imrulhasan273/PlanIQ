@@ -15,8 +15,11 @@ func (c *Client) GetWaitStats(ctx context.Context, limit int) ([]LiveWaitStat, e
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if !c.status.Connected {
+	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
+	}
+	if c.isPostgres() {
+		return c.pgGetWaitStats(ctx, limit)
 	}
 
 	if limit <= 0 {
@@ -126,6 +129,9 @@ func (c *Client) GetPerformanceAdvisors(ctx context.Context) ([]PerformanceAdvis
 
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
+	}
+	if c.isPostgres() {
+		return c.pgGetPerformanceAdvisors(ctx)
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -269,6 +275,10 @@ func (c *Client) GetWaitHistory(ctx context.Context) ([]WaitTimeHistoryPoint, er
 		return nil, fmt.Errorf("not connected and no local history cache available")
 	}
 
+	if c.isPostgres() {
+		return c.pgGetWaitHistory(ctx)
+	}
+
 	queryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 
@@ -399,7 +409,10 @@ func (c *Client) SyncSevenDayHistory(ctx context.Context) (*SevenDaySyncResult, 
 	defer c.mu.RUnlock()
 
 	if !c.status.Connected || c.db == nil {
-		return nil, fmt.Errorf("cannot sync history: not connected to SQL Server")
+		return nil, fmt.Errorf("cannot sync history: not connected to database")
+	}
+	if c.isPostgres() {
+		return c.pgSyncSevenDayHistory(ctx)
 	}
 
 	res := &SevenDaySyncResult{

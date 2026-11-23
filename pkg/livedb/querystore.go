@@ -17,6 +17,9 @@ func (c *Client) GetQueryStoreDiagnostic(ctx context.Context, hours int) (*Query
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
 	}
+	if c.isPostgres() {
+		return c.pgGetQueryStoreDiagnostic(ctx, hours)
+	}
 	if hours <= 0 {
 		hours = 24
 	}
@@ -95,6 +98,9 @@ func (c *Client) GetQueryStoreTopWindow(ctx context.Context, orderBy string, top
 
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
+	}
+	if c.isPostgres() {
+		return c.pgGetQueryStoreTopWindow(ctx, orderBy, topN, hours)
 	}
 
 	if topN <= 0 || topN > 500 {
@@ -586,6 +592,9 @@ func (c *Client) GetLiveDPAPerspective(ctx context.Context, perspective string) 
 
 	if !c.status.Connected || c.db == nil {
 		return nil, fmt.Errorf("not connected")
+	}
+	if c.isPostgres() {
+		return c.pgGetLiveDPAPerspective(ctx, perspective)
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)

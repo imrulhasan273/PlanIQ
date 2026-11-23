@@ -1,4 +1,5 @@
 export interface ConnectionConfig {
+  engine?: 'sqlserver' | 'postgresql';
   server: string;
   port: number;
   database: string;
