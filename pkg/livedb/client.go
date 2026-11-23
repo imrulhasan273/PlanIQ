@@ -2951,9 +2951,8 @@ func (c *Client) GetPLEReport(ctx context.Context) (*PLEReport, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Offline or demo fallback
 	if !c.status.Connected || c.db == nil {
-		return getDemoPLEReport(), nil
+		return nil, fmt.Errorf("not connected to live SQL Server")
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, 6*time.Second)

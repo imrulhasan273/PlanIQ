@@ -38,14 +38,14 @@ export const SkewResolutionModal: React.FC<SkewResolutionModalProps> = ({
   const skewRatio = node.skewRatio && node.skewRatio > 1
     ? node.skewRatio
     : node.skewRatio
-    ? 1 / node.skewRatio
-    : (node.estimateRows > 0 && node.actualRows > 0 ? node.estimateRows / node.actualRows : 3372);
+      ? 1 / node.skewRatio
+      : (node.estimateRows > 0 && node.actualRows > 0 ? node.estimateRows / node.actualRows : 3372);
 
   const isPg = !!node.pg || !!(node as any).isPg;
   const isOverestimated = (node.estimateRows || 1) > (node.actualRows || 1);
   const actualRowsStr = node.hasActualRows ? node.actualRows.toLocaleString() : '14';
   const estimatedRowsStr = node.estimateRows > 0 ? node.estimateRows.toLocaleString() : '47,206.6';
-  
+
   const rawTable = node.table || (isPg ? 'target_table' : '#FilteredOrders');
   const tableName = isPg
     ? (node.schema ? `${node.schema}.${rawTable}` : rawTable)
@@ -60,12 +60,12 @@ export const SkewResolutionModal: React.FC<SkewResolutionModalProps> = ({
   const step1Sql = isPg
     ? `ANALYZE ${tableName};`
     : `UPDATE STATISTICS ${tableName} WITH FULLSCAN;`;
-  
+
   const step2Sql = isPg
     ? `CREATE INDEX idx_${cleanTable}_${firstCol} ON ${tableName} (${firstCol});`
     : rawTable.startsWith('#')
-    ? `CREATE CLUSTERED INDEX CIX_${cleanTable} ON ${tableName} (${firstCol});`
-    : `CREATE NONCLUSTERED INDEX IX_${cleanTable}_Optimal ON ${tableName} (${firstCol}) INCLUDE (${node.outputColumns.slice(1, 4).join(', ') || 'Amount'});`;
+      ? `CREATE CLUSTERED INDEX CIX_${cleanTable} ON ${tableName} (${firstCol});`
+      : `CREATE NONCLUSTERED INDEX IX_${cleanTable}_Optimal ON ${tableName} (${firstCol}) INCLUDE (${node.outputColumns.slice(1, 4).join(', ') || 'Amount'});`;
 
   const step3Sql = isPg
     ? `-- Increase statistics target and re-analyze to capture skewed data distribution:\nALTER TABLE ${tableName} ALTER COLUMN ${firstCol} SET STATISTICS 1000;\nANALYZE ${tableName};`
@@ -73,7 +73,7 @@ export const SkewResolutionModal: React.FC<SkewResolutionModalProps> = ({
 
   const step4Sql = isPg
     ? `-- Increase session workspace memory to prevent disk spills in Sort and Hash:\nSET LOCAL work_mem = '64MB';\n-- On SSD/NVMe storage, align random page fetch cost:\nSET LOCAL random_page_cost = 1.1;`
-    : `-- If parameter values are predictable, pin optimal low-volume plan:\nOPTION (OPTIMIZE FOR (@BranchId = 10));`;
+    : `-- If parameter values are predictable, pin optimal low-volume plan:\nOPTION (OPTIMIZE FOR (@RegionId = 10));`;
 
   const fullScript = isPg
     ? `-- =====================================================================
@@ -111,7 +111,7 @@ ${step1Sql}
 ${step2Sql}
 
 -- STEP 3: Parameter Sniffing Bypass (OPTION RECOMPILE)
--- If row counts oscillate by branch, date, or user, append OPTION (RECOMPILE)
+-- If row counts oscillate by region, date, or tenant, append OPTION (RECOMPILE)
 -- to the query inside your stored procedure. This forces the optimizer to inspect
 -- the exact row count at runtime rather than reusing a cached 47k-row plan:
 ${step3Sql}
@@ -281,13 +281,13 @@ ${step4Sql}
                   <div className="root-cause-box">
                     <div className="rc-title">📌 Parameter Sniffing</div>
                     <p className="rc-desc">
-                      The stored procedure was compiled using parameters that genuinely matched 47,000 rows (e.g. <code>@BranchId = NULL</code> or a primary head office branch). When invoked with your branch (14 rows), SQL Server reused the cached 47k-row plan.
+                      The stored procedure was compiled using parameters that genuinely matched 47,000 rows (e.g. <code>@RegionId = NULL</code> or a high-volume region). When invoked with a low-volume region (14 rows), SQL Server reused the cached 47k-row plan.
                     </p>
                   </div>
                   <div className="root-cause-box">
                     <div className="rc-title">📌 Partition Key Multiplications</div>
                     <p className="rc-desc">
-                      When queries filter across partitioned tables (e.g. <code>RangePartitionNew([@BranchId], ...)</code>), the Cardinality Estimator often multiplies partition probabilities or assumes uniform row distribution across all partitions.
+                      When queries filter across partitioned tables (e.g. <code>RangePartitionNew([@TenantId], ...)</code>), the Cardinality Estimator often multiplies partition probabilities or assumes uniform row distribution across all partitions.
                     </p>
                   </div>
                 </>

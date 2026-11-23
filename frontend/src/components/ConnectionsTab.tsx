@@ -803,7 +803,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder={isPg ? "e.g., PostgreSQL Production (pg-prod-01)" : "e.g., Production Cluster (DC-DBPROD1)"}
+                    placeholder={isPg ? "e.g., PostgreSQL Production (pg-prod-01)" : "e.g., Production SQL Server (sql-prod-01)"}
                     className="conn-input"
                   />
                 </div>
@@ -828,7 +828,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     type="text"
                     value={formData.server}
                     onChange={(e) => setFormData({ ...formData, server: e.target.value })}
-                    placeholder={isPg ? "localhost, 127.0.0.1, or db.example.com" : "localhost, 192.168.1.100, or .\\SQLEXPRESS"}
+                    placeholder={isPg ? "localhost, 127.0.0.1, or db.example.com" : "localhost, sql.example.com, or .\\SQLEXPRESS"}
                     className="conn-input"
                   />
                   <div className="conn-shortcuts-row">

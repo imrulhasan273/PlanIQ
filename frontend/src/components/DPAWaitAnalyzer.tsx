@@ -67,23 +67,23 @@ type DPAPerspective =
 
 type DPABottomDrawerTab = 'resources' | 'sqltext' | 'blocking' | 'deadlocks';
 
-// SolarWinds DPA Exact Palette for Top 15 Query Hashes (Screenshot parity)
+// Standard Palette for Top 15 Query Hashes
 const DPA_QUERY_PALETTE = [
-  '#3949ab', // Slate Blue (#4675209948)
-  '#7cb342', // Lime Green (#2589928315)
-  '#3f51b5', // Royal Blue (#2366649485)
-  '#c0ca33', // Olive/Gold (#2446580537)
-  '#00acc1', // Cyan (#5290520832)
-  '#d87a38', // Amber/Orange (#3918961931)
-  '#1a237e', // Navy (#4689059277)
-  '#7e57c2', // Light Purple (#6375046345)
-  '#8bc34a', // Lime Green (#5320725829)
-  '#2e7d32', // Dark Green (#4648768235)
-  '#ec407a', // Pink (#3973389656)
-  '#ab47bc', // Magenta (#5040501700)
-  '#00897b', // Teal (#5135283776)
-  '#1e88e5', // Bright Blue (#4256233282)
-  '#26a69a'  // Turquoise (#2259449293)
+  '#3949ab', // Slate Blue
+  '#7cb342', // Lime Green
+  '#3f51b5', // Royal Blue
+  '#c0ca33', // Olive / Gold
+  '#00acc1', // Cyan
+  '#d87a38', // Amber / Orange
+  '#1a237e', // Navy
+  '#7e57c2', // Light Purple
+  '#8bc34a', // Light Green
+  '#2e7d32', // Dark Green
+  '#ec407a', // Pink
+  '#ab47bc', // Magenta
+  '#00897b', // Teal
+  '#1e88e5', // Bright Blue
+  '#26a69a'  // Turquoise
 ];
 
 // SolarWinds DPA Standard Wait Colors

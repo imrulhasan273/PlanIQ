@@ -61,7 +61,7 @@ export const QueryStoreStudio: React.FC<QueryStoreStudioProps> = ({
   const [groupBy, setGroupBy] = useState<'Query Hash' | 'Plan Hash' | 'Query ID' | 'None'>('Query Hash');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [timeCategory, setTimeCategory] = useState<'Local' | 'UTC'>('Local');
-  const [databaseName, setDatabaseName] = useState<string>(status?.databaseName || 'ArenaOnlineProd');
+  const [databaseName, setDatabaseName] = useState<string>(status?.databaseName || '');
 
   // Chart Metric Selection
   const [chartMetric, setChartMetric] = useState<string>('Total CPU (ms)');

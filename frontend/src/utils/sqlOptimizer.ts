@@ -57,7 +57,7 @@ function inferDataType(colName: string, rawExpr: string): string {
   if (upperExpr.includes('COUNT(')) return 'INT';
   if (upperExpr.includes('SUM(') || upperExpr.includes('AVG(')) return 'DECIMAL(18, 2)';
 
-  if (lowerName.endsWith('id') || lowerName.includes('memberid') || lowerName.includes('branchid') || lowerName.includes('groupid') || lowerName.includes('accountid')) {
+  if (lowerName.endsWith('id') || lowerName.includes('_id')) {
     return 'BIGINT';
   }
   if (lowerName.includes('status') || lowerName.includes('type') || lowerName.includes('count') || lowerName.includes('number')) {

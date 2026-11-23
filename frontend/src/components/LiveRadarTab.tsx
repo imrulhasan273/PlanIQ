@@ -131,96 +131,6 @@ const SESSION_COLUMNS: ColumnDef[] = [
   { id: 'action', label: 'Action', defaultVisible: true, type: 'text' }
 ];
 
-const BENCHMARK_ADVISORS: PerformanceAdvisor[] = [
-  {
-    id: 'adv-cpu-2589928315',
-    severity: 'critical',
-    category: 'CPU/Memory',
-    title: 'Query #2589928315 accounted for high CPU execution (100% In-Memory/CPU)',
-    description: 'Cumulative wait time reached 1,642.5 minutes in 24 hours. Query spins in SOS_SCHEDULER_YIELD (98.2% of wait) inside an application N+1 loop executing 649,945 times without composite index.',
-    queryId: 2589928315,
-    queryText: 'SELECT DISTINCT [o].[WarehouseId] FROM [dbo].[OrderStatusHistory] AS [o] WHERE [o].[OrderId] = @orderId',
-    metricValue: '238.4 min Peak Wait (649,945 Executions)',
-    timestamp: 'Today 10:00 AM',
-    recommendation: 'Create composite nonclustered index on ([OrderId] ASC, [WarehouseId] ASC) to replace Clustered Index Scan with 2-page Index Seek. Batch client lookups to eliminate 650,000 round-trips.'
-  },
-  {
-    id: 'adv-exec-4675209948',
-    severity: 'warning',
-    category: 'Executions',
-    title: 'Query #4675209948 has high execution frequency (124,800 executions)',
-    description: 'High execution volume query generating significant plan cache churn and lock overhead.',
-    queryId: 4675209948,
-    queryText: 'SELECT [a].[TxnId], [a].[Amount], [a].[TxnDate] FROM [dbo].[AccountTransactions] AS [a] WHERE [a].[AccountId] = @accountId',
-    metricValue: '42.1 min Wait (124,800 Executions)',
-    timestamp: 'Today 09:00 AM',
-    recommendation: 'Consider client-side caching or batching queries to reduce round-trips to SQL Server.'
-  },
-  {
-    id: 'adv-plan-2366649485',
-    severity: 'warning',
-    category: 'Plan Regression',
-    title: 'Query #2366649485 plan has changed / recompiled 12 times',
-    description: 'Multiple plan compilations detected. May indicate parameter sniffing or temporary table schema modifications triggering recompilation.',
-    queryId: 2366649485,
-    queryText: 'SELECT [c].[CustomerId], SUM([t].[Amount]) FROM [dbo].[Customer] [c] JOIN [dbo].[Transaction] [t] ON [c].[Id] = [t].[CustId] WHERE [c].[Region] = @region GROUP BY [c].[CustomerId]',
-    metricValue: '18.5 min Wait (12 Recompilations)',
-    timestamp: 'Yesterday 14:00 PM',
-    recommendation: 'Check for OPTION(RECOMPILE) or optimize query parameter sniffing with OPTIMIZE FOR.'
-  }
-];
-
-const BENCHMARK_ADVISORS_PG: PerformanceAdvisor[] = [
-  {
-    id: 'adv-pg-seqscan-104829',
-    severity: 'critical',
-    category: 'CPU/Memory',
-    title: 'Query #104829 accounted for severe I/O (Sequential Scan on large relation "customer_orders")',
-    description: 'Cumulative wait time reached 1,420.5 minutes in 24 hours. Query spends 92.4% waiting in "IO:DataFileRead" performing Seq Scan over 12,450,000 tuples without matching index on (tenant_id, order_date).',
-    queryId: 104829,
-    queryText: 'SELECT order_id, customer_id, total_amount, order_status FROM customer_orders WHERE tenant_id = $1 AND order_date >= $2 ORDER BY order_date DESC LIMIT 50',
-    metricValue: '184.2 min Peak Wait (820,410 Executions)',
-    timestamp: 'Today 10:00 AM',
-    recommendation: 'CREATE INDEX CONCURRENTLY idx_customer_orders_tenant_date ON customer_orders (tenant_id, order_date DESC) INCLUDE (total_amount, order_status); Run ANALYZE customer_orders to update planner statistics.'
-  },
-  {
-    id: 'adv-pg-spill-209381',
-    severity: 'critical',
-    category: 'Disk Spills',
-    title: 'Query #209381 spilled 4.8 GB into temporary disk files (pgsql_tmp) due to work_mem constraint',
-    description: 'External Sort and HashAggregate exceeded 4MB work_mem limit, writing temporary files to pgsql_tmp. Observed elevated IO:BufFileWrite and IO:BufFileRead wait events.',
-    queryId: 209381,
-    queryText: 'SELECT department_id, COUNT(*), AVG(salary), json_agg(employee_id) FROM employees GROUP BY department_id, project_id ORDER BY AVG(salary) DESC',
-    metricValue: '4.8 GB Spill (3,420 Executions)',
-    timestamp: 'Today 09:30 AM',
-    recommendation: 'Increase work_mem for reporting roles (e.g., SET LOCAL work_mem = "64MB") or tune hash_mem_multiplier in postgresql.conf.'
-  },
-  {
-    id: 'adv-pg-lock-304918',
-    severity: 'warning',
-    category: 'Locking',
-    title: 'Substantial RowExclusiveLock / ExclusiveLock contention on "inventory_items"',
-    description: 'Multiple concurrent transactions queued behind RowShareLock on inventory table during batch stock replenishment. Cumulative Lock:transactionid wait time: 48.6 minutes.',
-    queryId: 304918,
-    queryText: 'UPDATE inventory_items SET stock_qty = stock_qty - $1, updated_at = NOW() WHERE item_id = $2',
-    metricValue: '48.6 min Wait (45,200 Executions)',
-    timestamp: 'Today 09:00 AM',
-    recommendation: 'Order updates consistently by item_id in batch transactions or adopt SELECT ... FOR UPDATE SKIP LOCKED for worker queue consumers.'
-  },
-  {
-    id: 'adv-pg-vacuum-410294',
-    severity: 'warning',
-    category: 'Autovacuum',
-    title: 'Table "audit_log" approaching autovacuum_freeze_max_age (Wraparound Risk)',
-    description: 'RelFrozenXID age is 142,000,000 transactions. Autovacuum is throttled by aggressive client transactions holding long-lived snapshots.',
-    queryId: 410294,
-    queryText: 'VACUUM FREEZE ANALYZE audit_log',
-    metricValue: '142M XIDs Age (High Bloat)',
-    timestamp: 'Today 08:30 AM',
-    recommendation: 'Investigate idle-in-transaction backends blocking vacuum cleanup. Run VACUUM (VERBOSE, ANALYZE) audit_log during low traffic window.'
-  }
-];
-
 export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
   status,
   engine = 'sqlserver',
@@ -245,11 +155,11 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
   const [idleSessions, setIdleSessions] = useState<IdleSession[]>([]);
 
   // Enterprise Observability States (SolarWinds DPA Engine)
-  const [advisors, setAdvisors] = useState<PerformanceAdvisor[]>(() => (isPg ? BENCHMARK_ADVISORS_PG : BENCHMARK_ADVISORS));
+  const [advisors, setAdvisors] = useState<PerformanceAdvisor[]>([]);
 
   useEffect(() => {
     if (!isConnected) {
-      setAdvisors(isPg ? BENCHMARK_ADVISORS_PG : BENCHMARK_ADVISORS);
+      setAdvisors([]);
     }
   }, [isPg, isConnected]);
   const [advisorFilter, setAdvisorFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all');
@@ -2628,8 +2538,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                                   <td colSpan={6} style={{ padding: '8px 14px 16px', background: 'transparent' }}>
                                     <DPAQueryWaitChart
                                       advisor={adv}
-                                      serverName={status?.serverName || (isPg ? 'postgres-prod (PostgreSQL)' : 'DC-DBPROD1 (SQL Server)')}
-                                      dbName={status?.databaseName || (isPg ? 'postgres' : 'DBPROD1')}
+                                      serverName={status?.serverName || ''}
+                                      dbName={status?.databaseName || ''}
                                       onClose={() => setOpenWaitGraphAdvisorId(null)}
                                       onCopySQL={(sql) => handleCopy(sql, `adv-tbl-sql-${adv.id}`)}
                                       onAnalyzeAI={(sql) => {
@@ -2773,8 +2683,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                             {openWaitGraphAdvisorId === adv.id && (
                               <DPAQueryWaitChart
                                 advisor={adv}
-                                serverName={status?.serverName || (isPg ? 'postgres-prod (PostgreSQL)' : 'DC-DBPROD1 (SQL Server)')}
-                                dbName={status?.databaseName || (isPg ? 'postgres' : 'DBPROD1')}
+                                serverName={status?.serverName || ''}
+                                dbName={status?.databaseName || ''}
                                 onClose={() => setOpenWaitGraphAdvisorId(null)}
                                 onCopySQL={(sql) => handleCopy(sql, `adv-card-sql-${adv.id}`)}
                                 onAnalyzeAI={(sql) => {

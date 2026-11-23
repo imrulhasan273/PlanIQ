@@ -42,8 +42,8 @@ interface HourlyWaitData {
 
 export const DPAQueryWaitChart: React.FC<DPAQueryWaitChartProps> = ({
   advisor,
-  serverName = 'DC-DBPROD1 (SQL Server)',
-  dbName = 'DBPROD1',
+  serverName = '',
+  dbName = '',
   onClose,
   onCopySQL,
   onAnalyzeAI
@@ -183,14 +183,11 @@ export const DPAQueryWaitChart: React.FC<DPAQueryWaitChartProps> = ({
     };
   }, [isLightMode]);
 
-  // Extract query identifier from advisor (e.g. "SQL: 2589928315" or query hash "ce55817c")
+  // Extract query identifier from advisor (e.g. queryId or hash from title)
   const queryHash = useMemo(() => {
     if (advisor.queryId) return String(advisor.queryId);
     const hashMatch = advisor.title.match(/#([a-zA-Z0-9_]+)/);
     if (hashMatch && hashMatch[1]) return hashMatch[1];
-    if (advisor.id.includes('2589928315') || (advisor.queryText && advisor.queryText.includes('OrderStatusHistory'))) {
-      return '2589928315';
-    }
     return advisor.id.replace('adv-', '');
   }, [advisor]);
 
@@ -223,32 +220,14 @@ export const DPAQueryWaitChart: React.FC<DPAQueryWaitChartProps> = ({
       execCount = parseInt(execMatch[1].replace(/,/g, ''), 10);
     }
 
-    // 4. Special benchmark query 2589928315 (OrderStatusHistory)
-    if (
-      queryHash === '2589928315' ||
-      advisor.id.includes('2589928315') ||
-      (advisor.queryText && advisor.queryText.includes('OrderStatusHistory'))
-    ) {
-      return {
-        isBenchmark: true,
-        cpuMinutes: 1612.9,
-        ioMinutes: 21.4,
-        memAllocMinutes: 8.2,
-        otherMinutes: 1.6,
-        totalDurationMinutes: 1642.5,
-        execCount: 649945
-      };
-    }
-
-    const cpuMinutes = cpuMs > 0 ? cpuMs / 60000.0 : 120.0;
+    const cpuMinutes = cpuMs > 0 ? cpuMs / 60000.0 : 0;
     const totalDurationMinutes = durationMs > 0 ? durationMs / 60000.0 : cpuMinutes * 1.05;
-    const waitDiffMinutes = Math.max(0.1, totalDurationMinutes - cpuMinutes);
+    const waitDiffMinutes = Math.max(0, totalDurationMinutes - cpuMinutes);
     const ioMinutes = waitDiffMinutes * 0.75;
     const memAllocMinutes = waitDiffMinutes * 0.2;
     const otherMinutes = waitDiffMinutes * 0.05;
 
     return {
-      isBenchmark: false,
       cpuMinutes: Math.round(cpuMinutes * 10) / 10,
       ioMinutes: Math.round(ioMinutes * 10) / 10,
       memAllocMinutes: Math.round(memAllocMinutes * 10) / 10,
@@ -314,69 +293,6 @@ export const DPAQueryWaitChart: React.FC<DPAQueryWaitChartProps> = ({
 
     const targetDay = targetDate.getDate();
     const targetMonth = targetDate.toLocaleDateString(undefined, { month: 'short' });
-
-    if (parsedMetrics.isBenchmark) {
-      const hours = [
-        { hr: '12:00 AM', baseMin: 0.1, io: 0.05, mem: 0.02, other: 0.01 },
-        { hr: '1:00 AM', baseMin: 0.05, io: 0.02, mem: 0.01, other: 0.01 },
-        { hr: '2:00 AM', baseMin: 0.05, io: 0.02, mem: 0.01, other: 0.01 },
-        { hr: '3:00 AM', baseMin: 0.05, io: 0.02, mem: 0.01, other: 0.01 },
-        { hr: '4:00 AM', baseMin: 0.2, io: 0.05, mem: 0.02, other: 0.01 },
-        { hr: '5:00 AM', baseMin: 0.8, io: 0.1, mem: 0.05, other: 0.02 },
-        { hr: '6:00 AM', baseMin: 2.4, io: 0.2, mem: 0.1, other: 0.05 },
-        { hr: '7:00 AM', baseMin: 12.1, io: 0.5, mem: 0.2, other: 0.1 },
-        { hr: '8:00 AM', baseMin: 82.5, io: 1.5, mem: 0.4, other: 0.2 },
-        { hr: '9:00 AM', baseMin: 234.1, io: 3.2, mem: 1.1, other: 0.2 }, // PEAK ~ 238.4m
-        { hr: '10:00 AM', baseMin: 201.2, io: 3.1, mem: 1.3, other: 0.3 },
-        { hr: '11:00 AM', baseMin: 198.0, io: 2.9, mem: 1.2, other: 0.2 },
-        { hr: '12:00 PM', baseMin: 184.2, io: 3.0, mem: 1.3, other: 0.3 },
-        { hr: '1:00 PM', baseMin: 142.0, io: 2.2, mem: 1.0, other: 0.2 },
-        { hr: '2:00 PM', baseMin: 90.1, io: 1.6, mem: 0.7, other: 0.2 },
-        { hr: '3:00 PM', baseMin: 98.4, io: 1.8, mem: 0.6, other: 0.2 },
-        { hr: '4:00 PM', baseMin: 88.0, io: 1.7, mem: 0.6, other: 0.2 },
-        { hr: '5:00 PM', baseMin: 53.8, io: 1.0, mem: 0.4, other: 0.1 },
-        { hr: '6:00 PM', baseMin: 53.5, io: 0.9, mem: 0.4, other: 0.1 },
-        { hr: '7:00 PM', baseMin: 78.5, io: 1.4, mem: 0.7, other: 0.2 },
-        { hr: '8:00 PM', baseMin: 69.4, io: 1.3, mem: 0.5, other: 0.2 },
-        { hr: '9:00 PM', baseMin: 31.6, io: 0.6, mem: 0.3, other: 0.1 },
-        { hr: '10:00 PM', baseMin: 6.5, io: 0.2, mem: 0.1, other: 0.05 },
-        { hr: '11:00 PM', baseMin: 0.8, io: 0.08, mem: 0.04, other: 0.02 }
-      ];
-
-      // File access latency in seconds from SolarWinds DPA (Peak 25s at 4:00 PM)
-      const benchmarkFileSeconds = [
-        0, 0, 0, 0, 0, 0, 0, 2, 12, 14, 10, 5, 6, 7, 4, 13, 25, 9, 13, 21, 6, 5, 2, 0
-      ];
-
-      return hours.map((h, idx) => {
-        const isFuture = isFutureDay || (isToday && idx > currentHour);
-        if (isFuture) {
-          return {
-            hourLabel: h.hr,
-            fullTimeLabel: `${targetMonth} ${targetDay}, ${h.hr}`,
-            totalMinutes: 0,
-            memoryCpuMin: 0,
-            pageIOLatchMin: 0,
-            memoryAllocMin: 0,
-            otherMin: 0,
-            fileSeconds: 0,
-            isFuture: true
-          };
-        }
-        const total = Math.round((h.baseMin + h.io + h.mem + h.other) * 10) / 10;
-        return {
-          hourLabel: h.hr,
-          fullTimeLabel: `${targetMonth} ${targetDay}, ${h.hr}`,
-          totalMinutes: total,
-          memoryCpuMin: h.baseMin,
-          pageIOLatchMin: h.io,
-          memoryAllocMin: h.mem,
-          otherMin: h.other,
-          fileSeconds: benchmarkFileSeconds[idx] ?? Math.round(h.io * 60),
-          isFuture: false
-        };
-      });
-    }
 
     // Dynamic mathematical distribution for real queries from the database
     const hourlyWeights = [
@@ -523,16 +439,12 @@ export const DPAQueryWaitChart: React.FC<DPAQueryWaitChartProps> = ({
     setTimeout(() => setCopiedCode(null), 2000);
   };
 
-  const sqlText =
-    advisor.queryText ||
-    `SELECT DISTINCT [o].[WarehouseId] FROM [dbo].[OrderStatusHistory] AS [o] WHERE [o].[OrderId] = @orderId`;
+  const sqlText = advisor.queryText || '-- No SQL text available for this finding';
 
   // Dynamic Intelligent Analysis Diagnosis tailored to the real query
   const analysisReport = useMemo(() => {
     const text = advisor.queryText || '';
     const isMSTVF = /CREATE\s+FUNCTION/i.test(text) && /RETURNS\s+@\w+\s+TABLE/i.test(text);
-    const isOrderStatus = queryHash === '2589928315' || /OrderStatusHistory/i.test(text);
-    const isAccountTxns = /AccountTransactions/i.test(text);
 
     if (isMSTVF) {
       const funcNameMatch = text.match(/CREATE\s+FUNCTION\s+([a-zA-Z0-9_.\[\]]+)/i);
@@ -553,29 +465,6 @@ RETURN (
       };
     }
 
-    if (isOrderStatus) {
-      return {
-        title: 'Critical Bottleneck: N+1 Execution Loop with Clustered Index Scans',
-        description: `During peak business hours (8:00 AM – 2:00 PM), this query accumulated over 200–238 minutes of wait per hour. 98.2% of the total delay is Memory/CPU (SOS_SCHEDULER_YIELD) with near-zero physical I/O. The application is repeatedly executing this statement inside an N+1 loop (~650,000 executions) performing full Clustered Index Scans on table [dbo].[OrderStatusHistory].`,
-        recommendationTitle: 'Recommended Composite Index Fix (Eliminates 99.9% of Delay):',
-        recommendationText: `Create a composite nonclustered index on ([OrderId] ASC, [WarehouseId] ASC) to replace Clustered Index Scan with a 2-page Index Seek. Batch client lookups to eliminate 650,000 round-trips.`,
-        ddlCode: `CREATE NONCLUSTERED INDEX IX_OrderStatusHistory_OrderId_WarehouseId
-ON [dbo].[OrderStatusHistory] ([OrderId] ASC, [WarehouseId] ASC);`
-      };
-    }
-
-    if (isAccountTxns) {
-      return {
-        title: 'High Execution Frequency Bottleneck on AccountTransactions',
-        description: `High execution volume query (${parsedMetrics.execCount.toLocaleString()} calls) generating significant plan cache churn and lock overhead. Cumulative duration reached ${totals.totalWaitMinutes.toLocaleString()} minutes.`,
-        recommendationTitle: 'Recommended Indexing & Caching Strategy:',
-        recommendationText: `Add covering nonclustered index on [dbo].[AccountTransactions] and implement client-side caching to reduce round-trips to SQL Server.`,
-        ddlCode: `CREATE NONCLUSTERED INDEX IX_AccountTransactions_Account_TxnDate
-ON [dbo].[AccountTransactions] ([AccountId] ASC)
-INCLUDE ([TxnId], [Amount], [TxnDate]);`
-      };
-    }
-
     return {
       title: `${advisor.title}`,
       description:
@@ -589,61 +478,18 @@ INCLUDE ([TxnId], [Amount], [TxnDate]);`
     };
   }, [advisor, parsedMetrics, totals, queryHash]);
 
-  // Supporting Data Dimension Sections (Databases, Users, Files, Machines, Programs)
+  // Supporting Data Dimension Sections (only populated when live database name is available)
   const supportingSections = useMemo(() => {
-    const activeDb = dbName && dbName !== 'DBPROD1' ? dbName : 'SalesDBProd';
-    const filePath = `F:\\${activeDb}DB\\${activeDb}.mdf`;
-
+    if (!dbName) return [];
     return [
       {
         id: 'databases',
-        title: 'Databases',
-        chartTitle: 'Top Databases for SQL',
-        summary: activeDb,
+        title: 'Database',
+        subtitle: undefined as string | undefined,
+        chartTitle: 'Target Database',
+        summary: dbName,
         items: [
-          { name: activeDb, color: '#9333ea', pct: 1.0 } // Purple exactly matching SolarWinds screenshot
-        ]
-      },
-      {
-        id: 'dbusers',
-        title: 'Database Users',
-        chartTitle: 'Top Database Users for SQL',
-        summary: 'pdu',
-        items: [
-          { name: 'pdu', color: '#0284c7', pct: 1.0 }
-        ]
-      },
-      {
-        id: 'files',
-        title: 'Files',
-        subtitle: '(Only time spent on file access)',
-        unit: 'seconds',
-        chartTitle: 'Top Files for SQL',
-        summary: filePath,
-        items: [
-          { name: filePath, color: '#be185d', pct: 1.0 } // Burgundy / Rose Crimson matching SolarWinds Image 2
-        ]
-      },
-      {
-        id: 'machines',
-        title: 'Machines (4)',
-        chartTitle: 'Top Machines for SQL',
-        summary: 'APPPROD9, APPPROD10, APPPROD5, APPPROD6',
-        items: [
-          { name: 'APPPROD9', color: '#3b82f6', pct: 0.35 },
-          { name: 'APPPROD10', color: '#10b981', pct: 0.30 },
-          { name: 'APPPROD5', color: '#f59e0b', pct: 0.20 },
-          { name: 'APPPROD6', color: '#ec4899', pct: 0.15 }
-        ]
-      },
-      {
-        id: 'programs',
-        title: 'Programs (2)',
-        chartTitle: 'Top Programs for SQL',
-        summary: 'EFCore/10.0.11 (Microsoft Windows 10.0.20348 X64), EFCore/10.0.11 (Microsoft Windows 10.0.14393 X64)',
-        items: [
-          { name: 'EFCore/10.0.11 (Microsoft Windows 10.0.20348 X64)', color: '#8b5cf6', pct: 0.60 },
-          { name: 'EFCore/10.0.11 (Microsoft Windows 10.0.14393 X64)', color: '#06b6d4', pct: 0.40 }
+          { name: dbName, color: '#9333ea', pct: 1.0 }
         ]
       }
     ];
@@ -993,7 +839,7 @@ INCLUDE ([TxnId], [Amount], [TxnDate]);`
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '10.5px', color: theme.breadcrumbMuted }}>
-            {parsedMetrics.isBenchmark ? 'Cumulative Benchmark Duration:' : 'Plan Cache Lifetime Duration:'}{' '}
+            Plan Cache Lifetime Duration:{' '}
             <strong style={{ color: '#dc2626' }} title={`${parsedMetrics.totalDurationMinutes.toLocaleString()} minutes`}>
               {formatStandardDuration(parsedMetrics.totalDurationMinutes)}
             </strong>{' '}
@@ -1618,10 +1464,15 @@ INCLUDE ([TxnId], [Amount], [TxnDate]);`
           </div>
         )}
 
-        {/* Tab 3: Supporting Data (Matching SolarWinds Screenshot Accordion Graphs!) */}
+        {/* Tab 3: Supporting Data */}
         {activeBottomTab === 'data' && (
           <div>
             {supportViewMode === 'graphs' ? (
+              supportingSections.length === 0 ? (
+                <div style={{ padding: '18px', fontSize: '11.5px', color: theme.mutedText, textAlign: 'center' }}>
+                  No supporting dimension breakdown available for this query. Switch to Table view to inspect hourly metrics.
+                </div>
+              ) : (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 {supportingSections.map((sec) => {
                   const isOpen = expandedSupportSection === sec.id;
@@ -1680,6 +1531,7 @@ INCLUDE ([TxnId], [Amount], [TxnDate]);`
                   );
                 })}
               </div>
+              )
             ) : (
               /* Raw Hourly Table Fallback */
               <div style={{ maxHeight: '260px', overflowY: 'auto', padding: '14px 18px' }}>
