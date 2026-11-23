@@ -192,10 +192,8 @@ PlanIQ is engineered as an **offline-first** diagnostic workbench:
 - **Plan & Deadlock Analysis:** SQL Server `.sqlplan`/`.xml` parsing, PostgreSQL EXPLAIN `.json` parsing, `.xdl` deadlock graphing, health scoring, root-cause diagnostics, missing index consolidation, A/B plan comparison, and the Tuning Playbook all execute locally in Go/TypeScript with zero database connection required.
 - **Deterministic DBA Rule Engine:** Generates query tuning advice and rewrites completely offline without external API calls.
 - **Local Persistence & Self-Contained Exports:** Settings, connection profiles (with **AES-256-GCM** encrypted passwords), and wait snapshots are stored locally in SQLite (`planiq_config.db`). PNG, SVG, and standalone HTML diagnostic reports work on air-gapped networks with no external scripts or CDNs.
+- **100% Local UI & Diff Editor:** `@monaco-editor/react` and its `monaco-editor` web workers, styles, and SQL/PostgreSQL/XML syntax grammars are bundled directly in the app—zero CDN requests (no jsDelivr or Google Fonts calls).
 - **Local LLM Support:** Connects to a local **Ollama** instance (`http://localhost:11434`) on your workstation or internal network.
-
-### Current Air-Gapped Caveat (Known Limitation)
-- **Monaco Diff Editor CDN:** `@monaco-editor/react` loads Monaco Editor assets from jsDelivr CDN by default unless locally bundled. In offline environments, switch to the built-in **Code View** toggle inside the **AI Advisor** tab to inspect rewritten SQL locally.
 
 ### Strictly Opt-In Network Features
 - **Live Radar & Connections:** Read-only TCP connection (`READ UNCOMMITTED`, `ApplicationIntent=ReadOnly`) only initiated when you explicitly connect to a SQL Server instance.

@@ -8,5 +8,20 @@ export default defineConfig({
     port: 5173,
     host: 'localhost',
     clearScreen: false
+  },
+  build: {
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/monaco-editor')) {
+            return 'monaco'
+          }
+          if (id.includes('node_modules/lucide-react')) {
+            return 'icons'
+          }
+        }
+      }
+    }
   }
 })
