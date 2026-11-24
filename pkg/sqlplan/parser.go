@@ -1020,24 +1020,50 @@ func generateExecutiveVerdict(analysis *PlanAnalysis) *ExecutiveVerdict {
 		topOpName = culprit.StatementType
 	}
 
-	headline := fmt.Sprintf("Statement #%s dominates %0.1f%% of total execution cost (%0.2f subtree cost).", culprit.StatementID, culprit.CostPercentage, culprit.StatementSubTreeCost)
+	var headline string
+	if analysis.TotalStatements == 1 {
+		headline = fmt.Sprintf("Single-Statement Plan: Statement #%s (%0.2f subtree cost).", culprit.StatementID, culprit.StatementSubTreeCost)
+	} else {
+		headline = fmt.Sprintf("Statement #%s dominates %0.1f%% of total execution cost (%0.2f subtree cost).", culprit.StatementID, culprit.CostPercentage, culprit.StatementSubTreeCost)
+	}
 
 	var summary strings.Builder
 	var fix strings.Builder
+
+	hasScans := false
+	if culprit.RootNode != nil {
+		var checkScan func(n *PlanNode)
+		checkScan = func(n *PlanNode) {
+			if n == nil {
+				return
+			}
+			op := strings.ToLower(n.PhysicalOp)
+			if strings.Contains(op, "scan") && !strings.HasPrefix(n.Table, "[#") && (n.TableCardinality == 0 || n.TableCardinality >= 5000) {
+				hasScans = true
+			}
+			for _, c := range n.Children {
+				checkScan(c)
+			}
+		}
+		checkScan(culprit.RootNode)
+	}
 
 	if strings.Contains(strings.ToUpper(culprit.StatementText), "INTO #") {
 		summary.WriteString(fmt.Sprintf("Primary Bottleneck: Statement #%s creates temporary tables via SELECT ... INTO as unindexed heaps, triggering repeated nested loops and missing index penalties in downstream statements.", culprit.StatementID))
 		fix.WriteString("Pre-create temporary tables using explicit CREATE TABLE #temp (...) with a CLUSTERED PRIMARY KEY on join keys before inserting data.")
 	} else if len(culprit.Warnings) > 0 {
-		summary.WriteString(fmt.Sprintf("Primary Bottleneck: Statement #%s suffers from %d engine warnings, including implicit type conversion (CONVERT_IMPLICIT) which invalidates index seeks.", culprit.StatementID, len(culprit.Warnings)))
+		summary.WriteString(fmt.Sprintf("Primary Bottleneck: Statement #%s suffers from %d engine warnings, including implicit type conversion or spills.", culprit.StatementID, len(culprit.Warnings)))
 		fix.WriteString("Match query parameter types with underlying column definitions and add composite covering indexes.")
-	} else {
-		summary.WriteString(fmt.Sprintf("Primary Bottleneck: High-cost operator (%s) with heavy table scanning and lack of selective composite covering indexes.", topOpName))
+	} else if len(analysis.AllMissingIndexes) > 0 || hasScans {
+		summary.WriteString(fmt.Sprintf("Primary Bottleneck: High-cost operator (%s) with table scanning and missing selective covering indexes.", topOpName))
 		fix.WriteString(fmt.Sprintf("Add targeted covering indexes to convert %s to an Index Seek.", topOpName))
+	} else {
+		summary.WriteString(fmt.Sprintf("Healthy Execution Path: Statement #%s executes efficiently via %s without missing indexes or engine warnings.", culprit.StatementID, topOpName))
+		fix.WriteString("No urgent plan remediation required; continue monitoring query runtime statistics for data growth.")
 	}
 
-	if analysis.MaxDOPReason == "MaxDOPSetToOne" {
-		summary.WriteString(" Additionally, query execution is constrained to a single CPU core (MaxDOP = 1).")
+	if analysis.MaxDOPReason == "MaxDOPSetToOne" && analysis.TotalSubTreeCost >= 5.0 {
+		summary.WriteString(" Additionally, parallel-eligible execution is constrained to a single CPU core (MaxDOP = 1).")
 	}
 
 	return &ExecutiveVerdict{
@@ -1102,7 +1128,8 @@ func generateAdvancedDiagnostics(root *xmlElement, analysis *PlanAnalysis) *Adva
 		diag.ScalarUDFWarnings = make([]*ScalarUDFWarning, 0)
 	}
 
-	diag.HealthScore, diag.ScoreGrade = calculateHealthScore(diag, analysis)
+	diag.HealthBreakdown = buildHealthScoreBreakdown(diag, analysis)
+	diag.HealthScore, diag.ScoreGrade = scoreFromBreakdown(diag.HealthBreakdown)
 
 	appendFindingAntiPatterns(analysis, diag)
 	return diag
@@ -1690,56 +1717,297 @@ func createCEInfo(version string) *CardinalityEstimationEngine {
 	}
 }
 
-func calculateHealthScore(diag *AdvancedDiagnostics, analysis *PlanAnalysis) (int, string) {
-	score := 100
+func clampScore(v, maxV int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > maxV {
+		return maxV
+	}
+	return v
+}
 
-	if diag.MemoryGrant != nil {
-		if diag.MemoryGrant.HasSpills {
-			score -= 25
-		} else if diag.MemoryGrant.IsBloated {
-			score -= 15
+func pillarStatus(score, maxScore int) string {
+	if maxScore <= 0 {
+		return "healthy"
+	}
+	pct := float64(score) / float64(maxScore)
+	if pct >= 0.80 {
+		return "healthy"
+	}
+	if pct >= 0.50 {
+		return "warn"
+	}
+	return "critical"
+}
+
+// buildHealthScoreBreakdown evaluates 5 weighted diagnostic pillars summing to 100 points:
+//  1. I/O & Index Access Efficiency (30 pts)
+//  2. Memory & TempDB Workspace (25 pts)
+//  3. SARGability & Data Types (20 pts)
+//  4. Cardinality & Plan Stability (15 pts)
+//  5. Parallelism & CPU Execution (10 pts)
+func buildHealthScoreBreakdown(diag *AdvancedDiagnostics, analysis *PlanAnalysis) []*HealthScorePillar {
+	stmtCostWeight := make(map[string]float64, len(analysis.Statements))
+	for _, s := range analysis.Statements {
+		w := 1.0
+		if len(analysis.Statements) > 1 && analysis.TotalSubTreeCost > 0 {
+			w = s.CostPercentage / 100.0
+			if w < 0.25 {
+				w = 0.25
+			}
 		}
+		stmtCostWeight[s.StatementID] = w
 	}
 
-	if diag.ParallelismSkew != nil && diag.ParallelismSkew.HasSkew {
-		score -= 15
+	// ── Pillar 1: I/O & Index Access Efficiency (30 pts) ─────────────────────
+	ioScore := 30
+	var ioNotes []string
+	if len(analysis.AllMissingIndexes) > 0 {
+		maxImpact := 0.0
+		maxWeighted := 0.0
+		for _, mi := range analysis.AllMissingIndexes {
+			if mi.Impact > maxImpact {
+				maxImpact = mi.Impact
+			}
+			w := stmtCostWeight[mi.StatementID]
+			if w == 0 {
+				w = 1.0
+			}
+			eff := (math.Max(20.0, mi.Impact) / 100.0) * w
+			if eff > maxWeighted {
+				maxWeighted = eff
+			}
+		}
+		miPenalty := int(math.Round(maxWeighted*11.0)) + minInt(5, (len(analysis.AllMissingIndexes)-1)*2)
+		if analysis.TotalSubTreeCost < 0.1 && miPenalty > 5 {
+			miPenalty = 5
+		}
+		ioScore -= miPenalty
+		ioNotes = append(ioNotes, fmt.Sprintf("%d missing index(es) (up to %.0f%% impact)", len(analysis.AllMissingIndexes), maxImpact))
 	}
 
-	if len(diag.ImplicitConversions) > 0 {
-		score -= 15
-	}
-
-	if len(diag.ScalarUDFWarnings) > 0 {
-		score -= 15
-	}
-
-	if diag.CardinalityEngine != nil && diag.CardinalityEngine.IsLegacy {
-		score -= 10
-	}
-
-	if len(analysis.AllMissingIndexes) > 3 {
-		score -= 10
-	} else if len(analysis.AllMissingIndexes) > 0 {
-		score -= 5
-	}
-
-	if analysis.MaxDOPReason == "MaxDOPSetToOne" {
-		score -= 5
-	}
-
+	hasHeapScan := false
+	hasLargeScan := false
 	for _, ap := range analysis.AntiPatterns {
 		if ap.Type == "HEAP_TABLE" || ap.Type == "TableScanOnHeap" {
-			score -= 10
+			hasHeapScan = true
+		}
+	}
+	for _, stmt := range analysis.Statements {
+		var checkScan func(n *PlanNode)
+		checkScan = func(n *PlanNode) {
+			if n == nil {
+				return
+			}
+			op := strings.ToLower(n.PhysicalOp)
+			if strings.Contains(op, "scan") && !strings.HasPrefix(n.Table, "[#") && n.TableCardinality >= 10000 {
+				hasLargeScan = true
+			}
+			for _, c := range n.Children {
+				checkScan(c)
+			}
+		}
+		checkScan(stmt.RootNode)
+	}
+	if hasHeapScan {
+		ioScore -= 8
+		ioNotes = append(ioNotes, "heap table scan / RID lookup")
+	} else if hasLargeScan {
+		ioScore -= 5
+		ioNotes = append(ioNotes, "full scan on large table (>=10k rows)")
+	}
+
+	klRank := 0
+	for _, kl := range diag.KeyLookups {
+		if r := severityRank(kl.Severity); r > klRank {
+			klRank = r
+		}
+	}
+	if klRank >= 3 {
+		ioScore -= 10
+		ioNotes = append(ioNotes, "critical key/RID lookups")
+	} else if klRank == 2 {
+		ioScore -= 6
+		ioNotes = append(ioNotes, "high-cost key lookups")
+	} else if klRank == 1 {
+		ioScore -= 3
+		ioNotes = append(ioNotes, "minor key lookups")
+	}
+	ioScore = clampScore(ioScore, 30)
+	ioSummary := "Optimal index seeks & low page I/O"
+	if len(ioNotes) > 0 {
+		ioSummary = strings.Join(ioNotes, "; ")
+	}
+
+	// ── Pillar 2: Memory & TempDB Workspace (25 pts) ─────────────────────────
+	memScore := 25
+	var memNotes []string
+	if diag.MemoryGrant != nil {
+		if diag.MemoryGrant.HasSpills {
+			memScore -= 18
+			memNotes = append(memNotes, "TempDB memory spill detected")
+		} else if diag.MemoryGrant.IsBloated {
+			memScore -= 6
+			memNotes = append(memNotes, fmt.Sprintf("memory grant bloat (%.0f%% unused)", diag.MemoryGrant.WastedPercent))
+		}
+	}
+	spRank := 0
+	for _, sp := range diag.Spools {
+		if r := severityRank(sp.Severity); r > spRank {
+			spRank = r
+		}
+	}
+	if spRank >= 3 {
+		memScore -= 10
+		memNotes = append(memNotes, "critical eager spool overhead")
+	} else if spRank == 2 {
+		memScore -= 6
+		memNotes = append(memNotes, "expensive spool operator")
+	} else if spRank == 1 {
+		memScore -= 3
+		memNotes = append(memNotes, "minor spool buffering")
+	}
+	memScore = clampScore(memScore, 25)
+	memSummary := "Balanced memory grants, zero disk spills"
+	if len(memNotes) > 0 {
+		memSummary = strings.Join(memNotes, "; ")
+	}
+
+	// ── Pillar 3: SARGability & Data Types (20 pts) ──────────────────────────
+	sargScore := 20
+	var sargNotes []string
+	if len(diag.ImplicitConversions) > 0 {
+		pen := 10
+		if len(diag.ImplicitConversions) > 2 {
+			pen = 12
+		}
+		sargScore -= pen
+		sargNotes = append(sargNotes, fmt.Sprintf("%d CONVERT_IMPLICIT cast(s)", len(diag.ImplicitConversions)))
+	}
+	nsRank := 0
+	for _, ns := range diag.NonSargable {
+		if r := severityRank(ns.Severity); r > nsRank {
+			nsRank = r
+		}
+	}
+	if nsRank >= 3 {
+		sargScore -= 12
+		sargNotes = append(sargNotes, "critical non-SARGable predicate")
+	} else if nsRank == 2 {
+		sargScore -= 8
+		sargNotes = append(sargNotes, "non-SARGable filter/wildcard")
+	} else if nsRank == 1 {
+		sargScore -= 4
+		sargNotes = append(sargNotes, "minor non-SARGable predicate")
+	}
+	if len(diag.ScalarUDFWarnings) > 0 {
+		sargScore -= 10
+		sargNotes = append(sargNotes, fmt.Sprintf("%d scalar UDF(s) (RBAR)", len(diag.ScalarUDFWarnings)))
+	}
+	sargScore = clampScore(sargScore, 20)
+	sargSummary := "All predicates SARGable, matching column types"
+	if len(sargNotes) > 0 {
+		sargSummary = strings.Join(sargNotes, "; ")
+	}
+
+	// ── Pillar 4: Cardinality & Plan Stability (15 pts) ──────────────────────
+	cardScore := 15
+	var cardNotes []string
+	if len(diag.MissingStatistics) > 0 {
+		hasBaseMissing := false
+		for _, ms := range diag.MissingStatistics {
+			if !strings.HasPrefix(ms.Table, "#") {
+				hasBaseMissing = true
+				break
+			}
+		}
+		if hasBaseMissing {
+			cardScore -= 8
+			cardNotes = append(cardNotes, "missing base-table statistics")
+		} else {
+			cardScore -= 4
+			cardNotes = append(cardNotes, "missing temp-table statistics")
+		}
+	}
+	hasSniffImpact, hasSniffMismatch := false, false
+	for _, ps := range diag.ParameterSniffing {
+		if ps.HasMismatch && ps.HasEstimateImpact {
+			hasSniffImpact = true
+		} else if ps.HasMismatch {
+			hasSniffMismatch = true
+		}
+	}
+	if hasSniffImpact {
+		cardScore -= 7
+		cardNotes = append(cardNotes, "parameter sniffing skew")
+	} else if hasSniffMismatch {
+		cardScore -= 3
+		cardNotes = append(cardNotes, "compiled/runtime parameter delta")
+	}
+	for _, rg := range diag.RowGoals {
+		if rg.Misfired {
+			cardScore -= 6
+			cardNotes = append(cardNotes, "row goal misfire")
 			break
 		}
 	}
+	if diag.CardinalityEngine != nil && diag.CardinalityEngine.IsLegacy {
+		if analysis.TotalSubTreeCost >= 1.0 {
+			cardScore -= 4
+		} else {
+			cardScore -= 2
+		}
+		cardNotes = append(cardNotes, fmt.Sprintf("legacy CE (%s)", diag.CardinalityEngine.ModelVersion))
+	}
+	cardScore = clampScore(cardScore, 15)
+	cardSummary := "Accurate row estimates & stable cardinality"
+	if len(cardNotes) > 0 {
+		cardSummary = strings.Join(cardNotes, "; ")
+	}
 
-	score -= extraHealthPenalty(diag)
+	// ── Pillar 5: Parallelism & CPU Execution (10 pts) ───────────────────────
+	cpuScore := 10
+	var cpuNotes []string
+	if diag.ParallelismSkew != nil && diag.ParallelismSkew.HasSkew {
+		cpuScore -= 7
+		cpuNotes = append(cpuNotes, fmt.Sprintf("parallel thread skew (%.1fx)", diag.ParallelismSkew.SkewRatio))
+	}
+	if analysis.MaxDOPReason == "MaxDOPSetToOne" && analysis.TotalSubTreeCost >= 5.0 {
+		cpuScore -= 4
+		cpuNotes = append(cpuNotes, "MaxDOP = 1 on expensive plan")
+	}
+	cpuScore = clampScore(cpuScore, 10)
+	cpuSummary := "Balanced CPU & worker thread distribution"
+	if len(cpuNotes) > 0 {
+		cpuSummary = strings.Join(cpuNotes, "; ")
+	}
 
-	if score < 15 {
-		score = 15
-	} else if score > 98 {
-		score = 98
+	return []*HealthScorePillar{
+		{ID: "io", Name: "I/O & Index Access", Score: ioScore, MaxScore: 30, WeightPct: 30, Summary: ioSummary, Status: pillarStatus(ioScore, 30)},
+		{ID: "memory", Name: "Memory & Workspace", Score: memScore, MaxScore: 25, WeightPct: 25, Summary: memSummary, Status: pillarStatus(memScore, 25)},
+		{ID: "sargability", Name: "SARGability & Types", Score: sargScore, MaxScore: 20, WeightPct: 20, Summary: sargSummary, Status: pillarStatus(sargScore, 20)},
+		{ID: "cardinality", Name: "Cardinality & Stats", Score: cardScore, MaxScore: 15, WeightPct: 15, Summary: cardSummary, Status: pillarStatus(cardScore, 15)},
+		{ID: "cpu", Name: "Parallelism & CPU", Score: cpuScore, MaxScore: 10, WeightPct: 10, Summary: cpuSummary, Status: pillarStatus(cpuScore, 10)},
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func scoreFromBreakdown(pillars []*HealthScorePillar) (int, string) {
+	score := 0
+	for _, p := range pillars {
+		score += p.Score
+	}
+	if score < 0 {
+		score = 0
+	} else if score > 100 {
+		score = 100
 	}
 
 	var grade string

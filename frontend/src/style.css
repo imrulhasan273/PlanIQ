@@ -3000,8 +3000,23 @@ html, body {
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05) !important;
 }
 
-.light-theme .conn-list-toolbar {
+.light-theme .conn-list-header {
   background: #f8fafc !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+.light-theme .conn-list-header-title {
+  color: #0f172a !important;
+}
+
+.light-theme .conn-list-header-count {
+  background: #e0f2fe !important;
+  color: #0369a1 !important;
+  border: 1px solid #7dd3fc !important;
+}
+
+.light-theme .conn-list-toolbar {
+  background: #ffffff !important;
   border-bottom: 1px solid #e2e8f0 !important;
 }
 
@@ -3209,37 +3224,43 @@ html, body {
   color: #0f172a !important;
 }
 
-/* Auth Selector Tabs */
-.light-theme .conn-auth-tab {
-  background: #ffffff !important;
-  border: 1.5px solid #cbd5e1 !important;
+.light-theme .conn-engine-badge.mssql-badge {
+  background: #eef2ff !important;
+  border: 1px solid #c7d2fe !important;
+  color: #4338ca !important;
 }
 
-.light-theme .conn-auth-tab:hover {
-  background: #f0f9ff !important;
-  border-color: #0284c7 !important;
+.light-theme .conn-engine-badge.pg-badge {
+  background: #e0f2fe !important;
+  border: 1px solid #7dd3fc !important;
+  color: #0369a1 !important;
 }
 
-.light-theme .conn-auth-tab.active {
-  background: #f0f9ff !important;
-  border-color: #0284c7 !important;
-  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2) !important;
+/* Segmented Auth Selector */
+.light-theme .conn-auth-segmented {
+  background: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
 }
 
-.light-theme .conn-auth-title {
-  color: #0f172a !important;
-  font-weight: 700 !important;
-}
-
-.light-theme .conn-auth-desc {
+.light-theme .conn-auth-pill {
   color: #475569 !important;
-  font-weight: 500 !important;
+}
+
+.light-theme .conn-auth-pill:hover {
+  color: #0f172a !important;
+}
+
+.light-theme .conn-auth-pill.active {
+  background: #ffffff !important;
+  border-color: #0284c7 !important;
+  color: #0369a1 !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08) !important;
 }
 
 /* TLS Checkboxes */
 .light-theme .conn-checkbox-card {
   background: #ffffff !important;
-  border: 1.5px solid #cbd5e1 !important;
+  border: 1px solid #cbd5e1 !important;
 }
 
 .light-theme .conn-checkbox-card:hover {
@@ -3257,9 +3278,15 @@ html, body {
   font-weight: 500 !important;
 }
 
-.light-theme .conn-timeout-card label {
+.light-theme .conn-timeout-inline label {
   color: #1e293b !important;
   font-weight: 700 !important;
+}
+
+.light-theme .conn-dba-safe-pill {
+  background: #ecfdf5 !important;
+  border: 1px solid #a7f3d0 !important;
+  color: #065f46 !important;
 }
 
 /* Test Handshake Box */

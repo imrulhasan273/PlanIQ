@@ -60,9 +60,7 @@ jobs:
         shell: bash
         run: |
           go install github.com/wailsapp/wails/v2/cmd/wails@latest
-          if [ "$RUNNER_OS" != "Windows" ]; then
-            echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          fi
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Build PlanIQ Desktop Binary
         run: wails build -clean ${{ matrix.build_args }}

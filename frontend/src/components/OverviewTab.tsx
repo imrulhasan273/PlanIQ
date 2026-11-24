@@ -106,8 +106,13 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               <span>10-Second Executive Root Cause Verdict</span>
               <DiagnosticTooltip guideKey="executiveVerdict" />
             </div>
-            <span className="badge badge-critical" style={{ fontSize: '11px' }}>
-              Culprit: Stmt #{verdict.culpritStatementId} ({verdict.costPercentage}% Cost)
+            <span
+              className={`badge ${plan.totalStatements === 1 && (diag?.healthScore ?? 0) >= 80 ? 'badge-success' : 'badge-critical'}`}
+              style={{ fontSize: '11px' }}
+            >
+              {plan.totalStatements === 1
+                ? `Single Query Plan (${verdict.costPercentage}% of Plan)`
+                : `Culprit: Stmt #${verdict.culpritStatementId} (${verdict.costPercentage}% Cost)`}
             </span>
           </div>
 
@@ -269,6 +274,62 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Transparent 5-Pillar Weighted Score Breakdown */}
+          {diag.healthBreakdown && diag.healthBreakdown.length > 0 && (
+            <div
+              className="glass-panel"
+              style={{
+                padding: '12px 16px',
+                borderRadius: '10px',
+                border: '1px solid var(--border-subtle)',
+                marginBottom: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Weighted Rating Breakdown (100 Points Across 5 Diagnostic Pillars)
+                </span>
+                <span style={{ fontSize: '11px', color: '#64748b' }}>
+                  Total: <strong style={{ color: '#e2e8f0' }}>{diag.healthScore}/100</strong> • Grade <strong style={{ color: '#38bdf8' }}>{diag.scoreGrade}</strong> (A ≥ 90, B ≥ 75, C ≥ 60, D ≥ 45, F &lt; 45)
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '10px' }}>
+                {diag.healthBreakdown.map((p) => {
+                  const pct = p.maxScore > 0 ? Math.round((p.score / p.maxScore) * 100) : 100;
+                  const barColor =
+                    p.status === 'critical' ? '#f43f5e' : p.status === 'warn' ? '#fbbf24' : '#34d399';
+                  return (
+                    <div
+                      key={p.id}
+                      style={{
+                        background: 'rgba(15, 23, 42, 0.55)',
+                        border: '1px solid rgba(255, 255, 255, 0.06)',
+                        borderRadius: '8px',
+                        padding: '8px 10px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '5px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#e2e8f0' }}>{p.name}</span>
+                        <span style={{ fontSize: '11px', fontWeight: 800, color: barColor, fontFamily: 'Consolas, monospace' }}>
+                          {p.score}/{p.maxScore}
+                        </span>
+                      </div>
+                      <div style={{ height: '5px', width: '100%', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div style={{ width: `${pct}%`, height: '100%', background: barColor, borderRadius: '3px', transition: 'width 0.3s ease' }} />
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#94a3b8', lineHeight: 1.35 }} title={p.summary}>
+                        <strong style={{ color: '#64748b' }}>Weight {p.weightPct}%:</strong> {p.summary}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Interactive Diagnostic Category Filter Bar */}
           <div className="diag-filter-bar">

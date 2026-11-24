@@ -1525,7 +1525,8 @@ func evaluatePLERisk(analysis *PlanAnalysis) *PLERiskAssessment {
 			return
 		}
 		opLower := strings.ToLower(n.PhysicalOp + " " + n.LogicalOp)
-		if strings.Contains(opLower, "scan") {
+		isTinyTempScan := strings.HasPrefix(n.Table, "[#") && n.EstimateRows < 10000
+		if strings.Contains(opLower, "scan") && !isTinyTempScan {
 			name := n.PhysicalOp
 			if n.Table != "" {
 				name += " on " + n.Table
@@ -1567,20 +1568,20 @@ func evaluatePLERisk(analysis *PlanAnalysis) *PLERiskAssessment {
 		risk.RiskLevel = "LOW"
 		risk.Score = 5
 		risk.Headline = "Optimal Buffer Pool Footprint (Minimal PLE Impact)"
-		risk.Summary = "No table/index scans detected. Query touches minimal pages via seeks and does not cause buffer pool eviction pressure."
+		risk.Summary = "No large table/index scans detected. Query touches minimal pages via seeks and does not cause buffer pool eviction pressure."
 		risk.BufferPoolEvictionRisk = "Negligible (<0.1% buffer pool churn)"
 		risk.MitigationAction = "No PLE tuning required. Current index access paths protect buffer pool stability."
 		return risk
 	}
 
-	if scanVolumeMB > 1024 || totalLogicalReads > 100000 || totalEstRows > 1000000 {
+	if scanVolumeMB > 1024 || totalLogicalReads > 131072 {
 		risk.RiskLevel = "CRITICAL"
 		risk.Score = 95
 		risk.Headline = "Catastrophic Page Life Expectancy (PLE) Flush Risk"
-		risk.Summary = fmt.Sprintf("Query reads ~%.1f MB of data pages across full scan operations (%s). On standard production databases, this forces rapid eviction of active cached tables, cratering Page Life Expectancy (PLE) and triggering buffer pool churn.", scanVolumeMB, strings.Join(scanOperators, ", "))
+		risk.Summary = fmt.Sprintf("Query reads ~%.1f MB of data pages across scan operations (%s). On standard production databases, this forces rapid eviction of active cached tables, cratering Page Life Expectancy (PLE) and triggering buffer pool churn.", scanVolumeMB, strings.Join(scanOperators, ", "))
 		risk.BufferPoolEvictionRisk = "Catastrophic (>35% buffer pool eviction per run)"
 		risk.MitigationAction = "Create covering nonclustered index on scan filter/join keys to convert full scans into single-page seeks, eliminating RAM eviction."
-	} else if scanVolumeMB > 200 || totalLogicalReads > 25000 || totalEstRows > 200000 {
+	} else if scanVolumeMB > 250 || totalLogicalReads > 32000 || totalEstRows > 1000000 {
 		risk.RiskLevel = "HIGH"
 		risk.Score = 70
 		risk.Headline = "High Buffer Pool Ingestion (Elevated PLE Threat)"

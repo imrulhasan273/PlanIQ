@@ -4,6 +4,7 @@ import {
   PlanNode,
   ExecutiveVerdict,
   AdvancedDiagnostics,
+  HealthScorePillar,
   HardwareMetrics,
   PLERiskAssessment,
   TableIOLeader,
@@ -1417,15 +1418,91 @@ function generatePgDiagnostics(statements: StatementAnalysis[], missingIndexes: 
     walk(stmt.rootNode);
   });
 
-  // Calculate health score (0 - 100)
-  let healthScore = 100;
-  if (missingStats.length > 0) healthScore -= 20;
-  if (spools.some((s) => s.severity === 'CRITICAL')) healthScore -= 25;
-  if (missingIndexes.length > 0) healthScore -= 20;
-  if (nonSargable.length > 0) healthScore -= 10;
-  healthScore = Math.max(15, Math.min(100, healthScore));
+  // Calculate transparent 5-pillar weighted health score (0 - 100)
+  // Pillar 1: I/O & Index Access (30 pts)
+  let ioScore = 30;
+  const ioNotes: string[] = [];
+  if (missingIndexes.length > 0) {
+    ioScore -= Math.min(16, 10 + (missingIndexes.length - 1) * 3);
+    ioNotes.push(`${missingIndexes.length} missing index suggestion(s)`);
+  }
+  const pgHeapLookups = keyLookups.length;
+  if (pgHeapLookups > 0) {
+    const worstKl = keyLookups.some((k) => k.severity === 'CRITICAL') ? 10 : 6;
+    ioScore -= worstKl;
+    ioNotes.push(`${pgHeapLookups} heap fetch / table bloat issue(s)`);
+  }
+  ioScore = Math.max(0, Math.min(30, ioScore));
 
-  const scoreGrade = healthScore >= 90 ? 'A' : healthScore >= 75 ? 'B' : healthScore >= 60 ? 'C' : healthScore >= 40 ? 'D' : 'F';
+  // Pillar 2: Memory & work_mem Workspace (25 pts)
+  let memScore = 25;
+  const memNotes: string[] = [];
+  const criticalSpills = spools.filter((s) => s.severity === 'CRITICAL').length;
+  const highEvictions = spools.filter((s) => s.severity === 'HIGH').length;
+  if (criticalSpills > 0) {
+    memScore -= 18;
+    memNotes.push(`${criticalSpills} work_mem disk spill(s)`);
+  }
+  if (highEvictions > 0) {
+    memScore -= 7;
+    memNotes.push(`${highEvictions} cache eviction/overflow(s)`);
+  }
+  memScore = Math.max(0, Math.min(25, memScore));
+
+  // Pillar 3: SARGability & Filter Types (20 pts)
+  let sargScore = 20;
+  const sargNotes: string[] = [];
+  if (nonSargable.some((n) => n.severity === 'CRITICAL')) {
+    sargScore -= 14;
+    sargNotes.push('critical unindexed vector / filter scan');
+  } else if (nonSargable.length > 0) {
+    sargScore -= Math.min(12, 6 + (nonSargable.length - 1) * 3);
+    sargNotes.push(`${nonSargable.length} Seq Scan filter discard(s)`);
+  }
+  sargScore = Math.max(0, Math.min(20, sargScore));
+
+  // Pillar 4: Cardinality & Statistics (15 pts)
+  let cardScore = 15;
+  const cardNotes: string[] = [];
+  if (missingStats.length > 0) {
+    cardScore -= Math.min(12, 8 + (missingStats.length - 1) * 2);
+    cardNotes.push(`${missingStats.length} cardinality skew(s) (run ANALYZE)`);
+  }
+  cardScore = Math.max(0, Math.min(15, cardScore));
+
+  // Pillar 5: Parallelism & CPU Execution (10 pts)
+  let cpuScore = 10;
+  const cpuNotes: string[] = [];
+  let underLaunched = false;
+  statements.forEach((s) => {
+    const walkP = (n?: PlanNode) => {
+      if (!n) return;
+      if ((n.pg?.workersPlanned || 0) > 0 && (n.pg?.workersLaunched ?? 0) < (n.pg?.workersPlanned || 0)) {
+        underLaunched = true;
+      }
+      (n.children || []).forEach(walkP);
+    };
+    walkP(s.rootNode);
+  });
+  if (underLaunched) {
+    cpuScore -= 4;
+    cpuNotes.push('parallel workers under-launched');
+  }
+  cpuScore = Math.max(0, Math.min(10, cpuScore));
+
+  const pgPillarStatus = (score: number, max: number) =>
+    score / max >= 0.8 ? 'healthy' : score / max >= 0.5 ? 'warn' : 'critical';
+
+  const healthBreakdown: HealthScorePillar[] = [
+    { id: 'io', name: 'I/O & Index Access', score: ioScore, maxScore: 30, weightPct: 30, summary: ioNotes.length ? ioNotes.join('; ') : 'Optimal index access & buffer hits', status: pgPillarStatus(ioScore, 30) },
+    { id: 'memory', name: 'Memory & work_mem', score: memScore, maxScore: 25, weightPct: 25, summary: memNotes.length ? memNotes.join('; ') : 'All sorts & hashes fit in work_mem', status: pgPillarStatus(memScore, 25) },
+    { id: 'sargability', name: 'SARGability & Filters', score: sargScore, maxScore: 20, weightPct: 20, summary: sargNotes.length ? sargNotes.join('; ') : 'Selective predicates & index scans', status: pgPillarStatus(sargScore, 20) },
+    { id: 'cardinality', name: 'Cardinality & ANALYZE', score: cardScore, maxScore: 15, weightPct: 15, summary: cardNotes.length ? cardNotes.join('; ') : 'Accurate planner row estimates', status: pgPillarStatus(cardScore, 15) },
+    { id: 'cpu', name: 'Parallelism & CPU', score: cpuScore, maxScore: 10, weightPct: 10, summary: cpuNotes.length ? cpuNotes.join('; ') : 'Healthy worker launch & CPU efficiency', status: pgPillarStatus(cpuScore, 10) },
+  ];
+
+  const healthScore = Math.max(0, Math.min(100, ioScore + memScore + sargScore + cardScore + cpuScore));
+  const scoreGrade = healthScore >= 90 ? 'A' : healthScore >= 75 ? 'B' : healthScore >= 60 ? 'C' : healthScore >= 45 ? 'D' : 'F';
 
   return {
     implicitConversions: [],
@@ -1439,5 +1516,6 @@ function generatePgDiagnostics(statements: StatementAnalysis[], missingIndexes: 
     rowGoals,
     healthScore,
     scoreGrade,
+    healthBreakdown,
   };
 }

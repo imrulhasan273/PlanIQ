@@ -327,3 +327,43 @@ func TestSQLServer2025Features(t *testing.T) {
 		t.Errorf("unexpected SQL 2025 Optimized Locking wait categorization: %+v", plan.WaitStats)
 	}
 }
+
+func TestWeightedHealthScoreBreakdown(t *testing.T) {
+	cleanSingleStmtPlan := `<?xml version="1.0" encoding="utf-8"?>
+<ShowPlanXML xmlns="http://schemas.microsoft.com/sqlserver/2004/07/showplan" Version="1.5" Build="16.0.1000.6">
+  <BatchSequence><Batch><Statements>
+    <StmtSimple StatementId="1" StatementText="SELECT TOP 1 Id FROM dbo.Users WHERE Email = @p1" StatementType="SELECT" StatementSubTreeCost="0.0033" StatementEstRows="1" StatementOptmLevel="FULL" CardinalityEstimationModelVersion="160">
+      <QueryPlan CachedPlanSize="16" NonParallelPlanReason="MaxDOPSetToOne">
+        <RelOp NodeId="0" PhysicalOp="Index Seek" LogicalOp="Index Seek" EstimateRows="1" EstimatedTotalSubtreeCost="0.0033" TableCardinality="500000">
+          <IndexScan>
+            <Object Database="[AppDB]" Schema="[dbo]" Table="[Users]" Index="[IX_Users_Email]" IndexKind="NonClustered" />
+          </IndexScan>
+        </RelOp>
+      </QueryPlan>
+    </StmtSimple>
+  </Statements></Batch></BatchSequence>
+</ShowPlanXML>`
+
+	plan, err := ParseXML(cleanSingleStmtPlan, "clean-oltp.sqlplan")
+	if err != nil {
+		t.Fatalf("ParseXML failed: %v", err)
+	}
+	if plan.Diagnostics == nil {
+		t.Fatal("expected Diagnostics")
+	}
+	if plan.Diagnostics.HealthScore != 100 || plan.Diagnostics.ScoreGrade != "A" {
+		t.Errorf("expected clean single-query OLTP plan to score 100 [A], got %d [%s]", plan.Diagnostics.HealthScore, plan.Diagnostics.ScoreGrade)
+	}
+	if len(plan.Diagnostics.HealthBreakdown) != 5 {
+		t.Fatalf("expected 5 scoring pillars, got %d", len(plan.Diagnostics.HealthBreakdown))
+	}
+	sum := 0
+	weightSum := 0
+	for _, p := range plan.Diagnostics.HealthBreakdown {
+		sum += p.Score
+		weightSum += p.MaxScore
+	}
+	if sum != plan.Diagnostics.HealthScore || weightSum != 100 {
+		t.Errorf("expected pillars sum %d == healthScore %d and max weight 100 (got %d)", sum, plan.Diagnostics.HealthScore, weightSum)
+	}
+}

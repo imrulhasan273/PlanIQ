@@ -291,6 +291,16 @@ export interface AdaptiveProcessing {
   summary: string;
 }
 
+export interface HealthScorePillar {
+  id: string;
+  name: string;
+  score: number;
+  maxScore: number;
+  weightPct: number;
+  summary: string;
+  status: 'healthy' | 'warn' | 'critical' | string;
+}
+
 export interface AdvancedDiagnostics {
   memoryGrant?: MemoryGrantHealth;
   parallelismSkew?: ParallelismSkew;
@@ -307,6 +317,7 @@ export interface AdvancedDiagnostics {
   adaptive?: AdaptiveProcessing;
   healthScore: number;
   scoreGrade: string;
+  healthBreakdown?: HealthScorePillar[];
 }
 
 export interface PLERiskAssessment {

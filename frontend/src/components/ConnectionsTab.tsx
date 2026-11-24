@@ -5,7 +5,6 @@ import {
   Plus,
   Trash2,
   Copy,
-  Check,
   CheckCircle2,
   AlertCircle,
   Zap,
@@ -15,14 +14,11 @@ import {
   Lock,
   Star,
   Search,
-  ArrowRight,
   Eye,
   EyeOff,
   Activity,
   HardDrive,
   KeyRound,
-  ExternalLink,
-  Info
 } from 'lucide-react';
 import { DBConnectionProfile, ConnectionStatus, WindowsUserInfo } from '../types/livedb';
 import {
@@ -77,15 +73,12 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   onNavigateToRadar,
   onEngineChange,
 }) => {
-  // Engine filter in sidebar: 'all' | 'postgresql' | 'sqlserver'
-  const [engineFilter, setEngineFilter] = useState<'all' | 'postgresql' | 'sqlserver'>(() => {
-    return engine === 'postgresql' ? 'postgresql' : 'sqlserver';
-  });
+  const activeEngine: 'postgresql' | 'sqlserver' = engine === 'postgresql' ? 'postgresql' : 'sqlserver';
 
   const [profiles, setProfiles] = useState<DBConnectionProfile[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
   const [formData, setFormData] = useState<DBConnectionProfile>(() =>
-    getEmptyProfile(engine, 0, windowsUser?.username)
+    getEmptyProfile(activeEngine, 0, windowsUser?.username)
   );
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
@@ -102,28 +95,26 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   } | null>(null);
   const [bannerMsg, setBannerMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Synchronize engine filter and active editor profile with app engine change (e.g. from top bar)
+  // Synchronize active editor profile whenever top-bar engine changes
   useEffect(() => {
-    if (!engine) return;
-    setEngineFilter(engine);
     if (profiles.length > 0) {
-      const defaultForEngine = profiles.find((p) => p.isDefault && getProfileEngine(p) === engine);
-      const firstForEngine = profiles.find((p) => getProfileEngine(p) === engine);
+      const defaultForEngine = profiles.find((p) => p.isDefault && getProfileEngine(p) === activeEngine);
+      const firstForEngine = profiles.find((p) => getProfileEngine(p) === activeEngine);
       const chosen = defaultForEngine || firstForEngine;
       if (chosen) {
         setSelectedId(chosen.id);
-        setFormData({ ...chosen, engine });
+        setFormData({ ...chosen, engine: activeEngine });
         setTestResult(null);
       } else {
         setSelectedId('');
-        setFormData(getEmptyProfile(engine, 0, windowsUser?.username));
+        setFormData(getEmptyProfile(activeEngine, 0, windowsUser?.username));
         setTestResult(null);
       }
     } else {
       setSelectedId('');
-      setFormData(getEmptyProfile(engine, 0, windowsUser?.username));
+      setFormData(getEmptyProfile(activeEngine, 0, windowsUser?.username));
     }
-  }, [engine, profiles]);
+  }, [activeEngine, profiles]);
 
   // Load all profiles from SQLite on mount
   useEffect(() => {
@@ -149,22 +140,25 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
       setProfiles(safeList);
 
       if (safeList.length > 0) {
-        let target = safeList[0];
+        let target: DBConnectionProfile | undefined;
         if (selectIdAfterLoad) {
-          const found = safeList.find((p) => p.id === selectIdAfterLoad);
-          if (found) target = found;
-        } else {
-          // Find matching default or first profile for current engine filter
+          target = safeList.find((p) => p.id === selectIdAfterLoad);
+        }
+        if (!target) {
           const defaultForEngine = safeList.find(
-            (p) => p.isDefault && (engineFilter === 'all' || getProfileEngine(p) === engineFilter)
+            (p) => p.isDefault && getProfileEngine(p) === activeEngine
           );
           const firstForEngine = safeList.find(
-            (p) => engineFilter === 'all' || getProfileEngine(p) === engineFilter
+            (p) => getProfileEngine(p) === activeEngine
           );
-          target = defaultForEngine || firstForEngine || safeList[0];
+          target = defaultForEngine || firstForEngine;
         }
-        setSelectedId(target.id);
-        setFormData({ ...target, engine: getProfileEngine(target) });
+        if (target) {
+          setSelectedId(target.id);
+          setFormData({ ...target, engine: getProfileEngine(target) });
+        } else {
+          handleNewProfile();
+        }
       } else {
         handleNewProfile();
       }
@@ -188,48 +182,10 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   };
 
   const handleNewProfile = () => {
-    const targetEngine: 'sqlserver' | 'postgresql' =
-      engineFilter === 'all' ? (engine || 'sqlserver') : engineFilter;
-    const sameEngineCount = profiles.filter((p) => getProfileEngine(p) === targetEngine).length;
-    const def = getEmptyProfile(targetEngine, sameEngineCount, windowsUser?.username);
+    const sameEngineCount = profiles.filter((p) => getProfileEngine(p) === activeEngine).length;
+    const def = getEmptyProfile(activeEngine, sameEngineCount, windowsUser?.username);
     setSelectedId('');
     setFormData(def);
-    setTestResult(null);
-  };
-
-  const handleSwitchFormEngine = (newEngine: 'sqlserver' | 'postgresql') => {
-    const currentEngine = getProfileEngine(formData);
-    if (currentEngine === newEngine && formData.engine === newEngine) return;
-
-    const isTargetPg = newEngine === 'postgresql';
-
-    let newPort = formData.port;
-    if (!isTargetPg && formData.port === 5432) newPort = 1433;
-    if (isTargetPg && formData.port === 1433) newPort = 5432;
-
-    let newDb = formData.database;
-    if (!isTargetPg && formData.database === 'postgres') newDb = 'master';
-    if (isTargetPg && formData.database === 'master') newDb = 'postgres';
-
-    let newUsername = formData.username;
-    if (!isTargetPg && formData.username === 'postgres') newUsername = windowsUser?.username || 'sa';
-    if (isTargetPg && (formData.username === 'sa' || formData.username === windowsUser?.username)) newUsername = 'postgres';
-
-    let newName = formData.name;
-    if (!newName.trim() || /^(PostgreSQL|SQL Server) #\d+$/i.test(newName.trim())) {
-      const sameEngineCount = profiles.filter((p) => getProfileEngine(p) === newEngine).length;
-      newName = isTargetPg ? `PostgreSQL #${sameEngineCount + 1}` : `SQL Server #${sameEngineCount + 1}`;
-    }
-
-    setFormData({
-      ...formData,
-      engine: newEngine,
-      port: newPort,
-      database: newDb,
-      username: newUsername,
-      name: newName,
-      authType: isTargetPg && formData.authType === 'windows' ? 'sql' : formData.authType,
-    });
     setTestResult(null);
   };
 
@@ -265,7 +221,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     try {
       const payload: DBConnectionProfile = {
         ...formData,
-        engine: getProfileEngine(formData),
+        engine: activeEngine,
       };
 
       let saved: DBConnectionProfile;
@@ -336,7 +292,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     setIsTesting(true);
     setTestResult(null);
     try {
-      const profEngine = getProfileEngine(formData);
+      const profEngine = activeEngine;
       const connPayload = {
         engine: profEngine,
         server: formData.server,
@@ -377,7 +333,6 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
       setIsTesting(false);
     }
   };
-
 
   const handleConnect = async (profileToConnect?: DBConnectionProfile) => {
     const p = profileToConnect || formData;
@@ -426,15 +381,8 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     }
   };
 
-  const pgCount = profiles.filter((p) => getProfileEngine(p) === 'postgresql').length;
-  const sqlCount = profiles.filter((p) => getProfileEngine(p) === 'sqlserver').length;
-  const allCount = profiles.length;
-
-  const filteredProfiles = profiles.filter((p) => {
-    const profEngine = getProfileEngine(p);
-    if (engineFilter !== 'all' && profEngine !== engineFilter) {
-      return false;
-    }
+  const engineProfiles = profiles.filter((p) => getProfileEngine(p) === activeEngine);
+  const filteredProfiles = engineProfiles.filter((p) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -444,40 +392,29 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     );
   });
 
-  const formEngine = getProfileEngine(formData);
-  const isPg = formEngine === 'postgresql';
-
-  const headerTitle =
-    engineFilter === 'postgresql'
-      ? 'PostgreSQL Connection Studio'
-      : engineFilter === 'sqlserver'
-      ? 'SQL Server Connection Studio'
-      : 'Database Connection Studio';
-
-  const headerSubtitle =
-    engineFilter === 'postgresql'
-      ? 'Manage saved PostgreSQL cluster profiles, SCRAM/MD5 credentials, and 1-click active session switches.'
-      : engineFilter === 'sqlserver'
-      ? 'Manage saved Microsoft SQL Server credentials, TLS parameters, and 1-click active session switches.'
-      : 'Manage saved PostgreSQL & SQL Server credentials, TLS parameters, and 1-click active session switches.';
+  const isPg = activeEngine === 'postgresql';
+  const headerTitle = isPg ? 'PostgreSQL Connection Studio' : 'SQL Server Connection Studio';
+  const headerSubtitle = isPg
+    ? 'Encrypted PostgreSQL profiles & 1-click live session switching.'
+    : 'Encrypted SQL Server profiles, TLS options & 1-click live switching.';
 
   return (
     <div className="conn-page-wrapper">
-      {/* Page Header */}
+      {/* Compact Studio Header */}
       <div className="conn-page-header glass-panel">
         <div className="conn-header-left">
           <div className="conn-header-icon-box">
-            <Database size={24} color="#38bdf8" />
+            <Database size={18} color="#0284c7" />
           </div>
-          <div>
+          <div className="conn-header-title-block">
             <div className="conn-title-row">
               <h1 className="conn-page-title">{headerTitle}</h1>
               <span className="conn-sqlite-pill">
-                <HardDrive size={11} color="#34d399" />
-                <span>SQLite DB Storage</span>
+                <HardDrive size={10} />
+                <span>AES-256 SQLite</span>
               </span>
               <span className="conn-count-pill">
-                {filteredProfiles.length} of {profiles.length} Profiles
+                {engineProfiles.length} {isPg ? 'PostgreSQL' : 'SQL Server'}
               </span>
             </div>
             <p className="conn-page-subtitle">{headerSubtitle}</p>
@@ -489,7 +426,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
             <div className="conn-active-badge">
               <span className="conn-pulse-dot" />
               <div className="conn-active-details">
-                <span className="conn-active-label">ACTIVE DATABASE</span>
+                <span className="conn-active-label">ACTIVE</span>
                 <span className="conn-active-server">
                   {liveStatus.serverName.split('.')[0]} ({liveStatus.databaseName})
                 </span>
@@ -509,7 +446,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   onClick={onNavigateToRadar}
                   title="Go to Live Radar telemetry"
                 >
-                  <Zap size={13} />
+                  <Zap size={12} />
                   <span>Live Radar</span>
                 </button>
               )}
@@ -517,20 +454,20 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
           ) : (
             <div className="conn-offline-badge">
               <span className="conn-offline-dot" />
-              <span>Offline / Disconnected</span>
+              <span>Offline</span>
             </div>
           )}
 
-          <button type="button" className="btn btn-primary" onClick={handleNewProfile}>
-            <Plus size={15} />
-            <span>New Connection</span>
+          <button type="button" className="btn btn-primary btn-sm" onClick={handleNewProfile}>
+            <Plus size={14} />
+            <span>New Profile</span>
           </button>
         </div>
       </div>
 
       {bannerMsg && (
         <div className={`conn-banner ${bannerMsg.type}`}>
-          {bannerMsg.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+          {bannerMsg.type === 'success' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
           <span>{bannerMsg.text}</span>
           <button type="button" className="conn-banner-close" onClick={() => setBannerMsg(null)}>
             ✕
@@ -540,14 +477,21 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
 
       {/* Main Dual-Pane Studio */}
       <div className="conn-studio-grid">
-        {/* LEFT COLUMN: Saved Profiles Directory */}
+        {/* LEFT COLUMN: Engine-Scoped Saved Profiles */}
         <div className="conn-list-column glass-panel">
+          <div className="conn-list-header">
+            <span className="conn-list-header-title">
+              {isPg ? '🐘 Saved PostgreSQL Profiles' : '🗄️ Saved SQL Server Profiles'}
+            </span>
+            <span className="conn-list-header-count">{filteredProfiles.length}</span>
+          </div>
+
           <div className="conn-list-toolbar">
             <div className="conn-search-box">
-              <Search size={14} className="conn-search-icon" />
+              <Search size={13} className="conn-search-icon" />
               <input
                 type="text"
-                placeholder="Filter saved connections..."
+                placeholder={`Search ${isPg ? 'PostgreSQL' : 'SQL Server'} profiles...`}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="conn-search-input"
@@ -562,60 +506,24 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
               type="button"
               className="btn btn-secondary btn-sm btn-icon"
               onClick={() => loadProfiles()}
-              title="Refresh from SQLite database"
+              title="Refresh saved profiles from SQLite"
             >
               <RefreshCw size={13} className={isLoading ? 'spin' : ''} />
-            </button>
-          </div>
-
-          {/* Engine Filter Tabs */}
-          <div className="conn-filter-tabs">
-            <button
-              type="button"
-              className={`conn-filter-tab ${engineFilter === 'postgresql' ? 'active pg-filter' : ''}`}
-              onClick={() => {
-                setEngineFilter('postgresql');
-                if (onEngineChange) onEngineChange('postgresql');
-              }}
-            >
-              <span>🐘 PostgreSQL</span>
-              <span className="conn-filter-count">{pgCount}</span>
-            </button>
-            <button
-              type="button"
-              className={`conn-filter-tab ${engineFilter === 'sqlserver' ? 'active mssql-filter' : ''}`}
-              onClick={() => {
-                setEngineFilter('sqlserver');
-                if (onEngineChange) onEngineChange('sqlserver');
-              }}
-            >
-              <span>🗄️ SQL Server</span>
-              <span className="conn-filter-count">{sqlCount}</span>
-            </button>
-            <button
-              type="button"
-              className={`conn-filter-tab ${engineFilter === 'all' ? 'active' : ''}`}
-              onClick={() => setEngineFilter('all')}
-            >
-              <span>All</span>
-              <span className="conn-filter-count">{allCount}</span>
             </button>
           </div>
 
           <div className="conn-card-list">
             {filteredProfiles.length === 0 ? (
               <div className="conn-empty-state">
-                <Database size={32} color="#64748b" />
-                <p>No {engineFilter !== 'all' ? (engineFilter === 'postgresql' ? 'PostgreSQL' : 'SQL Server') : ''} connections found</p>
+                <Database size={28} color="#64748b" />
+                <p>No saved {isPg ? 'PostgreSQL' : 'SQL Server'} profiles yet</p>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={handleNewProfile}>
-                  Create First Connection
+                  Create Profile
                 </button>
               </div>
             ) : (
               filteredProfiles.map((p) => {
                 const isSelected = p.id === selectedId;
-                const cardEngine = getProfileEngine(p);
-                const isCardPg = cardEngine === 'postgresql';
                 const isLive =
                   liveStatus?.connected &&
                   (liveStatus.serverName.toLowerCase().includes(p.server.toLowerCase()) ||
@@ -628,75 +536,23 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     className={`conn-card ${isSelected ? 'selected' : ''} ${isLive ? 'is-active-conn' : ''}`}
                     onClick={() => handleSelectProfile(p)}
                   >
+                    {/* Row 1: Title + Status Tags + Primary Connect Action */}
                     <div className="conn-card-top">
                       <div className="conn-card-title-wrap">
-                        <span className="conn-card-name">{p.name}</span>
-                        <span className={`conn-engine-tag ${isCardPg ? 'pg-tag' : 'mssql-tag'}`}>
-                          {isCardPg ? '🐘 PostgreSQL' : '🗄️ SQL Server'}
-                        </span>
+                        <span className="conn-card-name" title={p.name}>{p.name}</span>
                         {p.isDefault && (
                           <span className="conn-default-tag" title="Default startup connection">
-                            <Star size={10} fill="#f59e0b" color="#f59e0b" />
-                            <span>Default</span>
+                            <Star size={9} fill="currentColor" />
                           </span>
                         )}
                         {isLive && (
                           <span className="conn-live-tag" title="Currently connected">
                             <span className="conn-live-dot" />
-                            <span>ACTIVE</span>
+                            <span>LIVE</span>
                           </span>
                         )}
                       </div>
 
-                      <div className="conn-card-quick-actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          className="conn-card-action-btn"
-                          title="Set as Default Connection"
-                          onClick={(e) => handleSetDefault(p.id, e)}
-                        >
-                          <Star
-                            size={13}
-                            color={p.isDefault ? '#f59e0b' : '#64748b'}
-                            fill={p.isDefault ? '#f59e0b' : 'transparent'}
-                          />
-                        </button>
-                        <button
-                          type="button"
-                          className="conn-card-action-btn"
-                          title="Duplicate connection"
-                          onClick={() => handleDuplicate(p)}
-                        >
-                          <Copy size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          className="conn-card-action-btn delete-btn"
-                          title="Delete from SQLite"
-                          onClick={() => handleDelete(p.id, p.name)}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="conn-card-details">
-                      <div className="conn-detail-pill">
-                        <Server size={11} color="#38bdf8" />
-                        <span>
-                          {p.server}:{p.port || (isCardPg ? 5432 : 1433)}
-                        </span>
-                      </div>
-                      <div className="conn-detail-pill">
-                        <Database size={11} color="#818cf8" />
-                        <span>{p.database}</span>
-                      </div>
-                      <span className={`conn-auth-badge auth-${p.authType}`}>
-                        {p.authType === 'windows' ? (isCardPg ? 'Peer' : 'Windows') : 'Password'}
-                      </span>
-                    </div>
-
-                    <div className="conn-card-footer">
                       <button
                         type="button"
                         className="btn btn-primary btn-xs conn-connect-btn"
@@ -706,9 +562,57 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                         }}
                         disabled={isConnecting}
                       >
-                        <Zap size={11} />
+                        <Zap size={10} />
                         <span>{isLive ? 'Reconnect' : 'Connect'}</span>
                       </button>
+                    </div>
+
+                    {/* Row 2: Compact Endpoint + DB + Quick Row Actions */}
+                    <div className="conn-card-meta-row">
+                      <div className="conn-card-details">
+                        <span className="conn-detail-pill">
+                          <Server size={10} />
+                          <span>{p.server}:{p.port || (isPg ? 5432 : 1433)}</span>
+                        </span>
+                        <span className="conn-detail-pill">
+                          <Database size={10} />
+                          <span>{p.database}</span>
+                        </span>
+                        <span className={`conn-auth-badge auth-${p.authType}`}>
+                          {p.authType === 'windows' ? (isPg ? 'Peer' : 'Win') : 'SQL'}
+                        </span>
+                      </div>
+
+                      <div className="conn-card-quick-actions" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="conn-card-action-btn"
+                          title="Set as Default"
+                          onClick={(e) => handleSetDefault(p.id, e)}
+                        >
+                          <Star
+                            size={12}
+                            color={p.isDefault ? '#f59e0b' : undefined}
+                            fill={p.isDefault ? '#f59e0b' : 'transparent'}
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          className="conn-card-action-btn"
+                          title="Clone profile"
+                          onClick={() => handleDuplicate(p)}
+                        >
+                          <Copy size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          className="conn-card-action-btn delete-btn"
+                          title="Delete profile"
+                          onClick={() => handleDelete(p.id, p.name)}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -717,31 +621,36 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Connection Configuration Studio */}
+        {/* RIGHT COLUMN: Compact Zero-Scroll Editor Studio */}
         <div className="conn-editor-column glass-panel">
           <div className="conn-editor-header">
             <div className="conn-editor-title-box">
-              <h2 className="conn-editor-heading">
-                {formData.id ? 'Edit Connection Profile' : 'Configure New Connection'}
-              </h2>
+              <div className="conn-editor-heading-row">
+                <h2 className="conn-editor-heading">
+                  {formData.id ? 'Edit Connection Profile' : 'New Connection Profile'}
+                </h2>
+                <span className={`conn-engine-badge ${isPg ? 'pg-badge' : 'mssql-badge'}`}>
+                  {isPg ? '🐘 PostgreSQL · Port 5432' : '🗄️ SQL Server · Port 1433'}
+                </span>
+              </div>
               <span className="conn-editor-sub">
-                {formData.id ? `ID: ${formData.id}` : 'Unsaved Profile (Will be saved to SQLite)'}
+                {formData.id ? `Profile ID: ${formData.id}` : 'Unsaved draft — click Save to persist in encrypted SQLite'}
               </span>
             </div>
 
             <div className="conn-editor-top-actions">
-              <label className="conn-default-toggle" title="Auto-connect or prefer this profile">
+              <label className="conn-default-toggle" title="Auto-select this profile on startup">
                 <input
                   type="checkbox"
                   checked={formData.isDefault}
                   onChange={(e) => setFormData({ ...formData, isDefault: e.target.checked })}
                 />
                 <Star
-                  size={14}
-                  color={formData.isDefault ? '#f59e0b' : '#64748b'}
+                  size={13}
+                  color={formData.isDefault ? '#f59e0b' : 'currentColor'}
                   fill={formData.isDefault ? '#f59e0b' : 'transparent'}
                 />
-                <span>Set as Default</span>
+                <span>Default</span>
               </label>
 
               {formData.id && (
@@ -751,7 +660,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   onClick={() => handleDuplicate(formData)}
                   title="Clone to new profile"
                 >
-                  <Copy size={13} />
+                  <Copy size={12} />
                   <span>Clone</span>
                 </button>
               )}
@@ -759,44 +668,53 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
           </div>
 
           <div className="conn-form-scrollable">
-            {/* SECTION 0: Target Database Engine (Strictly matches active engine) */}
-            <div className="conn-form-section conn-engine-section">
-              <div className="conn-section-header">
-                <Database size={15} color="#38bdf8" />
-                <span>Target Database Engine</span>
-              </div>
-              <div className="conn-engine-toggle-grid" style={{ gridTemplateColumns: '1fr' }}>
-                {isPg ? (
-                  <div className="conn-engine-card selected pg-selected">
-                    <div className="conn-engine-icon">🐘</div>
-                    <div className="conn-engine-info">
-                      <div className="conn-engine-title">PostgreSQL</div>
-                      <div className="conn-engine-desc">Port 5432 · db &apos;postgres&apos; · pg_stat_activity · EXPLAIN JSON</div>
-                    </div>
-                    <span className="conn-engine-active-indicator">
-                      <Check size={14} /> Active Engine
-                    </span>
-                  </div>
-                ) : (
-                  <div className="conn-engine-card selected mssql-selected">
-                    <div className="conn-engine-icon">🗄️</div>
-                    <div className="conn-engine-info">
-                      <div className="conn-engine-title">Microsoft SQL Server</div>
-                      <div className="conn-engine-desc">Port 1433 · db &apos;master&apos; · sys.dm_exec_requests · ShowPlan XML</div>
-                    </div>
-                    <span className="conn-engine-active-indicator">
-                      <Check size={14} /> Active Engine
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* SECTION 1: Identity & Server Target */}
+            {/* SECTION 1: Server & Instance Target */}
             <div className="conn-form-section">
               <div className="conn-section-header">
-                <Server size={15} color="#38bdf8" />
-                <span>1. Server Identity & Instance Target</span>
+                <Server size={14} color="#0284c7" />
+                <span>1. Server &amp; Instance Target</span>
+                <div className="conn-shortcuts-inline">
+                  <span className="conn-shortcuts-label">Quick Host:</span>
+                  <button
+                    type="button"
+                    className="conn-chip"
+                    onClick={() => setFormData({ ...formData, server: 'localhost' })}
+                  >
+                    localhost
+                  </button>
+                  <button
+                    type="button"
+                    className="conn-chip"
+                    onClick={() => setFormData({ ...formData, server: '127.0.0.1' })}
+                  >
+                    127.0.0.1
+                  </button>
+                  {isPg ? (
+                    <button
+                      type="button"
+                      className="conn-chip"
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          server: 'localhost',
+                          port: 5432,
+                          database: 'postgres',
+                          username: 'postgres',
+                        })
+                      }
+                    >
+                      postgres-local
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="conn-chip"
+                      onClick={() => setFormData({ ...formData, server: '.\\SQLEXPRESS' })}
+                    >
+                      .\SQLEXPRESS
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="conn-form-row">
@@ -806,7 +724,42 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder={isPg ? "e.g., PostgreSQL Production (pg-prod-01)" : "e.g., Production SQL Server (sql-prod-01)"}
+                    placeholder={isPg ? 'e.g., PostgreSQL Production (pg-prod-01)' : 'e.g., Production SQL Server (sql-prod-01)'}
+                    className="conn-input"
+                  />
+                </div>
+
+                <div className="conn-input-group flex-2">
+                  <label>Server Host / IP Address</label>
+                  <input
+                    type="text"
+                    value={formData.server}
+                    onChange={(e) => setFormData({ ...formData, server: e.target.value })}
+                    placeholder={isPg ? 'localhost, 127.0.0.1, or db.example.com' : 'localhost, sql.example.com, or .\\SQLEXPRESS'}
+                    className="conn-input"
+                  />
+                </div>
+
+                <div className="conn-input-group conn-port-group">
+                  <label>Port</label>
+                  <input
+                    type="number"
+                    value={formData.port}
+                    onChange={(e) => setFormData({ ...formData, port: Number(e.target.value) || (isPg ? 5432 : 1433) })}
+                    placeholder={isPg ? '5432' : '1433'}
+                    className="conn-input"
+                  />
+                </div>
+              </div>
+
+              <div className="conn-form-row">
+                <div className="conn-input-group flex-2">
+                  <label>Database Name</label>
+                  <input
+                    type="text"
+                    value={formData.database}
+                    onChange={(e) => setFormData({ ...formData, database: e.target.value })}
+                    placeholder={isPg ? 'postgres, production_db' : 'master, AppDB'}
                     className="conn-input"
                   />
                 </div>
@@ -823,129 +776,44 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   </select>
                 </div>
               </div>
-
-              <div className="conn-form-row">
-                <div className="conn-input-group flex-3">
-                  <label>Server Host / IP Address</label>
-                  <input
-                    type="text"
-                    value={formData.server}
-                    onChange={(e) => setFormData({ ...formData, server: e.target.value })}
-                    placeholder={isPg ? "localhost, 127.0.0.1, or db.example.com" : "localhost, sql.example.com, or .\\SQLEXPRESS"}
-                    className="conn-input"
-                  />
-                  <div className="conn-shortcuts-row">
-                    <span className="conn-shortcuts-label">Presets:</span>
-                    <button
-                      type="button"
-                      className="conn-chip"
-                      onClick={() => setFormData({ ...formData, server: 'localhost' })}
-                    >
-                      localhost
-                    </button>
-                    <button
-                      type="button"
-                      className="conn-chip"
-                      onClick={() => setFormData({ ...formData, server: '127.0.0.1' })}
-                    >
-                      127.0.0.1
-                    </button>
-                    {isPg ? (
-                      <button
-                        type="button"
-                        className="conn-chip"
-                        onClick={() =>
-                          setFormData({
-                            ...formData,
-                            server: 'localhost',
-                            port: 5432,
-                            database: 'postgres',
-                            username: 'postgres',
-                          })
-                        }
-                      >
-                        postgres-local
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="conn-chip"
-                        onClick={() => setFormData({ ...formData, server: '.\\SQLEXPRESS' })}
-                      >
-                        .\\SQLEXPRESS
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="conn-input-group flex-1">
-                  <label>TCP Port</label>
-                  <input
-                    type="number"
-                    value={formData.port}
-                    onChange={(e) => setFormData({ ...formData, port: Number(e.target.value) || (isPg ? 5432 : 1433) })}
-                    placeholder={isPg ? "5432" : "1433"}
-                    className="conn-input"
-                  />
-                </div>
-
-                <div className="conn-input-group flex-2">
-                  <label>Database Name</label>
-                  <input
-                    type="text"
-                    value={formData.database}
-                    onChange={(e) => setFormData({ ...formData, database: e.target.value })}
-                    placeholder={isPg ? "postgres, production_db, etc." : "master, SalesDB, etc."}
-                    className="conn-input"
-                  />
-                </div>
-              </div>
             </div>
 
-            {/* SECTION 2: Authentication & Credentials */}
-            <div className="conn-form-section">
-              <div className="conn-section-header">
-                <KeyRound size={15} color="#c084fc" />
-                <span>2. Authentication & Credentials</span>
-              </div>
-
-              <div className="conn-auth-selector">
-                <div
-                  className={`conn-auth-tab ${formData.authType === 'sql' ? 'active' : ''}`}
-                  onClick={() => setFormData({ ...formData, authType: 'sql' })}
-                >
-                  <Lock size={14} />
-                  <div>
-                    <span className="conn-auth-title">
-                      {isPg ? 'Standard Password Auth' : 'SQL Server Authentication'}
-                    </span>
-                    <span className="conn-auth-desc">Login with username and password</span>
-                  </div>
+            {/* SECTIONS 2 & 3 SIDE-BY-SIDE */}
+            <div className="conn-dual-sections-grid">
+              {/* SECTION 2: Authentication & Credentials */}
+              <div className="conn-form-section">
+                <div className="conn-section-header">
+                  <KeyRound size={14} color="#7c3aed" />
+                  <span>2. Authentication &amp; Credentials</span>
                 </div>
 
-                <div
-                  className={`conn-auth-tab ${formData.authType === 'windows' ? 'active' : ''}`}
-                  onClick={() =>
-                    setFormData({
-                      ...formData,
-                      authType: 'windows',
-                      username: windowsUser?.username || formData.username,
-                    })
-                  }
-                >
-                  <ShieldCheck size={14} />
-                  <div>
-                    <span className="conn-auth-title">
-                      {isPg ? 'Local / OS Peer Security' : 'Windows Authentication'}
-                    </span>
-                      <span className="conn-auth-desc">
-                        Integrated security ({windowsUser?.username || 'Current User'})
-                      </span>
-                    </div>
-                  </div>
+                <div className="conn-auth-segmented">
+                  <button
+                    type="button"
+                    className={`conn-auth-pill ${formData.authType === 'sql' ? 'active' : ''}`}
+                    onClick={() => setFormData({ ...formData, authType: 'sql' })}
+                  >
+                    <Lock size={13} />
+                    <span>{isPg ? 'Password Auth' : 'SQL Server Auth'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`conn-auth-pill ${formData.authType === 'windows' ? 'active' : ''}`}
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        authType: 'windows',
+                        username: windowsUser?.username || formData.username,
+                      })
+                    }
+                  >
+                    <ShieldCheck size={13} />
+                    <span>{isPg ? 'OS Peer Security' : 'Windows Integrated'}</span>
+                  </button>
                 </div>
 
-                <div className="conn-form-row" style={{ marginTop: '14px' }}>
+                <div className="conn-form-row">
                   <div className="conn-input-group flex-1">
                     <div className="conn-label-row">
                       <label>Login Username</label>
@@ -954,9 +822,9 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                           type="button"
                           className="conn-helper-btn"
                           onClick={() => setFormData({ ...formData, username: windowsUser.username })}
-                          title={`Click to fill Windows user: ${windowsUser.fullAccount || windowsUser.username}`}
+                          title={`Fill Windows user: ${windowsUser.fullAccount || windowsUser.username}`}
                         >
-                          Use Windows User ({windowsUser.username})
+                          Use {windowsUser.username}
                         </button>
                       )}
                     </div>
@@ -964,7 +832,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                       type="text"
                       value={formData.username || ''}
                       onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                      placeholder={formData.authType === 'windows' ? 'DOMAIN\\username or local' : (isPg ? 'postgres' : 'sa')}
+                      placeholder={formData.authType === 'windows' ? 'DOMAIN\\username' : (isPg ? 'postgres' : 'sa')}
                       className="conn-input"
                     />
                   </div>
@@ -994,54 +862,61 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                 </div>
               </div>
 
-            {/* SECTION 3: TLS & Network Configuration */}
-            <div className="conn-form-section">
-              <div className="conn-section-header">
-                <Shield size={15} color="#34d399" />
-                <span>3. TLS Encryption & Network Diagnostics</span>
-              </div>
+              {/* SECTION 3: TLS & Network Options */}
+              <div className="conn-form-section">
+                <div className="conn-section-header">
+                  <Shield size={14} color="#059669" />
+                  <span>3. TLS &amp; Network Options</span>
+                </div>
 
-              <div className="conn-toggles-grid">
-                <label className="conn-checkbox-card">
-                  <input
-                    type="checkbox"
-                    checked={formData.trustServerCertificate}
-                    onChange={(e) => setFormData({ ...formData, trustServerCertificate: e.target.checked })}
-                  />
-                  <div>
-                    <span className="conn-check-title">
-                      {isPg ? 'Trust Server Certificate (sslmode=no-verify)' : 'Trust Server Certificate'}
+                <div className="conn-tls-stack">
+                  <label className="conn-checkbox-card">
+                    <input
+                      type="checkbox"
+                      checked={formData.trustServerCertificate}
+                      onChange={(e) => setFormData({ ...formData, trustServerCertificate: e.target.checked })}
+                    />
+                    <div>
+                      <span className="conn-check-title">
+                        {isPg ? 'Trust Server Certificate (no-verify)' : 'Trust Server Certificate'}
+                      </span>
+                      <span className="conn-check-desc">Accept self-signed certs without CA chain check</span>
+                    </div>
+                  </label>
+
+                  <label className="conn-checkbox-card">
+                    <input
+                      type="checkbox"
+                      checked={formData.encrypt}
+                      onChange={(e) => setFormData({ ...formData, encrypt: e.target.checked })}
+                    />
+                    <div>
+                      <span className="conn-check-title">
+                        {isPg ? 'Require SSL (sslmode=require)' : 'Encrypt Connection (TLS)'}
+                      </span>
+                      <span className="conn-check-desc">Enforce encrypted payload channel in transit</span>
+                    </div>
+                  </label>
+
+                  <div className="conn-network-bottom-row">
+                    <div className="conn-timeout-inline">
+                      <label>Timeout (sec)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={60}
+                        value={formData.timeoutSeconds}
+                        onChange={(e) =>
+                          setFormData({ ...formData, timeoutSeconds: Number(e.target.value) || 4 })
+                        }
+                        className="conn-input conn-input-sm"
+                      />
+                    </div>
+                    <span className="conn-dba-safe-pill" title="PlanIQ runs read-only diagnostics without acquiring write locks">
+                      <ShieldCheck size={12} />
+                      <span>Read-Only · Zero Locks</span>
                     </span>
-                    <span className="conn-check-desc">Allow self-signed certificates without chain validation</span>
                   </div>
-                </label>
-
-                <label className="conn-checkbox-card">
-                  <input
-                    type="checkbox"
-                    checked={formData.encrypt}
-                    onChange={(e) => setFormData({ ...formData, encrypt: e.target.checked })}
-                  />
-                  <div>
-                    <span className="conn-check-title">
-                      {isPg ? 'Enable SSL (sslmode=require)' : 'Encrypt Data in Transit'}
-                    </span>
-                    <span className="conn-check-desc">Force SSL/TLS payload encryption for secure networks</span>
-                  </div>
-                </label>
-
-                <div className="conn-timeout-card">
-                  <label>Handshake Timeout (Seconds)</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={60}
-                    value={formData.timeoutSeconds}
-                    onChange={(e) =>
-                      setFormData({ ...formData, timeoutSeconds: Number(e.target.value) || 4 })
-                    }
-                    className="conn-input conn-input-sm"
-                  />
                 </div>
               </div>
             </div>
@@ -1052,10 +927,10 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                 {testResult.success ? (
                   <>
                     <div className="conn-test-header">
-                      <CheckCircle2 size={18} color="#34d399" />
+                      <CheckCircle2 size={17} />
                       <div>
-                        <strong>Connection Test Succeeded!</strong>
-                        <span>Round-trip handshake latency: {testResult.status?.latencyMs}ms</span>
+                        <strong>Connection Test Succeeded</strong>
+                        <span>Handshake latency: {testResult.status?.latencyMs}ms</span>
                       </div>
                     </div>
                     <div className="conn-test-metrics">
@@ -1075,7 +950,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   </>
                 ) : (
                   <div className="conn-test-header">
-                    <AlertCircle size={18} color="#f43f5e" />
+                    <AlertCircle size={17} />
                     <div>
                       <strong>Connection Test Failed</strong>
                       <span className="conn-test-error-text">{testResult.error}</span>
@@ -1091,12 +966,12 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
             <div className="conn-footer-left">
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-secondary btn-sm"
                 onClick={handleTest}
                 disabled={isTesting}
               >
-                <Activity size={14} className={isTesting ? 'spin' : ''} />
-                <span>{isTesting ? 'Testing Handshake...' : 'Test Handshake'}</span>
+                <Activity size={13} className={isTesting ? 'spin' : ''} />
+                <span>{isTesting ? 'Testing...' : 'Test Handshake'}</span>
               </button>
 
               {formData.id && (
@@ -1114,21 +989,21 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
             <div className="conn-footer-right">
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-secondary btn-sm"
                 onClick={() => handleSave(false)}
                 disabled={isSaving}
               >
-                <HardDrive size={14} />
+                <HardDrive size={13} />
                 <span>{isSaving ? 'Saving...' : 'Save to SQLite'}</span>
               </button>
 
               <button
                 type="button"
-                className="btn btn-primary"
+                className="btn btn-primary btn-sm"
                 onClick={() => handleSave(true)}
                 disabled={isSaving || isConnecting}
               >
-                <Zap size={14} />
+                <Zap size={13} />
                 <span>{isConnecting ? 'Connecting...' : 'Save & Connect'}</span>
               </button>
             </div>

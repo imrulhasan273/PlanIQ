@@ -593,38 +593,36 @@ export function App() {
             )}
           </ErrorBoundary>
         ) : (
-          /* Blank state when no plan is loaded - Dynamically filtered by selectedEngine */
+          /* Compact, Balanced Welcome Card when no plan is loaded */
           <div className="welcome-state-container">
-            <div className="welcome-box glass-panel">
-              <div className="welcome-icon">
-                <Database size={48} color={selectedEngine === 'postgresql' ? '#38bdf8' : '#818cf8'} />
-              </div>
+            <div className={`welcome-box glass-panel ${selectedEngine === 'postgresql' ? 'welcome-pg' : 'welcome-mssql'}`}>
+              {/* Top Row: Compact Brand + Inline Engine Switcher */}
+              <div className="welcome-header-row">
+                <div className="welcome-brand-left">
+                  <div className="welcome-icon">
+                    <Database size={20} color={selectedEngine === 'postgresql' ? '#38bdf8' : '#818cf8'} />
+                  </div>
+                  <div className="welcome-title-stack">
+                    <h1 className="welcome-title">
+                      {selectedEngine === 'postgresql'
+                        ? 'PostgreSQL Execution Plan Analyzer'
+                        : 'SQL Server Execution Plan Analyzer'}
+                    </h1>
+                    <p className="welcome-desc">
+                      {selectedEngine === 'postgresql'
+                        ? 'EXPLAIN (JSON) tree diagnostics, shared_buffers impact & AI tuning'
+                        : 'ShowPlan XML tree diagnostics, PLE risk rating & AI query tuning'}
+                    </p>
+                  </div>
+                </div>
 
-              {selectedEngine === 'postgresql' ? (
-                <>
-                  <h1 className="welcome-title">PostgreSQL Execution Plan Visualizer & AI Advisor</h1>
-                  <p className="welcome-desc">
-                    High-performance PostgreSQL EXPLAIN (JSON) execution plan visualizer and AI performance advisor. Instant bottleneck detection, interactive plan tree, shared_buffers / temp spill I/O diagnostics, and AI-powered query rewrites.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <h1 className="welcome-title">SQL Server Execution Plan Visualizer & AI Advisor</h1>
-                  <p className="welcome-desc">
-                    High-performance ShowPlan XML analyzer built with Go & React. Instant bottleneck detection, missing index DDL generation, buffer pool & PLE threat evaluation, and AI-powered query rewrites.
-                  </p>
-                </>
-              )}
-
-              <div className="welcome-engine-toggle-row">
-                <span className="welcome-engine-label">Target Database Engine:</span>
                 <div className="engine-switch-pills">
                   <button
                     type="button"
                     className={`engine-pill-btn ${selectedEngine === 'sqlserver' ? 'active' : ''}`}
                     onClick={() => handleSelectEngine('sqlserver')}
                   >
-                    <Database size={13} color={selectedEngine === 'sqlserver' ? '#818cf8' : '#64748b'} />
+                    <Database size={12} color={selectedEngine === 'sqlserver' ? '#818cf8' : '#64748b'} />
                     <span>SQL Server</span>
                   </button>
                   <button
@@ -632,65 +630,100 @@ export function App() {
                     className={`engine-pill-btn ${selectedEngine === 'postgresql' ? 'active' : ''}`}
                     onClick={() => handleSelectEngine('postgresql')}
                   >
-                    <Database size={13} color={selectedEngine === 'postgresql' ? '#38bdf8' : '#64748b'} />
+                    <Database size={12} color={selectedEngine === 'postgresql' ? '#38bdf8' : '#64748b'} />
                     <span>PostgreSQL</span>
                   </button>
                 </div>
               </div>
 
-              {selectedEngine === 'postgresql' ? (
-                /* PostgreSQL Action Buttons */
-                <div className="welcome-buttons-row">
-                  <button className="btn btn-primary btn-lg" onClick={handleOpenFile}>
-                    <Upload size={18} />
-                    <span>Open PostgreSQL Plan (.json)</span>
-                  </button>
+              {/* Compact Capability Strip */}
+              <div className="welcome-feature-chips">
+                <span className="welcome-chip">5-Pillar 100pt Grading</span>
+                <span className="welcome-chip">Interactive Plan Tree</span>
+                <span className="welcome-chip">Live DB Radar</span>
+                <span className="welcome-chip">Anonymized Export</span>
+              </div>
 
-                  <button
-                    className="btn btn-secondary btn-lg"
-                    onClick={() => setIsPasteOpen(true)}
-                    style={{ borderColor: 'rgba(56, 189, 248, 0.4)' }}
-                  >
-                    <Code2 size={18} color="#38bdf8" />
-                    <span>Paste EXPLAIN (JSON)</span>
-                  </button>
-                </div>
-              ) : (
-                /* SQL Server Action Buttons */
-                <div className="welcome-buttons-row">
-                  <button className="btn btn-primary btn-lg" onClick={handleOpenFile}>
-                    <Upload size={18} />
-                    <span>Open .sqlplan File</span>
-                  </button>
+              {/* Balanced 2x2 Action Grid */}
+              <div className="welcome-actions-grid">
+                <button
+                  type="button"
+                  className="welcome-action-tile is-primary"
+                  onClick={handleOpenFile}
+                >
+                  <div className="welcome-action-icon primary-icon">
+                    <Upload size={16} color="#ffffff" />
+                  </div>
+                  <div className="welcome-action-text">
+                    <span className="welcome-action-title">
+                      {selectedEngine === 'postgresql' ? 'Open Plan (.json)' : 'Open .sqlplan File'}
+                    </span>
+                    <span className="welcome-action-sub">
+                      {selectedEngine === 'postgresql' ? 'EXPLAIN (FORMAT JSON)' : 'ShowPlan XML / .xml'}
+                    </span>
+                  </div>
+                </button>
 
-                  <button
-                    className="btn btn-secondary btn-lg"
-                    onClick={() => setIsPasteOpen(true)}
-                    style={{ borderColor: 'rgba(129, 140, 248, 0.5)' }}
-                  >
-                    <FileCode2 size={18} color="#818cf8" />
-                    <span>Paste ShowPlan XML</span>
-                  </button>
+                <button
+                  type="button"
+                  className="welcome-action-tile"
+                  onClick={() => setIsPasteOpen(true)}
+                >
+                  <div className="welcome-action-icon">
+                    {selectedEngine === 'postgresql' ? (
+                      <Code2 size={16} color="#38bdf8" />
+                    ) : (
+                      <FileCode2 size={16} color="#818cf8" />
+                    )}
+                  </div>
+                  <div className="welcome-action-text">
+                    <span className="welcome-action-title">
+                      {selectedEngine === 'postgresql' ? 'Paste EXPLAIN (JSON)' : 'Paste ShowPlan XML'}
+                    </span>
+                    <span className="welcome-action-sub">Instant clipboard parse</span>
+                  </div>
+                </button>
 
-                  <button
-                    className="btn btn-secondary btn-lg"
-                    onClick={() => setIsLiveConnOpen(true)}
-                    style={{ borderColor: 'rgba(56, 189, 248, 0.4)' }}
-                  >
-                    <Zap size={18} color="#38bdf8" />
-                    <span>Connect to SQL Server</span>
-                  </button>
+                <button
+                  type="button"
+                  className="welcome-action-tile"
+                  onClick={() => setIsLiveConnOpen(true)}
+                >
+                  <div className="welcome-action-icon">
+                    <Zap size={16} color="#38bdf8" />
+                  </div>
+                  <div className="welcome-action-text">
+                    <span className="welcome-action-title">
+                      {selectedEngine === 'postgresql' ? 'Connect to PostgreSQL' : 'Connect to SQL Server'}
+                    </span>
+                    <span className="welcome-action-sub">Live Radar &amp; query capture</span>
+                  </div>
+                </button>
 
-                  <button
-                    className="btn btn-secondary btn-lg"
-                    onClick={() => setActiveTab('deadlock')}
-                    style={{ borderColor: 'rgba(244, 63, 94, 0.4)' }}
-                  >
-                    <ShieldAlert size={18} color="#f43f5e" />
-                    <span>Deadlock Graph Viewer (.xdl)</span>
-                  </button>
-                </div>
-              )}
+                <button
+                  type="button"
+                  className="welcome-action-tile"
+                  onClick={() => setActiveTab('deadlock')}
+                >
+                  <div className="welcome-action-icon">
+                    <ShieldAlert size={16} color="#f43f5e" />
+                  </div>
+                  <div className="welcome-action-text">
+                    <span className="welcome-action-title">
+                      {selectedEngine === 'postgresql' ? 'PG Deadlock Viewer' : 'Deadlock Viewer (.xdl)'}
+                    </span>
+                    <span className="welcome-action-sub">100% offline lock graph</span>
+                  </div>
+                </button>
+              </div>
+
+              {/* Compact Drag & Drop Hint */}
+              <div className="welcome-drop-hint">
+                <Upload size={12} color="#64748b" />
+                <span>
+                  Tip: Drag &amp; drop <code>{selectedEngine === 'postgresql' ? '.json' : '.sqlplan / .xml / .xdl'}</code> anywhere on this window
+                </span>
+              </div>
             </div>
           </div>
         )}

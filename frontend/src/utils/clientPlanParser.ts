@@ -7,6 +7,7 @@ import {
   WaitStat,
   ExecutiveVerdict,
   AdvancedDiagnostics,
+  HealthScorePillar,
   MemoryGrantHealth,
   ParallelismSkew,
   ImplicitConversion,
@@ -733,7 +734,7 @@ function detectAntiPatterns(statements: StatementAnalysis[]) {
   const antiPatterns = [];
   const topStmt = statements[0];
 
-  if (topStmt && topStmt.costPercentage > 40) {
+  if (statements.length > 1 && topStmt && topStmt.costPercentage > 40) {
     antiPatterns.push({
       type: 'SingleQueryDominance',
       severity: 'critical',
@@ -774,14 +775,23 @@ function hasTableScan(node: PlanNode): boolean {
 function generateExecutiveVerdict(statements: StatementAnalysis[], totalCost: number): ExecutiveVerdict | undefined {
   if (statements.length === 0) return undefined;
   const culprit = statements[0];
+  const isSingle = statements.length === 1;
+  const hasScans = culprit.rootNode ? hasTableScan(culprit.rootNode) : false;
+  const hasIssues = hasScans || (culprit.warnings?.length || 0) > 0 || (culprit.missingIndexes?.length || 0) > 0;
 
   return {
     culpritStatementId: culprit.statementId,
     costPercentage: Math.round(culprit.costPercentage),
-    headline: `Statement #${culprit.statementId} accounts for ${culprit.costPercentage.toFixed(1)}% of total batch execution cost (${culprit.statementSubTreeCost.toFixed(2)})`,
-    summary: `The SQL Server query optimizer allocated ${culprit.costPercentage.toFixed(1)}% of execution cost to Query #${culprit.statementId}. Remediating this query will produce the greatest reduction in runtime, CPU, and I/O pressure.`,
+    headline: isSingle
+      ? `Single-Statement Plan: Statement #${culprit.statementId} (${culprit.statementSubTreeCost.toFixed(2)} subtree cost)`
+      : `Statement #${culprit.statementId} accounts for ${culprit.costPercentage.toFixed(1)}% of total batch execution cost (${culprit.statementSubTreeCost.toFixed(2)})`,
+    summary: isSingle && !hasIssues
+      ? `Healthy execution plan for Statement #${culprit.statementId} (${culprit.rootNode?.physicalOp || 'Query'}) with targeted access paths and no missing index warnings.`
+      : `The SQL Server query optimizer allocated ${culprit.costPercentage.toFixed(1)}% of execution cost (${totalCost.toFixed(2)} total) to Query #${culprit.statementId}. Remediating this query will produce the greatest reduction in runtime, CPU, and I/O pressure.`,
     topOperator: culprit.rootNode?.physicalOp || 'Operator',
-    actionableFix: `Review query #${culprit.statementId} in the visualizer and AI Advisor to add recommended indexes or optimize joins and partition pruning.`,
+    actionableFix: isSingle && !hasIssues
+      ? 'No urgent plan remediation required; continue monitoring query runtime statistics for data growth.'
+      : `Review query #${culprit.statementId} in the visualizer and AI Advisor to add recommended indexes or optimize joins and partition pruning.`,
   };
 }
 
@@ -794,7 +804,8 @@ function evaluatePLERiskClient(statements: StatementAnalysis[]): PLERiskAssessme
   const walkNodes = (n: PlanNode | undefined) => {
     if (!n) return;
     const opLower = ((n.physicalOp || '') + ' ' + (n.logicalOp || '')).toLowerCase();
-    if (opLower.includes('scan')) {
+    const isTinyTemp = (n.table || '').startsWith('[#') && (n.estimateRows || 0) < 10000;
+    if (opLower.includes('scan') && !isTinyTemp) {
       let name = n.physicalOp;
       if (n.table) {
         name += ' on ' + n.table;
@@ -829,7 +840,7 @@ function evaluatePLERiskClient(statements: StatementAnalysis[]): PLERiskAssessme
       riskLevel: 'LOW',
       score: 5,
       headline: 'Optimal Buffer Pool Footprint (Minimal PLE Impact)',
-      summary: 'No table or index scans detected. Query touches minimal pages via seeks and does not cause buffer pool eviction pressure.',
+      summary: 'No large table or index scans detected. Query touches minimal pages via seeks and does not cause buffer pool eviction pressure.',
       estimatedScanVolumeMb: scanVolumeMB,
       bufferPoolEvictionRisk: 'Negligible (<0.1% buffer pool churn)',
       culpritOperators: [],
@@ -837,18 +848,18 @@ function evaluatePLERiskClient(statements: StatementAnalysis[]): PLERiskAssessme
     };
   }
 
-  if (scanVolumeMB > 1024 || totalLogicalReads > 100000 || totalEstRows > 1000000) {
+  if (scanVolumeMB > 1024 || totalLogicalReads > 131072) {
     return {
       riskLevel: 'CRITICAL',
       score: 95,
       headline: 'Catastrophic Page Life Expectancy (PLE) Flush Risk',
-      summary: `Query reads ~${scanVolumeMB.toFixed(1)} MB of data pages across full scan operations (${scanOperators.join(', ')}). On standard production databases, this forces rapid eviction of active cached tables, cratering Page Life Expectancy (PLE) and triggering buffer pool churn.`,
+      summary: `Query reads ~${scanVolumeMB.toFixed(1)} MB of data pages across scan operations (${scanOperators.join(', ')}). On standard production databases, this forces rapid eviction of active cached tables, cratering Page Life Expectancy (PLE) and triggering buffer pool churn.`,
       estimatedScanVolumeMb: scanVolumeMB,
       bufferPoolEvictionRisk: 'Catastrophic (>35% buffer pool eviction per run)',
       culpritOperators: scanOperators,
       mitigationAction: 'Create covering nonclustered index on scan filter/join keys to convert full scans into single-page seeks, eliminating RAM eviction.',
     };
-  } else if (scanVolumeMB > 200 || totalLogicalReads > 25000 || totalEstRows > 200000) {
+  } else if (scanVolumeMB > 250 || totalLogicalReads > 32000 || totalEstRows > 1000000) {
     return {
       riskLevel: 'HIGH',
       score: 70,
@@ -950,7 +961,8 @@ function generateAdvancedDiagnosticsClient(
   // 7 Extended Root Cause Detectors
   const extra = computeExtraDiagnostics(xmlDoc, cardinalityEngine?.modelVersion, scalarUdfWarnings.length);
 
-  const { healthScore, scoreGrade } = calculateHealthScoreClient(
+  const { healthScore, scoreGrade, healthBreakdown } = calculateHealthScoreClient(
+    statements,
     memoryGrant,
     parallelismSkew,
     implicitConversions,
@@ -978,6 +990,7 @@ function generateAdvancedDiagnosticsClient(
     adaptive: extra.adaptive,
     healthScore,
     scoreGrade,
+    healthBreakdown,
   };
 }
 
@@ -1291,7 +1304,29 @@ function extractCardinalityEngineClient(xmlDoc: Document): CardinalityEstimation
   };
 }
 
+function sevRankClient(sev: string | undefined): number {
+  switch ((sev || '').toUpperCase()) {
+    case 'CRITICAL':
+      return 3;
+    case 'HIGH':
+      return 2;
+    case 'MEDIUM':
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function pillarStatusClient(score: number, maxScore: number): 'healthy' | 'warn' | 'critical' {
+  if (maxScore <= 0) return 'healthy';
+  const pct = score / maxScore;
+  if (pct >= 0.8) return 'healthy';
+  if (pct >= 0.5) return 'warn';
+  return 'critical';
+}
+
 function calculateHealthScoreClient(
+  statements: StatementAnalysis[],
   memoryGrant: MemoryGrantHealth | undefined,
   skew: ParallelismSkew | undefined,
   implicitConversions: ImplicitConversion[],
@@ -1301,31 +1336,162 @@ function calculateHealthScoreClient(
   maxDopReason: string,
   antiPatterns: any[],
   extra?: any
-): { healthScore: number; scoreGrade: string } {
-  let score = 100;
+): { healthScore: number; scoreGrade: string; healthBreakdown: HealthScorePillar[] } {
+  const totalCost = statements.reduce((acc, s) => acc + (s.statementSubTreeCost || 0), 0);
+  const stmtWeight = new Map<string, number>();
+  statements.forEach((s) => {
+    let w = 1.0;
+    if (statements.length > 1 && totalCost > 0) {
+      w = Math.max(0.25, (s.costPercentage || 0) / 100.0);
+    }
+    stmtWeight.set(s.statementId, w);
+  });
 
-  if (memoryGrant?.hasSpills) score -= 25;
-  else if (memoryGrant?.isBloated) score -= 15;
-
-  if (skew?.hasSkew) score -= 15;
-  if (implicitConversions.length > 0) score -= 15;
-  if (udfs.length > 0) score -= 15;
-  if (ce?.isLegacy) score -= 10;
-  if (missingIndexes.length > 3) score -= 10;
-  else if (missingIndexes.length > 0) score -= 5;
-  if (maxDopReason === 'MaxDOPSetToOne') score -= 5;
-
-  if (antiPatterns.some((ap) => ap.type === 'HEAP_TABLE' || ap.type === 'TableScanOnHeap')) {
-    score -= 10;
+  // 1. I/O & Index Access Efficiency (30 pts)
+  let ioScore = 30;
+  const ioNotes: string[] = [];
+  if (missingIndexes.length > 0) {
+    let maxImpact = 0;
+    let maxWeighted = 0;
+    missingIndexes.forEach((mi) => {
+      if (mi.impact > maxImpact) maxImpact = mi.impact;
+      const w = stmtWeight.get(mi.statementId) ?? 1.0;
+      const eff = (Math.max(20, mi.impact) / 100.0) * w;
+      if (eff > maxWeighted) maxWeighted = eff;
+    });
+    let pen = Math.round(maxWeighted * 11) + Math.min(5, (missingIndexes.length - 1) * 2);
+    if (totalCost < 0.1 && pen > 5) pen = 5;
+    ioScore -= pen;
+    ioNotes.push(`${missingIndexes.length} missing index(es) (up to ${Math.round(maxImpact)}% impact)`);
   }
 
-  if (extra) {
-    score -= extraHealthPenalty(extra);
+  const hasHeap = antiPatterns.some((ap) => ap.type === 'HEAP_TABLE' || ap.type === 'TableScanOnHeap');
+  let hasLargeScan = false;
+  const walkLargeScan = (n: PlanNode | undefined) => {
+    if (!n) return;
+    if ((n.physicalOp || '').toLowerCase().includes('scan') && !(n.table || '').startsWith('[#') && n.tableCardinality >= 10000) {
+      hasLargeScan = true;
+    }
+    (n.children || []).forEach(walkLargeScan);
+  };
+  statements.forEach((s) => walkLargeScan(s.rootNode));
+  if (hasHeap) {
+    ioScore -= 8;
+    ioNotes.push('heap table scan / RID lookup');
+  } else if (hasLargeScan) {
+    ioScore -= 5;
+    ioNotes.push('full scan on large table (>=10k rows)');
   }
 
-  if (score < 15) score = 15;
-  if (score > 98) score = 98;
+  const klRank = (extra?.keyLookups || []).reduce((acc: number, k: any) => Math.max(acc, sevRankClient(k.severity)), 0);
+  if (klRank >= 3) {
+    ioScore -= 10;
+    ioNotes.push('critical key/RID lookups');
+  } else if (klRank === 2) {
+    ioScore -= 6;
+    ioNotes.push('high-cost key lookups');
+  } else if (klRank === 1) {
+    ioScore -= 3;
+    ioNotes.push('minor key lookups');
+  }
+  ioScore = Math.max(0, Math.min(30, ioScore));
 
+  // 2. Memory & TempDB Workspace (25 pts)
+  let memScore = 25;
+  const memNotes: string[] = [];
+  if (memoryGrant?.hasSpills) {
+    memScore -= 18;
+    memNotes.push('TempDB memory spill detected');
+  } else if (memoryGrant?.isBloated) {
+    memScore -= 6;
+    memNotes.push(`memory grant bloat (${Math.round(memoryGrant.wastedPercent || 0)}% unused)`);
+  }
+  const spRank = (extra?.spools || []).reduce((acc: number, s: any) => Math.max(acc, sevRankClient(s.severity)), 0);
+  if (spRank >= 3) {
+    memScore -= 10;
+    memNotes.push('critical eager spool overhead');
+  } else if (spRank === 2) {
+    memScore -= 6;
+    memNotes.push('expensive spool operator');
+  } else if (spRank === 1) {
+    memScore -= 3;
+    memNotes.push('minor spool buffering');
+  }
+  memScore = Math.max(0, Math.min(25, memScore));
+
+  // 3. SARGability & Data Types (20 pts)
+  let sargScore = 20;
+  const sargNotes: string[] = [];
+  if (implicitConversions.length > 0) {
+    sargScore -= implicitConversions.length > 2 ? 12 : 10;
+    sargNotes.push(`${implicitConversions.length} CONVERT_IMPLICIT cast(s)`);
+  }
+  const nsRank = (extra?.nonSargable || []).reduce((acc: number, n: any) => Math.max(acc, sevRankClient(n.severity)), 0);
+  if (nsRank >= 3) {
+    sargScore -= 12;
+    sargNotes.push('critical non-SARGable predicate');
+  } else if (nsRank === 2) {
+    sargScore -= 8;
+    sargNotes.push('non-SARGable filter/wildcard');
+  } else if (nsRank === 1) {
+    sargScore -= 4;
+    sargNotes.push('minor non-SARGable predicate');
+  }
+  if (udfs.length > 0) {
+    sargScore -= 10;
+    sargNotes.push(`${udfs.length} scalar UDF(s) (RBAR)`);
+  }
+  sargScore = Math.max(0, Math.min(20, sargScore));
+
+  // 4. Cardinality & Plan Stability (15 pts)
+  let cardScore = 15;
+  const cardNotes: string[] = [];
+  const missingStats = extra?.missingStatistics || [];
+  if (missingStats.length > 0) {
+    const hasBase = missingStats.some((ms: any) => !(ms.table || '').startsWith('#'));
+    cardScore -= hasBase ? 8 : 4;
+    cardNotes.push(hasBase ? 'missing base-table statistics' : 'missing temp-table statistics');
+  }
+  const psList = extra?.parameterSniffing || [];
+  if (psList.some((p: any) => p.hasMismatch && p.hasEstimateImpact)) {
+    cardScore -= 7;
+    cardNotes.push('parameter sniffing skew');
+  } else if (psList.some((p: any) => p.hasMismatch)) {
+    cardScore -= 3;
+    cardNotes.push('compiled/runtime parameter delta');
+  }
+  if ((extra?.rowGoals || []).some((r: any) => r.misfired)) {
+    cardScore -= 6;
+    cardNotes.push('row goal misfire');
+  }
+  if (ce?.isLegacy) {
+    cardScore -= totalCost >= 1.0 ? 4 : 2;
+    cardNotes.push(`legacy CE (${ce.modelVersion})`);
+  }
+  cardScore = Math.max(0, Math.min(15, cardScore));
+
+  // 5. Parallelism & CPU Execution (10 pts)
+  let cpuScore = 10;
+  const cpuNotes: string[] = [];
+  if (skew?.hasSkew) {
+    cpuScore -= 7;
+    cpuNotes.push(`parallel thread skew (${skew.skewRatio}x)`);
+  }
+  if (maxDopReason === 'MaxDOPSetToOne' && totalCost >= 5.0) {
+    cpuScore -= 4;
+    cpuNotes.push('MaxDOP = 1 on expensive plan');
+  }
+  cpuScore = Math.max(0, Math.min(10, cpuScore));
+
+  const healthBreakdown: HealthScorePillar[] = [
+    { id: 'io', name: 'I/O & Index Access', score: ioScore, maxScore: 30, weightPct: 30, summary: ioNotes.length ? ioNotes.join('; ') : 'Optimal index seeks & low page I/O', status: pillarStatusClient(ioScore, 30) },
+    { id: 'memory', name: 'Memory & Workspace', score: memScore, maxScore: 25, weightPct: 25, summary: memNotes.length ? memNotes.join('; ') : 'Balanced memory grants, zero disk spills', status: pillarStatusClient(memScore, 25) },
+    { id: 'sargability', name: 'SARGability & Types', score: sargScore, maxScore: 20, weightPct: 20, summary: sargNotes.length ? sargNotes.join('; ') : 'All predicates SARGable, matching column types', status: pillarStatusClient(sargScore, 20) },
+    { id: 'cardinality', name: 'Cardinality & Stats', score: cardScore, maxScore: 15, weightPct: 15, summary: cardNotes.length ? cardNotes.join('; ') : 'Accurate row estimates & stable cardinality', status: pillarStatusClient(cardScore, 15) },
+    { id: 'cpu', name: 'Parallelism & CPU', score: cpuScore, maxScore: 10, weightPct: 10, summary: cpuNotes.length ? cpuNotes.join('; ') : 'Balanced CPU & worker thread distribution', status: pillarStatusClient(cpuScore, 10) },
+  ];
+
+  const score = Math.max(0, Math.min(100, ioScore + memScore + sargScore + cardScore + cpuScore));
   let scoreGrade = 'A';
   if (score >= 90) scoreGrade = 'A';
   else if (score >= 75) scoreGrade = 'B';
@@ -1333,6 +1499,6 @@ function calculateHealthScoreClient(
   else if (score >= 45) scoreGrade = 'D';
   else scoreGrade = 'F';
 
-  return { healthScore: score, scoreGrade };
+  return { healthScore: score, scoreGrade, healthBreakdown };
 }
 

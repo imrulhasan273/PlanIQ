@@ -768,16 +768,29 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div
                 className="ribbon-verdict-pill"
                 onClick={(e) => handleSelectTab('overview', e)}
-                title={`Executive Bottleneck: Stmt #${verdict.culpritStatementId} accounts for ${verdict.costPercentage}% of batch cost`}
+                style={
+                  plan.totalStatements === 1 && (plan.diagnostics?.healthScore ?? 0) >= 80
+                    ? { background: 'rgba(16, 185, 129, 0.14)', borderColor: 'rgba(16, 185, 129, 0.35)', color: '#34d399' }
+                    : undefined
+                }
+                title={
+                  plan.totalStatements === 1
+                    ? `Single-Statement Plan: Stmt #${verdict.culpritStatementId} (${verdict.costPercentage}% of plan)`
+                    : `Executive Bottleneck: Stmt #${verdict.culpritStatementId} accounts for ${verdict.costPercentage}% of batch cost`
+                }
               >
-                <Zap size={11} color="#f43f5e" />
-                <span>Culprit: Stmt #{verdict.culpritStatementId} ({verdict.costPercentage}% Cost)</span>
+                <Zap size={11} color={plan.totalStatements === 1 && (plan.diagnostics?.healthScore ?? 0) >= 80 ? '#34d399' : '#f43f5e'} />
+                <span>
+                  {plan.totalStatements === 1
+                    ? `Stmt #${verdict.culpritStatementId} (Single Query • ${verdict.costPercentage}%)`
+                    : `Culprit: Stmt #${verdict.culpritStatementId} (${verdict.costPercentage}% Cost)`}
+                </span>
               </div>
             )}
             {plan?.diagnostics && (
               <div
                 className={`ribbon-grade-pill grade-${(plan.diagnostics.scoreGrade || 'c').toLowerCase()}`}
-                title="Overall execution plan health grade based on XML diagnostics"
+                title="Overall execution plan health grade across 5 weighted diagnostic pillars (I/O 30%, Memory 25%, SARGability 20%, Cardinality 15%, CPU 10%)"
               >
                 <span>Health: {plan.diagnostics.healthScore}/100</span>
                 <strong className="grade-letter">[{plan.diagnostics.scoreGrade || 'C'}]</strong>

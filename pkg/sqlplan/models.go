@@ -503,6 +503,17 @@ type AdaptiveProcessing struct {
 	Summary            string                 `json:"summary"`
 }
 
+// HealthScorePillar represents one weighted scoring dimension of the 100-point Health Score
+type HealthScorePillar struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Score     int    `json:"score"`
+	MaxScore  int    `json:"maxScore"`
+	WeightPct int    `json:"weightPct"`
+	Summary   string `json:"summary"`
+	Status    string `json:"status"` // "healthy", "warn", "critical"
+}
+
 // AdvancedDiagnostics bundles all high-level engine root cause diagnostics
 type AdvancedDiagnostics struct {
 	MemoryGrant         *MemoryGrantHealth           `json:"memoryGrant,omitempty"`
@@ -520,5 +531,6 @@ type AdvancedDiagnostics struct {
 	Adaptive            *AdaptiveProcessing          `json:"adaptive,omitempty"`
 	HealthScore         int                          `json:"healthScore"`
 	ScoreGrade          string                       `json:"scoreGrade"`
+	HealthBreakdown     []*HealthScorePillar         `json:"healthBreakdown,omitempty"`
 }
 

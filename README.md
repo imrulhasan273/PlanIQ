@@ -109,12 +109,16 @@ Download the latest release for your OS from the [GitHub Releases](https://githu
 | **macOS (Apple Silicon & Intel)** | `PlanIQ-vX.Y.Z-darwin-universal.zip` | Extract `PlanIQ.app` to `/Applications`. If Gatekeeper blocks an unsigned build, run `xattr -cr /Applications/PlanIQ.app` once. |
 | **Linux (x64)** | `PlanIQ-vX.Y.Z-linux-amd64.tar.gz` | Requires `libgtk-3-0` & `libwebkit2gtk-4.1-0` (Ubuntu 24.04+). Extract with `tar -xzf PlanIQ-*.tar.gz && ./PlanIQ`. |
 
-Verify artifact integrity with the release `SHA256SUMS.txt`:
-```bash
-sha256sum -c SHA256SUMS.txt --ignore-missing
-# On macOS:
-shasum -a 256 -c SHA256SUMS.txt --ignore-missing
-```
+> [!NOTE]
+> **Unsigned Community Binaries Notice:**
+> - **macOS:** Apple Gatekeeper may prompt `"PlanIQ.app cannot be opened because it is from an unidentified developer"`. Run `xattr -cr /Applications/PlanIQ.app` in Terminal, or right-click `PlanIQ.app` and choose **Open**.
+> - **Windows:** Microsoft Defender SmartScreen may display `"Windows protected your PC"`. Click **More info** &rarr; **Run anyway**.
+> - **Checksum Verification:** All official release archives include cryptographic SHA-256 hashes generated in GitHub Actions:
+>   ```bash
+>   sha256sum -c SHA256SUMS.txt --ignore-missing
+>   # On macOS:
+>   shasum -a 256 -c SHA256SUMS.txt --ignore-missing
+>   ```
 
 ---
 
