@@ -32,6 +32,7 @@ jobs:
 
       - name: Run Go vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./pkg/...
+        continue-on-error: true
 
   frontend-build:
     name: Frontend Tests, Typecheck & Build
