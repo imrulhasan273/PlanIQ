@@ -35,6 +35,7 @@ import {
   SetAppTheme,
 } from '../wailsjs/go/main/App';
 import { exportDiagnosticReportHTML } from './utils/reportExporter';
+import { buildAnonymizedPlanContent, exportAnonymizedPlanFile, exportRawPlanFile } from './utils/planExports';
 import { parseShowPlanXMLClient } from './utils/clientPlanParser';
 import { isPgExplainJson, parsePgExplainJson } from './utils/pgPlanParser';
 import { sanitizePlan } from './utils/sanitizePlan';
@@ -56,6 +57,7 @@ export type TabType =
 
 export function App() {
   const [plan, setPlan] = useState<PlanAnalysis | null>(null);
+  const [rawPlanContent, setRawPlanContent] = useState<string>('');
   const [selectedStatement, setSelectedStatement] = useState<StatementAnalysis | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -72,6 +74,18 @@ export function App() {
     const saved = localStorage.getItem('planiq_engine');
     return saved === 'postgresql' ? 'postgresql' : 'sqlserver';
   });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const rt = (window as any).runtime;
+      const w = window.screen?.availWidth || window.screen?.width;
+      const h = window.screen?.availHeight || window.screen?.height;
+      if (w > 0 && h > 0) {
+        rt?.WindowSetSize?.(w, h);
+      }
+      rt?.WindowMaximise?.();
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && (window as any).go?.main?.App?.SetActiveEngine) {
@@ -92,6 +106,7 @@ export function App() {
 
   const handleResetPlan = () => {
     setPlan(null);
+    setRawPlanContent('');
     setSelectedStatement(null);
     setActiveTab('overview');
   };
@@ -325,6 +340,7 @@ export function App() {
       const rawData = await parsePlanSafely(xmlContent, planName);
       const data = sanitizePlan(rawData);
       setPlan(data);
+      setRawPlanContent(xmlContent);
       if (data.engine) {
         setSelectedEngine(data.engine);
         localStorage.setItem('planiq_engine', data.engine);
@@ -388,6 +404,13 @@ export function App() {
         liveStatus={liveStatus}
         windowsUser={windowsUser}
         onExportReport={() => plan && exportDiagnosticReportHTML(plan)}
+        onExportRawPlan={() => plan && exportRawPlanFile(plan, rawPlanContent)}
+        onExportAnonymizedPlan={() => plan && exportAnonymizedPlanFile(plan, rawPlanContent)}
+        onAnonymizeInPlace={() => {
+          if (!plan) return;
+          const anon = buildAnonymizedPlanContent(plan, rawPlanContent);
+          handleParseManual(anon, `${plan.planName.replace(/\s*\(Anonymized\)$/i, '')} (Anonymized)`);
+        }}
         isLoading={isLoading}
         isDark={isDark}
         onToggleTheme={handleToggleTheme}
@@ -494,6 +517,12 @@ export function App() {
                 plan={plan}
                 selectedStatement={selectedStatement || plan.statements[0]}
                 onSelectStatement={(s) => setSelectedStatement(s)}
+                onExportRawPlan={() => exportRawPlanFile(plan, rawPlanContent)}
+                onExportAnonymizedPlan={() => exportAnonymizedPlanFile(plan, rawPlanContent)}
+                onAnonymizeInPlace={() => {
+                  const anon = buildAnonymizedPlanContent(plan, rawPlanContent);
+                  handleParseManual(anon, `${plan.planName.replace(/\s*\(Anonymized\)$/i, '')} (Anonymized)`);
+                }}
               />
             )}
 
@@ -687,6 +716,7 @@ export function App() {
         onClose={() => setIsLiveConnOpen(false)}
         status={liveStatus}
         engine={selectedEngine}
+        onEngineChange={(eng) => handleSelectEngine(eng)}
         onStatusChange={(st) => setLiveStatus(st)}
         defaultUsername={windowsUser?.username}
         onOpenConnectionsTab={() => setActiveTab('connections')}

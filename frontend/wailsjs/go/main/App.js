@@ -86,6 +86,14 @@ export function GetLivePLEReport() {
   return window['go']['main']['App']['GetLivePLEReport']();
 }
 
+export function GetLivePgConfigReport() {
+  return window['go']['main']['App']['GetLivePgConfigReport']();
+}
+
+export function GetLiveQueryPlan(arg1) {
+  return window['go']['main']['App']['GetLiveQueryPlan'](arg1);
+}
+
 export function GetLiveQueryStore(arg1, arg2) {
   return window['go']['main']['App']['GetLiveQueryStore'](arg1, arg2);
 }
@@ -100,6 +108,10 @@ export function GetLiveServerVitals() {
 
 export function GetLiveSessionPlan(arg1) {
   return window['go']['main']['App']['GetLiveSessionPlan'](arg1);
+}
+
+export function GetLiveSqlServerConfigReport() {
+  return window['go']['main']['App']['GetLiveSqlServerConfigReport']();
 }
 
 export function GetLiveTempDBUsage(arg1) {

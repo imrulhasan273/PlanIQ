@@ -1004,6 +1004,236 @@ export namespace livedb {
 	        this.recommendation = source["recommendation"];
 	    }
 	}
+	export class PgExtensionEntry {
+	    name: string;
+	    version: string;
+	    schema: string;
+	    relocatable: boolean;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PgExtensionEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.version = source["version"];
+	        this.schema = source["schema"];
+	        this.relocatable = source["relocatable"];
+	        this.description = source["description"];
+	    }
+	}
+	export class PgDbRoleSettingEntry {
+	    databaseName: string;
+	    roleName: string;
+	    name: string;
+	    value: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PgDbRoleSettingEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.databaseName = source["databaseName"];
+	        this.roleName = source["roleName"];
+	        this.name = source["name"];
+	        this.value = source["value"];
+	    }
+	}
+	export class PgIdentMappingEntry {
+	    mapNumber: number;
+	    fileName: string;
+	    lineNumber: number;
+	    mapName: string;
+	    sysName: string;
+	    pgUsername: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PgIdentMappingEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mapNumber = source["mapNumber"];
+	        this.fileName = source["fileName"];
+	        this.lineNumber = source["lineNumber"];
+	        this.mapName = source["mapName"];
+	        this.sysName = source["sysName"];
+	        this.pgUsername = source["pgUsername"];
+	        this.error = source["error"];
+	    }
+	}
+	export class PgHbaRuleEntry {
+	    lineNumber: number;
+	    type: string;
+	    database: string;
+	    userName: string;
+	    address: string;
+	    netmask: string;
+	    authMethod: string;
+	    options: string;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PgHbaRuleEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.lineNumber = source["lineNumber"];
+	        this.type = source["type"];
+	        this.database = source["database"];
+	        this.userName = source["userName"];
+	        this.address = source["address"];
+	        this.netmask = source["netmask"];
+	        this.authMethod = source["authMethod"];
+	        this.options = source["options"];
+	        this.error = source["error"];
+	    }
+	}
+	export class PgFileSettingEntry {
+	    sourceFile: string;
+	    seqNo: number;
+	    sourceLine: number;
+	    name: string;
+	    setting: string;
+	    applied: boolean;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PgFileSettingEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sourceFile = source["sourceFile"];
+	        this.seqNo = source["seqNo"];
+	        this.sourceLine = source["sourceLine"];
+	        this.name = source["name"];
+	        this.setting = source["setting"];
+	        this.applied = source["applied"];
+	        this.error = source["error"];
+	    }
+	}
+	export class PgSettingEntry {
+	    name: string;
+	    setting: string;
+	    formattedValue: string;
+	    unit: string;
+	    category: string;
+	    shortDesc: string;
+	    context: string;
+	    varType: string;
+	    source: string;
+	    sourceFile: string;
+	    sourceLine: number;
+	    bootVal: string;
+	    resetVal: string;
+	    pendingRestart: boolean;
+	    isModified: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PgSettingEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.setting = source["setting"];
+	        this.formattedValue = source["formattedValue"];
+	        this.unit = source["unit"];
+	        this.category = source["category"];
+	        this.shortDesc = source["shortDesc"];
+	        this.context = source["context"];
+	        this.varType = source["varType"];
+	        this.source = source["source"];
+	        this.sourceFile = source["sourceFile"];
+	        this.sourceLine = source["sourceLine"];
+	        this.bootVal = source["bootVal"];
+	        this.resetVal = source["resetVal"];
+	        this.pendingRestart = source["pendingRestart"];
+	        this.isModified = source["isModified"];
+	    }
+	}
+	export class PgConfigReport {
+	    currentUser: string;
+	    isSuperuser: boolean;
+	    canReadAll: boolean;
+	    serverVersion: string;
+	    configFile: string;
+	    hbaFile: string;
+	    identFile: string;
+	    dataDirectory: string;
+	    totalSettings: number;
+	    modifiedCount: number;
+	    pendingRestartCount: number;
+	    settings: PgSettingEntry[];
+	    fileSettings: PgFileSettingEntry[];
+	    fileSettingsError?: string;
+	    hbaRules: PgHbaRuleEntry[];
+	    hbaError?: string;
+	    identMappings: PgIdentMappingEntry[];
+	    identError?: string;
+	    dbRoleSettings: PgDbRoleSettingEntry[];
+	    extensions: PgExtensionEntry[];
+	    fetchedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PgConfigReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.currentUser = source["currentUser"];
+	        this.isSuperuser = source["isSuperuser"];
+	        this.canReadAll = source["canReadAll"];
+	        this.serverVersion = source["serverVersion"];
+	        this.configFile = source["configFile"];
+	        this.hbaFile = source["hbaFile"];
+	        this.identFile = source["identFile"];
+	        this.dataDirectory = source["dataDirectory"];
+	        this.totalSettings = source["totalSettings"];
+	        this.modifiedCount = source["modifiedCount"];
+	        this.pendingRestartCount = source["pendingRestartCount"];
+	        this.settings = this.convertValues(source["settings"], PgSettingEntry);
+	        this.fileSettings = this.convertValues(source["fileSettings"], PgFileSettingEntry);
+	        this.fileSettingsError = source["fileSettingsError"];
+	        this.hbaRules = this.convertValues(source["hbaRules"], PgHbaRuleEntry);
+	        this.hbaError = source["hbaError"];
+	        this.identMappings = this.convertValues(source["identMappings"], PgIdentMappingEntry);
+	        this.identError = source["identError"];
+	        this.dbRoleSettings = this.convertValues(source["dbRoleSettings"], PgDbRoleSettingEntry);
+	        this.extensions = this.convertValues(source["extensions"], PgExtensionEntry);
+	        this.fetchedAt = source["fetchedAt"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	
+	
+	
+	
 	export class QueryStoreDiagnostic {
 	    currentDb: string;
 	    isQueryStoreOn: boolean;
@@ -1143,6 +1373,221 @@ export namespace livedb {
 	        this.syncedAt = source["syncedAt"];
 	    }
 	}
+	export class SqlDatabaseFileEntry {
+	    databaseName: string;
+	    fileId: number;
+	    logicalName: string;
+	    fileType: string;
+	    physicalPath: string;
+	    sizeMb: number;
+	    growthDesc: string;
+	    maxSizeDesc: string;
+	    stateDesc: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SqlDatabaseFileEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.databaseName = source["databaseName"];
+	        this.fileId = source["fileId"];
+	        this.logicalName = source["logicalName"];
+	        this.fileType = source["fileType"];
+	        this.physicalPath = source["physicalPath"];
+	        this.sizeMb = source["sizeMb"];
+	        this.growthDesc = source["growthDesc"];
+	        this.maxSizeDesc = source["maxSizeDesc"];
+	        this.stateDesc = source["stateDesc"];
+	    }
+	}
+	export class SqlDatabaseOptionEntry {
+	    name: string;
+	    value: string;
+	    category: string;
+	    status: string;
+	    description: string;
+	    minVersion?: string;
+	    versionComment?: string;
+	    alterTsql?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SqlDatabaseOptionEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.value = source["value"];
+	        this.category = source["category"];
+	        this.status = source["status"];
+	        this.description = source["description"];
+	        this.minVersion = source["minVersion"];
+	        this.versionComment = source["versionComment"];
+	        this.alterTsql = source["alterTsql"];
+	    }
+	}
+	export class SqlScopedConfigEntry {
+	    configId: number;
+	    name: string;
+	    value: string;
+	    valueForSecondary: string;
+	    isDefault: boolean;
+	    description: string;
+	    minVersion?: string;
+	    versionComment?: string;
+	    isUnsupported: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SqlScopedConfigEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.configId = source["configId"];
+	        this.name = source["name"];
+	        this.value = source["value"];
+	        this.valueForSecondary = source["valueForSecondary"];
+	        this.isDefault = source["isDefault"];
+	        this.description = source["description"];
+	        this.minVersion = source["minVersion"];
+	        this.versionComment = source["versionComment"];
+	        this.isUnsupported = source["isUnsupported"];
+	    }
+	}
+	export class SqlServerConfigEntry {
+	    configId: number;
+	    name: string;
+	    value: string;
+	    valueInUse: string;
+	    minimum: string;
+	    maximum: string;
+	    description: string;
+	    isDynamic: boolean;
+	    isAdvanced: boolean;
+	    isModified: boolean;
+	    pendingAction: string;
+	    category: string;
+	    bestPracticeNote?: string;
+	    minVersion?: string;
+	    versionComment?: string;
+	    isUnsupported: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SqlServerConfigEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.configId = source["configId"];
+	        this.name = source["name"];
+	        this.value = source["value"];
+	        this.valueInUse = source["valueInUse"];
+	        this.minimum = source["minimum"];
+	        this.maximum = source["maximum"];
+	        this.description = source["description"];
+	        this.isDynamic = source["isDynamic"];
+	        this.isAdvanced = source["isAdvanced"];
+	        this.isModified = source["isModified"];
+	        this.pendingAction = source["pendingAction"];
+	        this.category = source["category"];
+	        this.bestPracticeNote = source["bestPracticeNote"];
+	        this.minVersion = source["minVersion"];
+	        this.versionComment = source["versionComment"];
+	        this.isUnsupported = source["isUnsupported"];
+	    }
+	}
+	export class SqlTraceFlagEntry {
+	    traceFlag: number;
+	    status: number;
+	    global: number;
+	    session: number;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SqlTraceFlagEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.traceFlag = source["traceFlag"];
+	        this.status = source["status"];
+	        this.global = source["global"];
+	        this.session = source["session"];
+	        this.description = source["description"];
+	    }
+	}
+	export class SqlServerConfigReport {
+	    serverName: string;
+	    databaseName: string;
+	    productVersion: string;
+	    productLevel: string;
+	    edition: string;
+	    majorVersion: number;
+	    majorYearLabel: string;
+	    compatibilityLevel: number;
+	    cpuCount: number;
+	    physicalMemoryMb: number;
+	    collation: string;
+	    totalInstanceConfigs: number;
+	    modifiedInstanceCount: number;
+	    pendingReconfigureCount: number;
+	    instanceConfigs: SqlServerConfigEntry[];
+	    scopedConfigs: SqlScopedConfigEntry[];
+	    databaseOptions: SqlDatabaseOptionEntry[];
+	    databaseFiles: SqlDatabaseFileEntry[];
+	    traceFlags: SqlTraceFlagEntry[];
+	    traceFlagsError?: string;
+	    fetchedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SqlServerConfigReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.serverName = source["serverName"];
+	        this.databaseName = source["databaseName"];
+	        this.productVersion = source["productVersion"];
+	        this.productLevel = source["productLevel"];
+	        this.edition = source["edition"];
+	        this.majorVersion = source["majorVersion"];
+	        this.majorYearLabel = source["majorYearLabel"];
+	        this.compatibilityLevel = source["compatibilityLevel"];
+	        this.cpuCount = source["cpuCount"];
+	        this.physicalMemoryMb = source["physicalMemoryMb"];
+	        this.collation = source["collation"];
+	        this.totalInstanceConfigs = source["totalInstanceConfigs"];
+	        this.modifiedInstanceCount = source["modifiedInstanceCount"];
+	        this.pendingReconfigureCount = source["pendingReconfigureCount"];
+	        this.instanceConfigs = this.convertValues(source["instanceConfigs"], SqlServerConfigEntry);
+	        this.scopedConfigs = this.convertValues(source["scopedConfigs"], SqlScopedConfigEntry);
+	        this.databaseOptions = this.convertValues(source["databaseOptions"], SqlDatabaseOptionEntry);
+	        this.databaseFiles = this.convertValues(source["databaseFiles"], SqlDatabaseFileEntry);
+	        this.traceFlags = this.convertValues(source["traceFlags"], SqlTraceFlagEntry);
+	        this.traceFlagsError = source["traceFlagsError"];
+	        this.fetchedAt = source["fetchedAt"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	
 	export class UnusedIndex {
 	    databaseName: string;

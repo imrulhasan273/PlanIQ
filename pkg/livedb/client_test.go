@@ -121,3 +121,22 @@ func TestParseDeadlockMetadata(t *testing.T) {
 		t.Errorf("expected non-empty deadlock type and summary, got type=%q summary=%q", dlType, summary)
 	}
 }
+
+func TestPgExplainHelpers(t *testing.T) {
+	if kw := extractPgLeadingKeyword("/* comment */\n-- line\n  SELECT * FROM orders"); kw != "SELECT" {
+		t.Errorf("expected SELECT, got %q", kw)
+	}
+	if !isPgExplainableKeyword("WITH") || !isPgExplainableKeyword("MERGE") || isPgExplainableKeyword("SHOW") {
+		t.Errorf("unexpected isPgExplainableKeyword behavior")
+	}
+
+	sqlWithParams := `SELECT * FROM customers WHERE id = $1 AND tag = '$2' AND "col$3" = $2`
+	replaced, had := replacePgParamsWithNull(sqlWithParams)
+	if !had {
+		t.Fatalf("expected parameters to be detected")
+	}
+	expected := `SELECT * FROM customers WHERE id = NULL AND tag = '$2' AND "col$3" = NULL`
+	if replaced != expected {
+		t.Errorf("expected:\n%s\ngot:\n%s", expected, replaced)
+	}
+}

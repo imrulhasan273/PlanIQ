@@ -41,7 +41,8 @@ import {
   FolderTree,
   Trash2,
   Network,
-  Gauge
+  Gauge,
+  Download
 } from 'lucide-react';
 import {
   ActiveSession,
@@ -67,7 +68,9 @@ import {
   NUMAPLENode,
   PLECulpritQuery,
   TableEvictionImpact,
-  PLEDoctorInsight
+  PLEDoctorInsight,
+  PgConfigReport,
+  SqlServerConfigReport
 } from '../types/livedb';
 import {
   GetLiveActiveSessions,
@@ -85,7 +88,10 @@ import { DPAQueryWaitChart } from './DPAQueryWaitChart';
 import { QueryStoreStudio } from './QueryStoreStudio';
 import { PgSharedBuffersView } from './pg/PgSharedBuffersView';
 import { PgVitalsView } from './pg/PgVitalsView';
+import { PgConfigsView } from './pg/PgConfigsView';
+import { SqlServerConfigsView } from './SqlServerConfigsView';
 import { formatAdvisorMetricString } from '../utils/durationFormatter';
+import { downloadCapturedPlanFile } from '../utils/planExports';
 
 interface LiveRadarTabProps {
   status: ConnectionStatus | null;
@@ -107,7 +113,8 @@ type SubTabType =
   | 'indexes'
   | 'deadlocks'
   | 'tempdb'
-  | 'vitals';
+  | 'vitals'
+  | 'configs';
 
 interface ColumnDef {
   id: string;
@@ -162,6 +169,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
   useEffect(() => {
     if (!isConnected) {
       setAdvisors([]);
+      setPgConfigReport(null);
+      setSqlConfigReport(null);
     }
   }, [isPg, isConnected]);
   const [advisorFilter, setAdvisorFilter] = useState<'all' | 'critical' | 'warning' | 'info'>('all');
@@ -239,6 +248,8 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
 
   // Deep Engine Internals (Erik Darling sp_PressureDetector parity)
   const [engineInternals, setEngineInternals] = useState<EngineInternalsReport | null>(null);
+  const [pgConfigReport, setPgConfigReport] = useState<PgConfigReport | null>(null);
+  const [sqlConfigReport, setSqlConfigReport] = useState<SqlServerConfigReport | null>(null);
   const [vitalsSubTab, setVitalsSubTab] = useState<'overview' | 'schedulers' | 'attribution' | 'numa'>('overview');
   const [schedulerFilter, setSchedulerFilter] = useState<'all' | 'warning' | 'active'>('all');
   const [taskSearch, setTaskSearch] = useState<string>('');
@@ -298,6 +309,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
     deadlocks: true,
     tempdb: true,
     vitals: true,
+    configs: true,
   });
 
   // Load polling config from SQLite on component mount
@@ -718,6 +730,22 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
               console.error('Failed to fetch engine internals:', eiErr);
             }
           }
+        } else if (activeSubTab === 'configs') {
+          if (isPg && app.GetLivePgConfigReport) {
+            try {
+              const cfgRep = await app.GetLivePgConfigReport();
+              setPgConfigReport(cfgRep || null);
+            } catch (cfgErr) {
+              console.error('Failed to fetch PostgreSQL config report:', cfgErr);
+            }
+          } else if (!isPg && app.GetLiveSqlServerConfigReport) {
+            try {
+              const sqlCfg = await app.GetLiveSqlServerConfigReport();
+              setSqlConfigReport(sqlCfg || null);
+            } catch (cfgErr) {
+              console.error('Failed to fetch SQL Server config report:', cfgErr);
+            }
+          }
         }
 
         // Background preload advisors count once if empty
@@ -760,26 +788,73 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
     };
   }, [isConnected, isAutoRefresh, activeSubTab, pagePollingConfig, qsOrderBy, activeLimit, idleLimit, qsLimit, waitsLimit, deadlocksLimit, indexesLimit, tempDbLimit]);
 
-  // Handle Inspect Live Plan
-  const handleInspectPlan = async (session: ActiveSession) => {
-    if (!session.planHandle && !session.spid) {
-      alert('This query does not have a cached plan handle or active SPID available in memory.');
+  // Handle Inspect or Export Live Plan
+  const handleInspectPlan = async (session: ActiveSession, exportOnly = false) => {
+    if (!session.planHandle && !session.spid && !session.queryText) {
+      alert('This query does not have a cached plan handle, active PID/SPID, or SQL text available.');
       return;
     }
     const targetKey = `${session.spid}:${session.planHandle || ''}`;
-    setSelectedPlanLoading(session.planHandle || `${session.spid}`);
+    const loadKey = `${exportOnly ? 'exp:' : ''}${session.planHandle || session.spid}`;
+    setSelectedPlanLoading(loadKey);
     try {
       const app = (window as any).go?.main?.App;
-      if (typeof window !== 'undefined' && app?.GetLiveSessionPlan) {
-        const xml = await app.GetLiveSessionPlan(targetKey);
-        if (xml) {
-          onLoadPlanXML(xml, `Live SPID #${session.spid} (${session.databaseName})`);
-        } else {
-          alert('Unable to extract execution plan XML from live DMVs.');
+      let planPayload = '';
+      let firstErr: any = null;
+      if (typeof window !== 'undefined' && app?.GetLiveSessionPlan && (session.planHandle || session.spid)) {
+        try {
+          planPayload = (await app.GetLiveSessionPlan(targetKey)) || '';
+        } catch (err) {
+          firstErr = err;
         }
       }
+      // Fallback: capture execution plan directly from SQL query text (e.g. EXPLAIN FORMAT JSON or SHOWPLAN_XML)
+      if (!planPayload.trim() && session.queryText?.trim() && app?.GetLiveQueryPlan) {
+        planPayload = (await app.GetLiveQueryPlan(session.queryText)) || '';
+      }
+
+      if (planPayload.trim()) {
+        const label = `Live ${isPg ? 'PID' : 'SPID'} #${session.spid} (${session.databaseName || 'db'})`;
+        if (exportOnly) {
+          downloadCapturedPlanFile(planPayload, label, isPg ? 'postgresql' : 'sqlserver');
+        } else {
+          onLoadPlanXML(planPayload, label);
+        }
+      } else {
+        throw firstErr || new Error('Unable to extract execution plan from live engine.');
+      }
     } catch (e: any) {
-      alert(`Failed to retrieve live plan: ${e.message}`);
+      alert(`Failed to retrieve live plan: ${e?.message || e}`);
+    } finally {
+      setSelectedPlanLoading(null);
+    }
+  };
+
+  const handleCaptureAdvisorPlan = async (adv: PerformanceAdvisor, exportOnly = false) => {
+    if (!adv.queryText?.trim()) {
+      alert('No SQL text available on this advisor finding.');
+      return;
+    }
+    setSelectedPlanLoading(`adv:${adv.id}:${exportOnly ? 'exp' : 'load'}`);
+    try {
+      const app = (window as any).go?.main?.App;
+      if (!app?.GetLiveQueryPlan) {
+        alert('Live query plan capture backend is unavailable.');
+        return;
+      }
+      const planPayload = await app.GetLiveQueryPlan(adv.queryText);
+      if (planPayload?.trim()) {
+        const label = `Advisor_${adv.id}`;
+        if (exportOnly) {
+          downloadCapturedPlanFile(planPayload, label, isPg ? 'postgresql' : 'sqlserver');
+        } else {
+          onLoadPlanXML(planPayload, `${adv.title.slice(0, 48)}`);
+        }
+      } else {
+        alert('Engine returned an empty execution plan.');
+      }
+    } catch (e: any) {
+      alert(`Failed to capture live plan: ${e?.message || e}`);
     } finally {
       setSelectedPlanLoading(null);
     }
@@ -1991,7 +2066,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                 onClick={() => setRadarCategory('all')}
                 title="Show all 12 Live Radar subtabs in compact view"
               >
-                <span>All (12)</span>
+                <span>All (13)</span>
               </button>
               <button
                 type="button"
@@ -2026,7 +2101,7 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                 className={`radar-cat-pill ${radarCategory === 'engine' ? 'active' : ''}`}
                 onClick={() => {
                   setRadarCategory('engine');
-                  if (!['bufferpool', 'indexes', 'tempdb', 'vitals'].includes(activeSubTab)) {
+                  if (!['bufferpool', 'indexes', 'tempdb', 'vitals', 'configs'].includes(activeSubTab)) {
                     setActiveSubTab('bufferpool');
                   }
                 }}
@@ -2235,6 +2310,32 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                     <Cpu size={12} className="radar-subnav-icon" />
                     <span>{isPg ? (radarCategory === 'all' ? 'PG Vitals' : 'PostgreSQL Vitals') : (radarCategory === 'all' ? 'Vitals' : 'Server Vitals')}</span>
                     {pagePollingConfig['vitals'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                  </button>
+                )}
+
+                {/* 12. Server Configs (PostgreSQL conf/hba/settings OR SQL Server sys.configurations / scoped / DB options) */}
+                {(radarCategory === 'all' || radarCategory === 'engine') && (
+                  <button
+                    type="button"
+                    className={`radar-subnav-btn ${activeSubTab === 'configs' ? 'active' : ''}`}
+                    onClick={() => setActiveSubTab('configs')}
+                    title={isPg
+                      ? 'Inspect postgresql.conf, pg_hba.conf, pg_ident.conf, pg_settings, overrides & extensions'
+                      : 'Inspect sys.configurations, database-scoped configs (SQL 2022/2025), DB & Query Store options, files & trace flags'}
+                  >
+                    <SlidersHorizontal size={12} className="radar-subnav-icon" color="#38bdf8" />
+                    <span>{isPg ? 'PG Configs' : 'SQL Configs'}</span>
+                    {pagePollingConfig['configs'] === false && <span className="radar-subnav-paused-pill">Paused</span>}
+                    {isPg && pgConfigReport && pgConfigReport.pendingRestartCount > 0 && (
+                      <span className="radar-blocked-pill" style={{ background: '#f59e0b' }}>
+                        {pgConfigReport.pendingRestartCount} Restart
+                      </span>
+                    )}
+                    {!isPg && sqlConfigReport && sqlConfigReport.pendingReconfigureCount > 0 && (
+                      <span className="radar-blocked-pill" style={{ background: '#f59e0b' }}>
+                        {sqlConfigReport.pendingReconfigureCount} Pending
+                      </span>
+                    )}
                   </button>
                 )}
               </div>
@@ -2759,15 +2860,39 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                                     <span>{openWaitGraphAdvisorId === adv.id ? 'Hide Wait Chart' : 'Wait Type Trend'}</span>
                                   </button>
                                   {adv.queryText && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-secondary btn-sm"
-                                      onClick={() => handleCopy(adv.queryText!, `adv-sql-${adv.id}`)}
-                                      style={{ fontSize: '11px' }}
-                                    >
-                                      {copiedKey === `adv-sql-${adv.id}` ? <Check size={11} /> : <Copy size={11} />}
-                                      <span>Copy SQL</span>
-                                    </button>
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        onClick={() => handleCopy(adv.queryText!, `adv-sql-${adv.id}`)}
+                                        style={{ fontSize: '11px' }}
+                                      >
+                                        {copiedKey === `adv-sql-${adv.id}` ? <Check size={11} /> : <Copy size={11} />}
+                                        <span>Copy SQL</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        disabled={selectedPlanLoading === `adv:${adv.id}:load`}
+                                        onClick={() => handleCaptureAdvisorPlan(adv, false)}
+                                        style={{ fontSize: '11px' }}
+                                        title={isPg ? 'Capture EXPLAIN (FORMAT JSON) plan for this query' : 'Capture ShowPlan XML for this query'}
+                                      >
+                                        {selectedPlanLoading === `adv:${adv.id}:load` ? <RefreshCw size={11} className="spin" /> : <Eye size={11} color="#38bdf8" />}
+                                        <span>Live Plan</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-sm"
+                                        disabled={selectedPlanLoading === `adv:${adv.id}:exp`}
+                                        onClick={() => handleCaptureAdvisorPlan(adv, true)}
+                                        style={{ fontSize: '11px' }}
+                                        title={isPg ? 'Capture & download .json plan' : 'Capture & download .sqlplan'}
+                                      >
+                                        {selectedPlanLoading === `adv:${adv.id}:exp` ? <RefreshCw size={11} className="spin" /> : <Download size={11} color="#34d399" />}
+                                        <span>{isPg ? '.json' : '.sqlplan'}</span>
+                                      </button>
+                                    </>
                                   )}
                                   <button
                                     type="button"
@@ -3124,17 +3249,32 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
                               <button
                                 type="button"
                                 className="btn btn-secondary btn-sm"
-                                onClick={() => handleInspectPlan(s)}
-                                disabled={selectedPlanLoading === (s.planHandle || `${s.spid}`)}
+                                onClick={() => handleInspectPlan(s, false)}
+                                disabled={selectedPlanLoading === `${s.planHandle || s.spid}`}
                                 style={{ fontSize: '11px', padding: '3px 8px' }}
-                                title="Inspect ShowPlan XML in PlanIQ visualizer"
+                                title={isPg ? 'Capture EXPLAIN (FORMAT JSON) & visualize in PlanIQ' : 'Inspect ShowPlan XML in PlanIQ visualizer'}
                               >
-                                {selectedPlanLoading === (s.planHandle || `${s.spid}`) ? (
+                                {selectedPlanLoading === `${s.planHandle || s.spid}` ? (
                                   <RefreshCw size={11} className="spin" />
                                 ) : (
                                   <Eye size={11} color="#38bdf8" />
                                 )}
                                 <span>Plan</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => handleInspectPlan(s, true)}
+                                disabled={selectedPlanLoading === `exp:${s.planHandle || s.spid}`}
+                                style={{ fontSize: '11px', padding: '3px 6px' }}
+                                title={isPg ? 'Capture & export .json execution plan' : 'Capture & export .sqlplan execution plan'}
+                              >
+                                {selectedPlanLoading === `exp:${s.planHandle || s.spid}` ? (
+                                  <RefreshCw size={11} className="spin" />
+                                ) : (
+                                  <Download size={11} color="#34d399" />
+                                )}
                               </button>
                             </div>
                           </td>
@@ -5180,6 +5320,24 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
         />
       )}
 
+      {activeSubTab === 'configs' && isPg && (
+        <PgConfigsView
+          report={pgConfigReport}
+          isLoading={isLoading}
+          pollingToggle={renderPagePollingToggle('configs')}
+          onRefresh={() => fetchData(true)}
+        />
+      )}
+
+      {activeSubTab === 'configs' && !isPg && (
+        <SqlServerConfigsView
+          report={sqlConfigReport}
+          isLoading={isLoading}
+          pollingToggle={renderPagePollingToggle('configs')}
+          onRefresh={() => fetchData(true)}
+        />
+      )}
+
       {activeSubTab === 'vitals' && !isPg && (
         <div className="section-block radar-subtab-section">
           {/* Header & Sub-Navigation */}
@@ -6334,11 +6492,23 @@ export const LiveRadarTab: React.FC<LiveRadarTabProps> = ({
 
                   <button
                     type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      const s = inspectSession;
+                      handleInspectPlan(s, true);
+                    }}
+                  >
+                    <Download size={12} color="#34d399" />
+                    <span>{isPg ? 'Export .json Plan' : 'Export .sqlplan'}</span>
+                  </button>
+
+                  <button
+                    type="button"
                     className="btn btn-primary btn-sm"
                     onClick={() => {
                       const s = inspectSession;
                       setInspectSession(null);
-                      handleInspectPlan(s);
+                      handleInspectPlan(s, false);
                     }}
                   >
                     <Eye size={12} />

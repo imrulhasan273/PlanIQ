@@ -453,4 +453,194 @@ type PLECulpritQuery struct {
 	LastExecutionTime    string  `json:"lastExecutionTime"`
 }
 
+// PgSettingEntry represents a single row from PostgreSQL pg_settings
+type PgSettingEntry struct {
+	Name           string `json:"name"`
+	Setting        string `json:"setting"`
+	FormattedValue string `json:"formattedValue"`
+	Unit           string `json:"unit"`
+	Category       string `json:"category"`
+	ShortDesc      string `json:"shortDesc"`
+	Context        string `json:"context"`
+	VarType        string `json:"varType"`
+	Source         string `json:"source"`
+	SourceFile     string `json:"sourceFile"`
+	SourceLine     int    `json:"sourceLine"`
+	BootVal        string `json:"bootVal"`
+	ResetVal       string `json:"resetVal"`
+	PendingRestart bool   `json:"pendingRestart"`
+	IsModified     bool   `json:"isModified"`
+}
+
+// PgFileSettingEntry represents a raw directive parsed from postgresql.conf / postgresql.auto.conf
+type PgFileSettingEntry struct {
+	SourceFile string `json:"sourceFile"`
+	SeqNo      int    `json:"seqNo"`
+	SourceLine int    `json:"sourceLine"`
+	Name       string `json:"name"`
+	Setting    string `json:"setting"`
+	Applied    bool   `json:"applied"`
+	Error      string `json:"error"`
+}
+
+// PgHbaRuleEntry represents a rule parsed from pg_hba_file_rules (pg_hba.conf)
+type PgHbaRuleEntry struct {
+	LineNumber int    `json:"lineNumber"`
+	Type       string `json:"type"`
+	Database   string `json:"database"`
+	UserName   string `json:"userName"`
+	Address    string `json:"address"`
+	Netmask    string `json:"netmask"`
+	AuthMethod string `json:"authMethod"`
+	Options    string `json:"options"`
+	Error      string `json:"error"`
+}
+
+// PgIdentMappingEntry represents a mapping parsed from pg_ident_file_mappings (pg_ident.conf)
+type PgIdentMappingEntry struct {
+	MapNumber  int    `json:"mapNumber"`
+	FileName   string `json:"fileName"`
+	LineNumber int    `json:"lineNumber"`
+	MapName    string `json:"mapName"`
+	SysName    string `json:"sysName"`
+	PgUsername string `json:"pgUsername"`
+	Error      string `json:"error"`
+}
+
+// PgDbRoleSettingEntry represents a database or role-level ALTER DATABASE / ALTER ROLE SET override
+type PgDbRoleSettingEntry struct {
+	DatabaseName string `json:"databaseName"`
+	RoleName     string `json:"roleName"`
+	Name         string `json:"name"`
+	Value        string `json:"value"`
+}
+
+// PgExtensionEntry represents an installed extension from pg_extension
+type PgExtensionEntry struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Schema      string `json:"schema"`
+	Relocatable bool   `json:"relocatable"`
+	Description string `json:"description"`
+}
+
+// PgConfigReport aggregates all visible PostgreSQL runtime and file-based configurations
+type PgConfigReport struct {
+	CurrentUser       string                 `json:"currentUser"`
+	IsSuperuser       bool                   `json:"isSuperuser"`
+	CanReadAll        bool                   `json:"canReadAll"`
+	ServerVersion     string                 `json:"serverVersion"`
+	ConfigFile        string                 `json:"configFile"`
+	HbaFile           string                 `json:"hbaFile"`
+	IdentFile         string                 `json:"identFile"`
+	DataDirectory     string                 `json:"dataDirectory"`
+	TotalSettings     int                    `json:"totalSettings"`
+	ModifiedCount     int                    `json:"modifiedCount"`
+	PendingRestartCnt int                    `json:"pendingRestartCount"`
+	Settings          []PgSettingEntry       `json:"settings"`
+	FileSettings      []PgFileSettingEntry   `json:"fileSettings"`
+	FileSettingsError string                 `json:"fileSettingsError,omitempty"`
+	HbaRules          []PgHbaRuleEntry       `json:"hbaRules"`
+	HbaError          string                 `json:"hbaError,omitempty"`
+	IdentMappings     []PgIdentMappingEntry  `json:"identMappings"`
+	IdentError        string                 `json:"identError,omitempty"`
+	DbRoleSettings    []PgDbRoleSettingEntry `json:"dbRoleSettings"`
+	Extensions        []PgExtensionEntry     `json:"extensions"`
+	FetchedAt         string                 `json:"fetchedAt"`
+}
+
+// SqlServerConfigEntry represents an instance-level configuration from sys.configurations (plus version compatibility annotations)
+type SqlServerConfigEntry struct {
+	ConfigID         int    `json:"configId"`
+	Name             string `json:"name"`
+	Value            string `json:"value"`
+	ValueInUse       string `json:"valueInUse"`
+	Minimum          string `json:"minimum"`
+	Maximum          string `json:"maximum"`
+	Description      string `json:"description"`
+	IsDynamic        bool   `json:"isDynamic"`
+	IsAdvanced       bool   `json:"isAdvanced"`
+	IsModified       bool   `json:"isModified"`
+	PendingAction    string `json:"pendingAction"` // "", "RECONFIGURE Pending", "Restart Required"
+	Category         string `json:"category"`
+	BestPracticeNote string `json:"bestPracticeNote,omitempty"`
+	MinVersion       string `json:"minVersion,omitempty"` // e.g. "SQL 2022", "SQL 2025"
+	VersionComment   string `json:"versionComment,omitempty"`
+	IsUnsupported    bool   `json:"isUnsupported"`
+}
+
+// SqlScopedConfigEntry represents a row from sys.database_scoped_configurations (plus SQL 2022/2025 compatibility entries)
+type SqlScopedConfigEntry struct {
+	ConfigID          int    `json:"configId"`
+	Name              string `json:"name"`
+	Value             string `json:"value"`
+	ValueForSecondary string `json:"valueForSecondary"`
+	IsDefault         bool   `json:"isDefault"`
+	Description       string `json:"description"`
+	MinVersion        string `json:"minVersion,omitempty"`
+	VersionComment    string `json:"versionComment,omitempty"`
+	IsUnsupported     bool   `json:"isUnsupported"`
+}
+
+// SqlDatabaseOptionEntry represents a database-level or Query Store configuration option
+type SqlDatabaseOptionEntry struct {
+	Name           string `json:"name"`
+	Value          string `json:"value"`
+	Category       string `json:"category"`
+	Status         string `json:"status"` // "OPTIMAL", "WARNING", "INFO", "UNSUPPORTED"
+	Description    string `json:"description"`
+	MinVersion     string `json:"minVersion,omitempty"`
+	VersionComment string `json:"versionComment,omitempty"`
+	AlterTsql      string `json:"alterTsql,omitempty"`
+}
+
+// SqlDatabaseFileEntry represents a physical data/log file from sys.database_files or tempdb.sys.database_files
+type SqlDatabaseFileEntry struct {
+	DatabaseName string  `json:"databaseName"`
+	FileID       int     `json:"fileId"`
+	LogicalName  string  `json:"logicalName"`
+	FileType     string  `json:"fileType"`
+	PhysicalPath string  `json:"physicalPath"`
+	SizeMB       float64 `json:"sizeMb"`
+	GrowthDesc   string  `json:"growthDesc"`
+	MaxSizeDesc  string  `json:"maxSizeDesc"`
+	StateDesc    string  `json:"stateDesc"`
+}
+
+// SqlTraceFlagEntry represents an active trace flag returned by DBCC TRACESTATUS(-1)
+type SqlTraceFlagEntry struct {
+	TraceFlag   int    `json:"traceFlag"`
+	Status      int    `json:"status"`
+	Global      int    `json:"global"`
+	Session     int    `json:"session"`
+	Description string `json:"description"`
+}
+
+// SqlServerConfigReport aggregates all visible SQL Server instance, database-scoped, Query Store, file, and trace flag configs
+type SqlServerConfigReport struct {
+	ServerName              string                   `json:"serverName"`
+	DatabaseName            string                   `json:"databaseName"`
+	ProductVersion          string                   `json:"productVersion"`
+	ProductLevel            string                   `json:"productLevel"`
+	Edition                 string                   `json:"edition"`
+	MajorVersion            int                      `json:"majorVersion"`
+	MajorYearLabel          string                   `json:"majorYearLabel"`
+	CompatibilityLevel      int                      `json:"compatibilityLevel"`
+	CpuCount                int                      `json:"cpuCount"`
+	PhysicalMemoryMB        float64                  `json:"physicalMemoryMb"`
+	Collation               string                   `json:"collation"`
+	TotalInstanceConfigs    int                      `json:"totalInstanceConfigs"`
+	ModifiedInstanceCount   int                      `json:"modifiedInstanceCount"`
+	PendingReconfigureCount int                      `json:"pendingReconfigureCount"`
+	InstanceConfigs         []SqlServerConfigEntry   `json:"instanceConfigs"`
+	ScopedConfigs           []SqlScopedConfigEntry   `json:"scopedConfigs"`
+	DatabaseOptions         []SqlDatabaseOptionEntry `json:"databaseOptions"`
+	DatabaseFiles           []SqlDatabaseFileEntry   `json:"databaseFiles"`
+	TraceFlags              []SqlTraceFlagEntry      `json:"traceFlags"`
+	TraceFlagsError         string                   `json:"traceFlagsError,omitempty"`
+	FetchedAt               string                   `json:"fetchedAt"`
+}
+
+
+
 

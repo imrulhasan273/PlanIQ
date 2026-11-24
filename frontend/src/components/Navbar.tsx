@@ -30,6 +30,7 @@ import {
   Moon,
   Sun,
   RotateCcw,
+  EyeOff,
 } from 'lucide-react';
 import { PlanAnalysis } from '../types/plan';
 import { ConnectionStatus, WindowsUserInfo, DBConnectionProfile } from '../types/livedb';
@@ -49,6 +50,9 @@ interface NavbarProps {
   liveStatus: ConnectionStatus | null;
   windowsUser?: WindowsUserInfo | null;
   onExportReport?: () => void;
+  onExportRawPlan?: () => void;
+  onExportAnonymizedPlan?: () => void;
+  onAnonymizeInPlace?: () => void;
   isLoading: boolean;
   isDark: boolean;
   onToggleTheme: () => void;
@@ -68,6 +72,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   liveStatus,
   windowsUser,
   onExportReport,
+  onExportRawPlan,
+  onExportAnonymizedPlan,
+  onAnonymizeInPlace,
   isLoading,
   isDark,
   onToggleTheme,
@@ -76,6 +83,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [isConnDropdownOpen, setIsConnDropdownOpen] = useState<boolean>(false);
   const [isEngineDropdownOpen, setIsEngineDropdownOpen] = useState<boolean>(false);
   const [isTopEngineDropdownOpen, setIsTopEngineDropdownOpen] = useState<boolean>(false);
+  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState<boolean>(false);
   const [savedProfiles, setSavedProfiles] = useState<DBConnectionProfile[]>([]);
   const timerRef = useRef<any>(null);
   const diagRef = useRef<HTMLDivElement>(null);
@@ -83,6 +91,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const connDropdownRef = useRef<HTMLDivElement>(null);
   const engineDropdownRef = useRef<HTMLDivElement>(null);
   const topEngineDropdownRef = useRef<HTMLDivElement>(null);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
 
   const refreshSavedProfiles = async () => {
     try {
@@ -184,10 +193,12 @@ export const Navbar: React.FC<NavbarProps> = ({
       if (connDropdownRef.current && connDropdownRef.current.contains(target)) return;
       if (engineDropdownRef.current && engineDropdownRef.current.contains(target)) return;
       if (topEngineDropdownRef.current && topEngineDropdownRef.current.contains(target)) return;
+      if (exportDropdownRef.current && exportDropdownRef.current.contains(target)) return;
       setOpenMenu(null);
       setIsConnDropdownOpen(false);
       setIsEngineDropdownOpen(false);
       setIsTopEngineDropdownOpen(false);
+      setIsExportDropdownOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -334,16 +345,105 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="nav-vertical-divider" />
 
           <div className="actions-group">
-            {plan && onExportReport && (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm top-action-btn"
-                onClick={onExportReport}
-                title="Export diagnostic report as standalone HTML"
-              >
-                <Download size={12} color="#34d399" />
-                <span>Export Report</span>
-              </button>
+            {plan && (onExportReport || onExportRawPlan || onExportAnonymizedPlan) && (
+              <div className="live-conn-dropdown-wrap" ref={exportDropdownRef}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm top-action-btn"
+                  onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
+                  title="Export raw execution plan, anonymized/masked plan, or HTML report"
+                >
+                  <Download size={12} color="#34d399" />
+                  <span>Export</span>
+                  <ChevronDown size={11} className={`conn-dropdown-chevron ${isExportDropdownOpen ? 'open' : ''}`} />
+                </button>
+
+                {isExportDropdownOpen && (
+                  <div className="nav-conn-flyout glass-panel" style={{ minWidth: '285px' }}>
+                    <div className="nav-conn-flyout-header">
+                      <div className="nav-conn-flyout-title">
+                        <Download size={13} color="#34d399" />
+                        <span>Export Plan &amp; Diagnostics</span>
+                      </div>
+                      <span className="nav-conn-count-pill">{isPg ? '.json' : '.sqlplan'}</span>
+                    </div>
+
+                    <div className="nav-conn-flyout-list">
+                      {onExportRawPlan && (
+                        <div
+                          className="nav-conn-flyout-item"
+                          onClick={() => {
+                            setIsExportDropdownOpen(false);
+                            onExportRawPlan();
+                          }}
+                        >
+                          <div className="nav-conn-item-main">
+                            <div className="nav-conn-item-server" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <FileCode2 size={13} color="#38bdf8" />
+                              <span>Export Execution Plan ({isPg ? '.json' : '.sqlplan'})</span>
+                            </div>
+                            <div className="nav-conn-item-sub">Download full unmasked {isPg ? 'EXPLAIN JSON' : 'ShowPlan XML'} file</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {onExportAnonymizedPlan && (
+                        <div
+                          className="nav-conn-flyout-item"
+                          onClick={() => {
+                            setIsExportDropdownOpen(false);
+                            onExportAnonymizedPlan();
+                          }}
+                        >
+                          <div className="nav-conn-item-main">
+                            <div className="nav-conn-item-server" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <EyeOff size={13} color="#f59e0b" />
+                              <span>Export Anonymized Plan ({isPg ? '.anonymized.json' : '.anonymized.sqlplan'})</span>
+                            </div>
+                            <div className="nav-conn-item-sub">Obfuscates table/column/index names &amp; masks literals</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {onAnonymizeInPlace && (
+                        <div
+                          className="nav-conn-flyout-item"
+                          onClick={() => {
+                            setIsExportDropdownOpen(false);
+                            onAnonymizeInPlace();
+                          }}
+                        >
+                          <div className="nav-conn-item-main">
+                            <div className="nav-conn-item-server" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <ShieldAlert size={13} color="#a78bfa" />
+                              <span>Mask &amp; Preview Anonymized in App</span>
+                            </div>
+                            <div className="nav-conn-item-sub">Reload current view with deterministic obfuscated IDs</div>
+                          </div>
+                        </div>
+                      )}
+
+                      {onExportReport && (
+                        <div
+                          className="nav-conn-flyout-item"
+                          onClick={() => {
+                            setIsExportDropdownOpen(false);
+                            onExportReport();
+                          }}
+                        >
+                          <div className="nav-conn-item-main">
+                            <div className="nav-conn-item-server" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Download size={13} color="#34d399" />
+                              <span>Export HTML Diagnostic Report</span>
+                            </div>
+                            <div className="nav-conn-item-sub">Standalone offline report with findings &amp; index DDL</div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
             <div className="live-conn-dropdown-wrap" ref={connDropdownRef}>
@@ -382,13 +482,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )}
 
-              {isConnDropdownOpen && (
+              {isConnDropdownOpen && (() => {
+                const filteredSavedProfiles = savedProfiles.filter((p) => {
+                  const profEngine =
+                    p.engine === 'postgresql' || p.port === 5432 || p.database?.toLowerCase() === 'postgres'
+                      ? 'postgresql'
+                      : 'sqlserver';
+                  return profEngine === selectedEngine;
+                });
+
+                return (
                 <div className="nav-conn-flyout glass-panel">
                   <div className="nav-conn-flyout-header">
                     <div className="nav-conn-flyout-title">
                       <HardDrive size={13} color="#34d399" />
-                      <span>{selectedEngine === 'postgresql' ? 'Saved PostgreSQL Connections' : 'Saved SQL Connections'}</span>
-                      <span className="nav-conn-count-pill">{savedProfiles.length}</span>
+                      <span>{selectedEngine === 'postgresql' ? 'Saved PostgreSQL Connections' : 'Saved SQL Server Connections'}</span>
+                      <span className="nav-conn-count-pill">{filteredSavedProfiles.length}</span>
                     </div>
                     <button
                       type="button"
@@ -405,9 +514,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
 
                   <div className="nav-conn-flyout-list">
-                    {savedProfiles.length === 0 ? (
+                    {filteredSavedProfiles.length === 0 ? (
                       <div className="nav-conn-empty">
-                        <span>No saved profiles found.</span>
+                        <span>No saved {selectedEngine === 'postgresql' ? 'PostgreSQL' : 'SQL Server'} profiles found.</span>
                         <button
                           type="button"
                           className="btn btn-primary btn-xs"
@@ -420,7 +529,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         </button>
                       </div>
                     ) : (
-                      savedProfiles.map((p) => {
+                      filteredSavedProfiles.map((p) => {
                         const profEngine =
                           p.engine === 'postgresql' || p.port === 5432 || p.database?.toLowerCase() === 'postgres'
                             ? 'postgresql'
@@ -504,7 +613,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </button>
                   </div>
                 </div>
-              )}
+                );
+              })()}
             </div>
 
 

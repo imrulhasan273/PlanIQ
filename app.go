@@ -32,6 +32,45 @@ func NewApp() *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.fitToCurrentDisplay(ctx)
+}
+
+func (a *App) domReady(ctx context.Context) {
+	a.fitToCurrentDisplay(ctx)
+}
+
+func (a *App) fitToCurrentDisplay(ctx context.Context) {
+	if ctx == nil {
+		return
+	}
+	if screens, err := runtime.ScreenGetAll(ctx); err == nil && len(screens) > 0 {
+		chosen := screens[0]
+		foundCurrent := false
+		for _, s := range screens {
+			if s.IsCurrent {
+				chosen = s
+				foundCurrent = true
+				break
+			}
+		}
+		if !foundCurrent {
+			for _, s := range screens {
+				if s.IsPrimary {
+					chosen = s
+					break
+				}
+			}
+		}
+		w, h := chosen.Size.Width, chosen.Size.Height
+		if w <= 0 || h <= 0 {
+			w, h = chosen.Width, chosen.Height
+		}
+		if w > 0 && h > 0 {
+			runtime.WindowSetSize(ctx, w, h)
+			runtime.WindowCenter(ctx)
+		}
+	}
+	runtime.WindowMaximise(ctx)
 }
 
 // ParsePlan parses a raw XML string containing a SQL Server ShowPlan
@@ -224,6 +263,12 @@ func (a *App) GetLiveSessionPlan(planHandleHex string) (string, error) {
 	return client.GetSessionPlan(a.ctx, planHandleHex)
 }
 
+// GetLiveQueryPlan captures a live execution plan (PostgreSQL EXPLAIN FORMAT JSON or SQL Server ShowPlan XML) for a SQL query
+func (a *App) GetLiveQueryPlan(queryText string) (string, error) {
+	client := livedb.GetClient()
+	return client.ExplainQuery(a.ctx, queryText)
+}
+
 // GetLiveQueryStore pulls top resource-consuming queries from Query Store (default 24h)
 func (a *App) GetLiveQueryStore(orderBy string, topN int) ([]livedb.QueryStoreEntry, error) {
 	client := livedb.GetClient()
@@ -346,6 +391,18 @@ func (a *App) GetLiveEngineInternals() (*livedb.EngineInternalsReport, error) {
 func (a *App) GetLivePLEReport() (*livedb.PLEReport, error) {
 	client := livedb.GetClient()
 	return client.GetPLEReport(a.ctx)
+}
+
+// GetLivePgConfigReport retrieves all visible PostgreSQL configurations (pg_settings, postgresql.conf, pg_hba.conf, pg_ident.conf, overrides, and extensions)
+func (a *App) GetLivePgConfigReport() (*livedb.PgConfigReport, error) {
+	client := livedb.GetClient()
+	return client.GetPgConfigReport(a.ctx)
+}
+
+// GetLiveSqlServerConfigReport retrieves all visible SQL Server configurations (sys.configurations, scoped configs, DB options, Query Store, files, and trace flags)
+func (a *App) GetLiveSqlServerConfigReport() (*livedb.SqlServerConfigReport, error) {
+	client := livedb.GetClient()
+	return client.GetSqlServerConfigReport(a.ctx)
 }
 
 // GetRadarPagePollingConfig retrieves per-subtab polling settings from SQLite

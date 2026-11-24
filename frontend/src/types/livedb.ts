@@ -438,5 +438,182 @@ export interface PLEReport {
   doctorInsights: PLEDoctorInsight[];
 }
 
+export interface PgSettingEntry {
+  name: string;
+  setting: string;
+  formattedValue: string;
+  unit: string;
+  category: string;
+  shortDesc: string;
+  context: string;
+  varType: string;
+  source: string;
+  sourceFile: string;
+  sourceLine: number;
+  bootVal: string;
+  resetVal: string;
+  pendingRestart: boolean;
+  isModified: boolean;
+}
+
+export interface PgFileSettingEntry {
+  sourceFile: string;
+  seqNo: number;
+  sourceLine: number;
+  name: string;
+  setting: string;
+  applied: boolean;
+  error: string;
+}
+
+export interface PgHbaRuleEntry {
+  lineNumber: number;
+  type: string;
+  database: string;
+  userName: string;
+  address: string;
+  netmask: string;
+  authMethod: string;
+  options: string;
+  error: string;
+}
+
+export interface PgIdentMappingEntry {
+  mapNumber: number;
+  fileName: string;
+  lineNumber: number;
+  mapName: string;
+  sysName: string;
+  pgUsername: string;
+  error: string;
+}
+
+export interface PgDbRoleSettingEntry {
+  databaseName: string;
+  roleName: string;
+  name: string;
+  value: string;
+}
+
+export interface PgExtensionEntry {
+  name: string;
+  version: string;
+  schema: string;
+  relocatable: boolean;
+  description: string;
+}
+
+export interface PgConfigReport {
+  currentUser: string;
+  isSuperuser: boolean;
+  canReadAll: boolean;
+  serverVersion: string;
+  configFile: string;
+  hbaFile: string;
+  identFile: string;
+  dataDirectory: string;
+  totalSettings: number;
+  modifiedCount: number;
+  pendingRestartCount: number;
+  settings: PgSettingEntry[];
+  fileSettings: PgFileSettingEntry[];
+  fileSettingsError?: string;
+  hbaRules: PgHbaRuleEntry[];
+  hbaError?: string;
+  identMappings: PgIdentMappingEntry[];
+  identError?: string;
+  dbRoleSettings: PgDbRoleSettingEntry[];
+  extensions: PgExtensionEntry[];
+  fetchedAt: string;
+}
+
+export interface SqlServerConfigEntry {
+  configId: number;
+  name: string;
+  value: string;
+  valueInUse: string;
+  minimum: string;
+  maximum: string;
+  description: string;
+  isDynamic: boolean;
+  isAdvanced: boolean;
+  isModified: boolean;
+  pendingAction: string;
+  category: string;
+  bestPracticeNote?: string;
+  minVersion?: string;
+  versionComment?: string;
+  isUnsupported: boolean;
+}
+
+export interface SqlScopedConfigEntry {
+  configId: number;
+  name: string;
+  value: string;
+  valueForSecondary: string;
+  isDefault: boolean;
+  description: string;
+  minVersion?: string;
+  versionComment?: string;
+  isUnsupported: boolean;
+}
+
+export interface SqlDatabaseOptionEntry {
+  name: string;
+  value: string;
+  category: string;
+  status: string;
+  description: string;
+  minVersion?: string;
+  versionComment?: string;
+  alterTsql?: string;
+}
+
+export interface SqlDatabaseFileEntry {
+  databaseName: string;
+  fileId: number;
+  logicalName: string;
+  fileType: string;
+  physicalPath: string;
+  sizeMb: number;
+  growthDesc: string;
+  maxSizeDesc: string;
+  stateDesc: string;
+}
+
+export interface SqlTraceFlagEntry {
+  traceFlag: number;
+  status: number;
+  global: number;
+  session: number;
+  description: string;
+}
+
+export interface SqlServerConfigReport {
+  serverName: string;
+  databaseName: string;
+  productVersion: string;
+  productLevel: string;
+  edition: string;
+  majorVersion: number;
+  majorYearLabel: string;
+  compatibilityLevel: number;
+  cpuCount: number;
+  physicalMemoryMb: number;
+  collation: string;
+  totalInstanceConfigs: number;
+  modifiedInstanceCount: number;
+  pendingReconfigureCount: number;
+  instanceConfigs: SqlServerConfigEntry[];
+  scopedConfigs: SqlScopedConfigEntry[];
+  databaseOptions: SqlDatabaseOptionEntry[];
+  databaseFiles: SqlDatabaseFileEntry[];
+  traceFlags: SqlTraceFlagEntry[];
+  traceFlagsError?: string;
+  fetchedAt: string;
+}
+
+
+
 
 

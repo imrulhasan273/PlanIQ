@@ -17,14 +17,14 @@ func main() {
 
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:  "PlanIQ — Database Execution Plan Visualizer & AI Advisor",
-		Width:  1024,
-		Height: 768,
+		Title:            "PlanIQ — Database Execution Plan Visualizer & AI Advisor",
+		WindowStartState: options.Maximised,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup:        app.startup,
+		OnDomReady:       app.domReady,
 		Bind: []interface{}{
 			app,
 		},

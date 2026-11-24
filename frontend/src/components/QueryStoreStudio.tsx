@@ -20,9 +20,12 @@ import {
   Layers,
   ArrowUpDown,
   Download,
-  AlertCircle
+  AlertCircle,
+  Loader2,
+  Eye
 } from 'lucide-react';
 import { QueryStoreEntry, ConnectionStatus } from '../types/livedb';
+import { downloadCapturedPlanFile } from '../utils/planExports';
 
 interface QueryStoreStudioProps {
   entries: QueryStoreEntry[];
@@ -73,6 +76,7 @@ export const QueryStoreStudio: React.FC<QueryStoreStudioProps> = ({
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [selectedCheckboxes, setSelectedCheckboxes] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [capturingPlanKey, setCapturingPlanKey] = useState<string | null>(null);
   const [showServerFilters, setShowServerFilters] = useState<boolean>(false);
   const [minCpuThreshold, setMinCpuThreshold] = useState<string>('');
   const [spillsOnly, setSpillsOnly] = useState<boolean>(false);
@@ -94,6 +98,53 @@ export const QueryStoreStudio: React.FC<QueryStoreStudioProps> = ({
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 1800);
+  };
+
+  const handleCaptureOrLoadPlan = async (
+    entry: QueryStoreEntry | undefined,
+    fallbackQueryText: string,
+    label: string,
+    keyId: string,
+    mode: 'load' | 'export'
+  ) => {
+    const planText = entry?.planXml?.trim();
+    if (planText) {
+      if (mode === 'export') {
+        downloadCapturedPlanFile(planText, label, isPg ? 'postgresql' : 'sqlserver');
+      } else {
+        onLoadPlanXML(planText, label);
+      }
+      return;
+    }
+
+    const sqlToExplain = (entry?.queryText || fallbackQueryText || '').trim();
+    if (!sqlToExplain) {
+      alert('No SQL statement text is available to capture an execution plan.');
+      return;
+    }
+
+    setCapturingPlanKey(`${mode}:${keyId}`);
+    try {
+      const app = (window as any).go?.main?.App;
+      if (!app?.GetLiveQueryPlan) {
+        alert('Live query plan capture backend method is unavailable.');
+        return;
+      }
+      const captured = await app.GetLiveQueryPlan(sqlToExplain);
+      if (!captured || !captured.trim()) {
+        alert('The database engine returned an empty execution plan.');
+        return;
+      }
+      if (mode === 'export') {
+        downloadCapturedPlanFile(captured, label, isPg ? 'postgresql' : 'sqlserver');
+      } else {
+        onLoadPlanXML(captured, label);
+      }
+    } catch (err: any) {
+      alert(`Failed to capture live execution plan: ${err?.message || err}`);
+    } finally {
+      setCapturingPlanKey(null);
+    }
   };
 
   const formatDisplayTime = (timeStr: string, mode: 'Local' | 'UTC'): string => {
@@ -1433,29 +1484,63 @@ export const QueryStoreStudio: React.FC<QueryStoreStudioProps> = ({
 
                     {/* Action */}
                     <td style={{ padding: '6px 10px', textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const plan = row.plans[0];
-                          if (plan?.planXml) {
-                            onLoadPlanXML(plan.planXml, `QueryStore Plan #${plan.planId} (${row.displayKey})`);
-                          } else {
-                            alert(`Plan XML is not available for ${row.displayKey}.`);
-                          }
-                        }}
-                        style={{
-                          fontSize: '10px',
-                          padding: '2px 8px',
-                          height: '22px',
-                          gap: '3px'
-                        }}
-                        title="Load this plan into PlanIQ Visualizer & AI Advisor"
-                      >
-                        <Zap size={10} />
-                        <span>Load Plan</span>
-                      </button>
+                      {(() => {
+                        const firstPlan = row.plans[0];
+                        const hasCached = !!firstPlan?.planXml;
+                        const label = isPg
+                          ? `PG_Stmt_${firstPlan?.queryId || row.displayKey}`
+                          : `QueryStore_Plan_${firstPlan?.planId || row.displayKey}`;
+                        const isBusyLoad = capturingPlanKey === `load:${row.groupKey}`;
+                        const isBusyExp = capturingPlanKey === `export:${row.groupKey}`;
+                        return (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              disabled={isBusyLoad || isBusyExp}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCaptureOrLoadPlan(firstPlan, row.queryText, label, row.groupKey, 'load');
+                              }}
+                              style={{
+                                fontSize: '10px',
+                                padding: '2px 8px',
+                                height: '22px',
+                                gap: '3px'
+                              }}
+                              title={
+                                hasCached
+                                  ? 'Load cached plan into PlanIQ Visualizer & AI Advisor'
+                                  : isPg
+                                  ? 'Capture live EXPLAIN (FORMAT JSON) plan from this statement'
+                                  : 'Capture live ShowPlan XML for this query'
+                              }
+                            >
+                              {isBusyLoad ? <Loader2 size={10} className="spin" /> : hasCached ? <Zap size={10} /> : <Eye size={10} />}
+                              <span>{hasCached ? 'Load Plan' : 'Capture Plan'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              disabled={isBusyLoad || isBusyExp}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCaptureOrLoadPlan(firstPlan, row.queryText, label, row.groupKey, 'export');
+                              }}
+                              style={{
+                                fontSize: '10px',
+                                padding: '2px 6px',
+                                height: '22px',
+                                gap: '3px'
+                              }}
+                              title={isPg ? 'Capture & Export as PostgreSQL .json plan file' : 'Capture & Export as .sqlplan XML file'}
+                            >
+                              {isBusyExp ? <Loader2 size={10} className="spin" /> : <Download size={10} color="#34d399" />}
+                              <span>{isPg ? '.json' : '.sqlplan'}</span>
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
 
@@ -1502,20 +1587,41 @@ export const QueryStoreStudio: React.FC<QueryStoreStudioProps> = ({
                       </td>
                       <td style={{ padding: '4px 10px', color: '#64748b' }}>{p.executionType || 'Regular'}</td>
                       <td style={{ padding: '4px 10px', textAlign: 'right' }}>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => {
-                            if (p.planXml) {
-                              onLoadPlanXML(p.planXml, `QueryStore Plan #${p.planId} (${row.displayKey})`);
-                            } else {
-                              alert(`Plan XML is not available for Plan #${p.planId}.`);
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() =>
+                              handleCaptureOrLoadPlan(
+                                p,
+                                p.queryText || row.queryText,
+                                isPg ? `PG_Stmt_${p.queryId}` : `QueryStore_Plan_${p.planId}`,
+                                `child-${p.planId}-${pIdx}`,
+                                'load'
+                              )
                             }
-                          }}
-                          style={{ fontSize: '9.5px', padding: '1px 6px', height: '20px' }}
-                        >
-                          Load #{p.planId}
-                        </button>
+                            style={{ fontSize: '9.5px', padding: '1px 6px', height: '20px' }}
+                          >
+                            {p.planXml ? `Load #${p.planId}` : 'Capture Plan'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() =>
+                              handleCaptureOrLoadPlan(
+                                p,
+                                p.queryText || row.queryText,
+                                isPg ? `PG_Stmt_${p.queryId}` : `QueryStore_Plan_${p.planId}`,
+                                `child-${p.planId}-${pIdx}`,
+                                'export'
+                              )
+                            }
+                            style={{ fontSize: '9.5px', padding: '1px 5px', height: '20px' }}
+                            title={isPg ? 'Export .json' : 'Export .sqlplan'}
+                          >
+                            <Download size={9} color="#34d399" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

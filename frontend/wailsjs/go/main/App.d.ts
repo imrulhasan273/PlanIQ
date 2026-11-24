@@ -48,6 +48,10 @@ export function GetLiveMissingIndexes(arg1:number):Promise<Array<livedb.LiveMiss
 
 export function GetLivePLEReport():Promise<livedb.PLEReport>;
 
+export function GetLivePgConfigReport():Promise<livedb.PgConfigReport>;
+
+export function GetLiveQueryPlan(arg1:string):Promise<string>;
+
 export function GetLiveQueryStore(arg1:string,arg2:number):Promise<Array<livedb.QueryStoreEntry>>;
 
 export function GetLiveQueryStoreWindow(arg1:string,arg2:number,arg3:number):Promise<Array<livedb.QueryStoreEntry>>;
@@ -55,6 +59,8 @@ export function GetLiveQueryStoreWindow(arg1:string,arg2:number,arg3:number):Pro
 export function GetLiveServerVitals():Promise<livedb.ServerVitals>;
 
 export function GetLiveSessionPlan(arg1:string):Promise<string>;
+
+export function GetLiveSqlServerConfigReport():Promise<livedb.SqlServerConfigReport>;
 
 export function GetLiveTempDBUsage(arg1:number):Promise<Array<livedb.LiveTempDBUsage>>;
 

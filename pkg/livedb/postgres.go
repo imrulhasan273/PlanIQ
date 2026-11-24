@@ -3,8 +3,11 @@ package livedb
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -55,6 +58,8 @@ func (c *Client) pgGetActiveSessions(ctx context.Context, limit int) ([]ActiveSe
 		WHERE pid <> pg_backend_pid()
 		  AND state IS NOT NULL
 		  AND state <> 'idle'
+		  AND COALESCE(backend_type, 'client backend') IN ('client backend', 'parallel worker')
+		  AND COALESCE(wait_event_type, '') <> 'Activity'
 		ORDER BY query_start ASC NULLS LAST
 		LIMIT $1;
 	`
@@ -248,8 +253,216 @@ func (c *Client) pgGetLiveDeadlocks(ctx context.Context, limit int) ([]LiveDeadl
 	return []LiveDeadlockReport{}, nil
 }
 
-func (c *Client) pgGetSessionPlan(_ context.Context, _ string) (string, error) {
-	return "", fmt.Errorf("PostgreSQL does not cache XML execution plans per PID in memory; run EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) and open or paste the JSON in PlanIQ")
+var (
+	rxPgParamPlaceholder = regexp.MustCompile(`\$\d+`)
+	rxPgLineComment      = regexp.MustCompile(`--[^\r\n]*`)
+	rxPgBlockComment     = regexp.MustCompile(`/\*[\s\S]*?\*/`)
+)
+
+func extractPgLeadingKeyword(sqlText string) string {
+	cleaned := rxPgBlockComment.ReplaceAllString(sqlText, " ")
+	cleaned = rxPgLineComment.ReplaceAllString(cleaned, " ")
+	cleaned = strings.TrimSpace(cleaned)
+	if cleaned == "" {
+		return ""
+	}
+	// Strip leading parentheses if e.g. (SELECT ...)
+	cleaned = strings.TrimLeft(cleaned, "(")
+	cleaned = strings.TrimSpace(cleaned)
+	fields := strings.Fields(cleaned)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToUpper(fields[0])
+}
+
+func isPgExplainableKeyword(kw string) bool {
+	switch kw {
+	case "SELECT", "WITH", "TABLE", "VALUES", "INSERT", "UPDATE", "DELETE", "MERGE":
+		return true
+	default:
+		return false
+	}
+}
+
+// replacePgParamsWithNull replaces positional $1, $2 parameters outside string/quoted identifiers with NULL.
+func replacePgParamsWithNull(sqlText string) (string, bool) {
+	var b strings.Builder
+	b.Grow(len(sqlText) + 16)
+	replaced := false
+	inSingle := false
+	inDouble := false
+	n := len(sqlText)
+
+	for i := 0; i < n; i++ {
+		ch := sqlText[i]
+		if ch == '\'' && !inDouble {
+			b.WriteByte(ch)
+			if inSingle && i+1 < n && sqlText[i+1] == '\'' {
+				b.WriteByte(sqlText[i+1])
+				i++
+			} else {
+				inSingle = !inSingle
+			}
+			continue
+		}
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			b.WriteByte(ch)
+			continue
+		}
+		if !inSingle && !inDouble && ch == '$' && i+1 < n && sqlText[i+1] >= '0' && sqlText[i+1] <= '9' {
+			// Ensure $ is not part of an identifier / dollar-quoted tag like $tag$
+			prevIsIdent := i > 0 && ((sqlText[i-1] >= 'a' && sqlText[i-1] <= 'z') || (sqlText[i-1] >= 'A' && sqlText[i-1] <= 'Z') || (sqlText[i-1] >= '0' && sqlText[i-1] <= '9') || sqlText[i-1] == '_' || sqlText[i-1] == '$')
+			j := i + 1
+			for j < n && sqlText[j] >= '0' && sqlText[j] <= '9' {
+				j++
+			}
+			nextIsTagEnd := j < n && sqlText[j] == '$'
+			if !prevIsIdent && !nextIsTagEnd {
+				b.WriteString("NULL")
+				replaced = true
+				i = j - 1
+				continue
+			}
+		}
+		b.WriteByte(ch)
+	}
+	return b.String(), replaced
+}
+
+func (c *Client) runPgExplainJSON(ctx context.Context, explainStmt string) (string, error) {
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var rawJSON string
+	if err := tx.QueryRowContext(ctx, explainStmt).Scan(&rawJSON); err != nil {
+		return "", err
+	}
+	return rawJSON, nil
+}
+
+func (c *Client) pgExplainQuery(ctx context.Context, queryText string) (string, error) {
+	if c.db == nil {
+		return "", fmt.Errorf("not connected to PostgreSQL")
+	}
+	cleanSQL := strings.TrimSpace(queryText)
+	cleanSQL = strings.TrimRight(cleanSQL, "; \t\r\n")
+	if cleanSQL == "" {
+		return "", fmt.Errorf("empty SQL query text")
+	}
+
+	kw := extractPgLeadingKeyword(cleanSQL)
+	if kw == "EXPLAIN" {
+		return "", fmt.Errorf("statement is already an EXPLAIN command; provide the underlying SQL statement")
+	}
+	if !isPgExplainableKeyword(kw) {
+		return "", fmt.Errorf("PostgreSQL EXPLAIN only supports SELECT, WITH, TABLE, VALUES, INSERT, UPDATE, DELETE, or MERGE statements (got %s)", kw)
+	}
+
+	queryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	nullReplacedSQL, hasParams := replacePgParamsWithNull(cleanSQL)
+	if !hasParams {
+		hasParams = rxPgParamPlaceholder.MatchString(cleanSQL)
+	}
+
+	var candidates []string
+	if hasParams {
+		candidates = []string{
+			fmt.Sprintf("EXPLAIN (GENERIC_PLAN, VERBOSE, SETTINGS, FORMAT JSON) %s", cleanSQL),
+			fmt.Sprintf("EXPLAIN (GENERIC_PLAN, VERBOSE, FORMAT JSON) %s", cleanSQL),
+			fmt.Sprintf("EXPLAIN (VERBOSE, SETTINGS, FORMAT JSON) %s", nullReplacedSQL),
+			fmt.Sprintf("EXPLAIN (VERBOSE, FORMAT JSON) %s", nullReplacedSQL),
+			fmt.Sprintf("EXPLAIN (FORMAT JSON) %s", nullReplacedSQL),
+		}
+	} else {
+		candidates = []string{
+			fmt.Sprintf("EXPLAIN (VERBOSE, SETTINGS, FORMAT JSON) %s", cleanSQL),
+			fmt.Sprintf("EXPLAIN (VERBOSE, FORMAT JSON) %s", cleanSQL),
+			fmt.Sprintf("EXPLAIN (FORMAT JSON) %s", cleanSQL),
+		}
+	}
+
+	var rawJSON string
+	var lastErr error
+	for _, stmt := range candidates {
+		res, err := c.runPgExplainJSON(queryCtx, stmt)
+		if err == nil && strings.TrimSpace(res) != "" {
+			rawJSON = res
+			lastErr = nil
+			break
+		}
+		lastErr = err
+	}
+
+	if lastErr != nil || strings.TrimSpace(rawJSON) == "" {
+		if lastErr != nil {
+			return "", fmt.Errorf("failed to capture PostgreSQL EXPLAIN JSON: %w", lastErr)
+		}
+		return "", fmt.Errorf("PostgreSQL returned an empty EXPLAIN JSON response")
+	}
+
+	// Inject original SQL statement text into the EXPLAIN root for PlanIQ visualizer & export
+	var arr []map[string]interface{}
+	if err := json.Unmarshal([]byte(rawJSON), &arr); err == nil && len(arr) > 0 {
+		arr[0]["Query"] = cleanSQL
+		if enriched, mErr := json.MarshalIndent(arr, "", "  "); mErr == nil {
+			return string(enriched), nil
+		}
+	}
+
+	return rawJSON, nil
+}
+
+func (c *Client) pgGetSessionPlan(ctx context.Context, handleOrPid string) (string, error) {
+	if c.db == nil {
+		return "", fmt.Errorf("not connected to PostgreSQL")
+	}
+	trimmed := strings.TrimSpace(handleOrPid)
+	if trimmed == "" {
+		return "", fmt.Errorf("no PostgreSQL PID or query provided")
+	}
+
+	var pid int
+	// Handle formats like "1234:pg:1234", "pg:1234", or "1234"
+	if idx := strings.Index(trimmed, ":"); idx != -1 {
+		prefix := strings.TrimSpace(trimmed[:idx])
+		if p, err := strconv.Atoi(prefix); err == nil && p > 0 {
+			pid = p
+		} else {
+			suffix := strings.TrimPrefix(strings.TrimSpace(trimmed[idx+1:]), "pg:")
+			if p2, err2 := strconv.Atoi(suffix); err2 == nil && p2 > 0 {
+				pid = p2
+			}
+		}
+	} else if strings.HasPrefix(trimmed, "pg:") {
+		if p, err := strconv.Atoi(strings.TrimPrefix(trimmed, "pg:")); err == nil && p > 0 {
+			pid = p
+		}
+	} else if p, err := strconv.Atoi(trimmed); err == nil && p > 0 {
+		pid = p
+	}
+
+	if pid > 0 {
+		queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		defer cancel()
+		var qText string
+		err := c.db.QueryRowContext(queryCtx, `SELECT COALESCE(query, '') FROM pg_stat_activity WHERE pid = $1;`, pid).Scan(&qText)
+		if err != nil {
+			return "", fmt.Errorf("could not read active query for PostgreSQL PID #%d: %w", pid, err)
+		}
+		if strings.TrimSpace(qText) == "" {
+			return "", fmt.Errorf("PostgreSQL PID #%d has no query text visible in pg_stat_activity (may require pg_read_all_stats role)", pid)
+		}
+		return c.pgExplainQuery(ctx, qText)
+	}
+
+	return c.pgExplainQuery(ctx, trimmed)
 }
 
 func (c *Client) pgGetServerVitals(ctx context.Context) (*ServerVitals, error) {
@@ -319,6 +532,8 @@ func (c *Client) pgGetWaitStats(ctx context.Context, limit int) ([]LiveWaitStat,
 		FROM pg_stat_activity
 		WHERE pid <> pg_backend_pid()
 		  AND state = 'active'
+		  AND COALESCE(backend_type, 'client backend') IN ('client backend', 'parallel worker')
+		  AND COALESCE(wait_event_type, '') <> 'Activity'
 		GROUP BY COALESCE(wait_event, 'CPU_ACTIVE'), COALESCE(wait_event_type, 'CPU')
 		ORDER BY 4 DESC
 		LIMIT $1;
@@ -491,38 +706,275 @@ func (c *Client) pgGetLiveDPAPerspective(ctx context.Context, perspective string
 	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 
-	var groupExpr, secExpr string
-	switch strings.ToLower(strings.TrimSpace(perspective)) {
+	p := strings.ToLower(strings.TrimSpace(perspective))
+	var q string
+
+	switch p {
 	case "databases":
-		groupExpr = "COALESCE(datname, '(none)')"
-		secExpr = "'Database'"
-	case "users", "logins":
-		groupExpr = "COALESCE(usename, '(system)')"
-		secExpr = "'Role'"
+		q = `
+			WITH client_sessions AS (
+				SELECT
+					datname,
+					COUNT(*)::int AS session_count,
+					COALESCE(SUM(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0)) FILTER (WHERE state = 'active'), 0)::float8 AS wait_sec
+				FROM pg_stat_activity
+				WHERE pid <> pg_backend_pid()
+				  AND datname IS NOT NULL
+				  AND COALESCE(backend_type, 'client backend') = 'client backend'
+				GROUP BY datname
+			)
+			SELECT
+				d.datname AS name,
+				CASE WHEN d.datname = current_database() THEN 'Current Database' ELSE 'Database' END AS secondary,
+				COALESCE(cs.session_count, 0)::int AS session_count,
+				COALESCE(cs.wait_sec, 0)::float8 AS wait_sec,
+				COALESCE(cs.wait_sec, 0)::float8 AS cpu_sec,
+				COALESCE(d.blks_hit + d.blks_read, 0)::bigint AS logical_reads,
+				COALESCE(d.tup_inserted + d.tup_updated + d.tup_deleted, 0)::bigint AS writes
+			FROM pg_stat_database d
+			LEFT JOIN client_sessions cs ON cs.datname = d.datname
+			WHERE d.datname IS NOT NULL
+			  AND d.datname NOT LIKE 'template%'
+			  AND (COALESCE(cs.session_count, 0) > 0 OR d.datname = current_database() OR (d.blks_hit + d.blks_read) > 0)
+			ORDER BY session_count DESC, wait_sec DESC, logical_reads DESC
+			LIMIT 20;
+		`
+	case "dbusers", "users", "logins":
+		var hasPgss bool
+		_ = c.db.QueryRowContext(queryCtx, `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements');`).Scan(&hasPgss)
+		if hasPgss {
+			qPgss := `
+				WITH live_users AS (
+					SELECT
+						usename AS role_name,
+						COUNT(*)::int AS session_count,
+						COALESCE(SUM(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0)) FILTER (WHERE state = 'active'), 0)::float8 AS live_wait_sec,
+						COALESCE(string_agg(DISTINCT datname, ', ') FILTER (WHERE datname IS NOT NULL), '') AS dbs
+					FROM pg_stat_activity
+					WHERE pid <> pg_backend_pid()
+					  AND usename IS NOT NULL
+					  AND btrim(usename) <> ''
+					GROUP BY usename
+				),
+				hist_users AS (
+					SELECT
+						r.rolname AS role_name,
+						COALESCE(SUM(s.total_exec_time) / 1000.0, 0)::float8 AS exec_sec,
+						COALESCE(SUM(s.shared_blks_hit + s.shared_blks_read), 0)::bigint AS reads,
+						COALESCE(SUM(s.shared_blks_written), 0)::bigint AS writes
+					FROM pg_stat_statements s
+					JOIN pg_roles r ON r.oid = s.userid
+					GROUP BY r.rolname
+				)
+				SELECT
+					COALESCE(l.role_name, h.role_name) AS name,
+					CASE
+						WHEN COALESCE(l.dbs, '') <> '' THEN 'DB User • ' || l.dbs
+						ELSE 'DB Role (pg_stat_statements)'
+					END AS secondary,
+					COALESCE(l.session_count, 0)::int AS session_count,
+					GREATEST(COALESCE(l.live_wait_sec, 0), COALESCE(h.exec_sec, 0))::float8 AS wait_sec,
+					COALESCE(h.exec_sec, l.live_wait_sec, 0)::float8 AS cpu_sec,
+					COALESCE(h.reads, 0)::bigint AS logical_reads,
+					COALESCE(h.writes, 0)::bigint AS writes
+				FROM live_users l
+				FULL OUTER JOIN hist_users h ON h.role_name = l.role_name
+				WHERE COALESCE(l.role_name, h.role_name) IS NOT NULL
+				ORDER BY session_count DESC, wait_sec DESC, logical_reads DESC
+				LIMIT 20;
+			`
+			if items, err := c.scanPgPerspectiveQuery(queryCtx, qPgss); err == nil && len(items) > 0 {
+				return items, nil
+			}
+		}
+		q = `
+			SELECT
+				usename AS name,
+				'DB User • ' || COALESCE(NULLIF(string_agg(DISTINCT datname, ', '), ''), current_database()) AS secondary,
+				COUNT(*)::int AS session_count,
+				COALESCE(SUM(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0)) FILTER (WHERE state = 'active'), 0)::float8 AS wait_sec,
+				COALESCE(SUM(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0)) FILTER (WHERE state = 'active'), 0)::float8 AS cpu_sec,
+				0::bigint AS logical_reads,
+				0::bigint AS writes
+			FROM pg_stat_activity
+			WHERE pid <> pg_backend_pid()
+			  AND usename IS NOT NULL
+			  AND btrim(usename) <> ''
+			GROUP BY usename
+			ORDER BY session_count DESC, wait_sec DESC
+			LIMIT 20;
+		`
 	case "programs", "applications":
-		groupExpr = "COALESCE(NULLIF(application_name, ''), '(unnamed client)')"
-		secExpr = "'Application'"
+		q = `
+			SELECT
+				COALESCE(NULLIF(btrim(application_name), ''), usename || ' (' || COALESCE(datname, current_database()) || ')') AS name,
+				'Application • ' || COALESCE(NULLIF(string_agg(DISTINCT usename, ', '), ''), 'client') AS secondary,
+				COUNT(*)::int AS session_count,
+				COALESCE(SUM(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0)) FILTER (WHERE state = 'active'), 0)::float8 AS wait_sec,
+				COALESCE(SUM(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0)) FILTER (WHERE state = 'active'), 0)::float8 AS cpu_sec,
+				0::bigint AS logical_reads,
+				0::bigint AS writes
+			FROM pg_stat_activity
+			WHERE pid <> pg_backend_pid()
+			  AND COALESCE(backend_type, 'client backend') = 'client backend'
+			  AND usename IS NOT NULL
+			GROUP BY 1
+			ORDER BY session_count DESC, wait_sec DESC
+			LIMIT 20;
+		`
 	case "machines", "hosts":
-		groupExpr = "COALESCE(host(client_addr), 'localhost')"
-		secExpr = "'Client Host'"
+		q = `
+			SELECT
+				COALESCE(NULLIF(host(client_addr), ''), 'localhost') AS name,
+				'Client Host • ' || COALESCE(NULLIF(string_agg(DISTINCT usename, ', '), ''), 'local') AS secondary,
+				COUNT(*)::int AS session_count,
+				COALESCE(SUM(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0)) FILTER (WHERE state = 'active'), 0)::float8 AS wait_sec,
+				COALESCE(SUM(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0)) FILTER (WHERE state = 'active'), 0)::float8 AS cpu_sec,
+				0::bigint AS logical_reads,
+				0::bigint AS writes
+			FROM pg_stat_activity
+			WHERE pid <> pg_backend_pid()
+			  AND COALESCE(backend_type, 'client backend') = 'client backend'
+			  AND usename IS NOT NULL
+			GROUP BY 1
+			ORDER BY session_count DESC, wait_sec DESC
+			LIMIT 20;
+		`
+	case "sessions":
+		q = `
+			SELECT
+				'PID #' || pid::text || ' — ' || COALESCE(NULLIF(usename, ''), 'postgres') || COALESCE(' @ ' || NULLIF(datname, ''), '') AS name,
+				COALESCE(NULLIF(btrim(application_name), ''), 'client') || ' • ' || COALESCE(state, 'idle') ||
+					CASE WHEN wait_event IS NOT NULL THEN ' (' || wait_event || ')' ELSE '' END AS secondary,
+				1::int AS session_count,
+				CASE
+					WHEN state = 'active' THEN COALESCE(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0), 0)::float8
+					ELSE 0::float8
+				END AS wait_sec,
+				CASE
+					WHEN state = 'active' THEN COALESCE(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0), 0)::float8
+					ELSE 0::float8
+				END AS cpu_sec,
+				0::bigint AS logical_reads,
+				0::bigint AS writes
+			FROM pg_stat_activity
+			WHERE pid <> pg_backend_pid()
+			  AND COALESCE(backend_type, 'client backend') = 'client backend'
+			  AND usename IS NOT NULL
+			ORDER BY (state = 'active') DESC, wait_sec DESC, pid ASC
+			LIMIT 25;
+		`
+	case "files":
+		q = `
+			SELECT
+				io.schemaname || '.' || io.relname AS name,
+				current_database() || ' • Table + Index Relation' AS secondary,
+				0::int AS session_count,
+				0::float8 AS wait_sec,
+				0::float8 AS cpu_sec,
+				COALESCE(io.heap_blks_hit + io.idx_blks_hit + io.heap_blks_read + io.idx_blks_read, 0)::bigint AS logical_reads,
+				COALESCE(io.heap_blks_read + io.idx_blks_read, 0)::bigint AS writes
+			FROM pg_statio_user_tables io
+			WHERE (io.heap_blks_hit + io.idx_blks_hit + io.heap_blks_read + io.idx_blks_read) > 0
+			ORDER BY logical_reads DESC, writes DESC
+			LIMIT 20;
+		`
+	case "drives":
+		q = `
+			SELECT
+				t.spcname AS name,
+				'PostgreSQL Tablespace' AS secondary,
+				COUNT(d.oid)::int AS session_count,
+				0::float8 AS wait_sec,
+				0::float8 AS cpu_sec,
+				COALESCE(SUM(sd.blks_hit + sd.blks_read), 0)::bigint AS logical_reads,
+				COALESCE(SUM(sd.blks_read), 0)::bigint AS writes
+			FROM pg_tablespace t
+			LEFT JOIN pg_database d ON d.dattablespace = t.oid
+			LEFT JOIN pg_stat_database sd ON sd.datid = d.oid
+			GROUP BY t.spcname
+			ORDER BY logical_reads DESC, session_count DESC
+			LIMIT 15;
+		`
+	case "blockers":
+		q = `
+			SELECT
+				'Blocker PID #' || blocker.pid::text || ' (' || COALESCE(blocker.usename, 'postgres') || ' blocking PID #' || blocked.pid::text || ')' AS name,
+				COALESCE(blocked.wait_event, COALESCE(blocked.wait_event_type, 'Lock')) || ' • ' || COALESCE(NULLIF(btrim(blocker.application_name), ''), 'client') AS secondary,
+				1::int AS session_count,
+				COALESCE(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - blocked.query_start)), 0), 0)::float8 AS wait_sec,
+				0::float8 AS cpu_sec,
+				0::bigint AS logical_reads,
+				0::bigint AS writes
+			FROM pg_stat_activity blocked
+			CROSS JOIN LATERAL unnest(pg_blocking_pids(blocked.pid)) AS blocker_pid
+			JOIN pg_stat_activity blocker ON blocker.pid = blocker_pid
+			ORDER BY wait_sec DESC
+			LIMIT 25;
+		`
+	case "plans":
+		var hasPgss bool
+		_ = c.db.QueryRowContext(queryCtx, `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements');`).Scan(&hasPgss)
+		if hasPgss {
+			qPgss := `
+				SELECT
+					'Query #' || COALESCE(s.queryid::text, '0') || ' (' || current_database() || ')' AS name,
+					LEFT(btrim(regexp_replace(COALESCE(s.query, ''), '\s+', ' ', 'g')), 64) AS secondary,
+					LEAST(COALESCE(s.calls, 0), 2147483647)::int AS session_count,
+					COALESCE(s.total_exec_time / 1000.0, 0)::float8 AS wait_sec,
+					COALESCE(s.total_exec_time / 1000.0, 0)::float8 AS cpu_sec,
+					COALESCE(s.shared_blks_hit + s.shared_blks_read, 0)::bigint AS logical_reads,
+					COALESCE(s.shared_blks_written, 0)::bigint AS writes
+				FROM pg_stat_statements s
+				WHERE s.dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+				ORDER BY s.total_exec_time DESC
+				LIMIT 20;
+			`
+			if items, err := c.scanPgPerspectiveQuery(queryCtx, qPgss); err == nil && len(items) > 0 {
+				return items, nil
+			}
+		}
+		q = `
+			SELECT
+				'PID #' || pid::text || ' (' || COALESCE(NULLIF(usename, ''), 'postgres') || ')' AS name,
+				LEFT(btrim(regexp_replace(COALESCE(query, ''), '\s+', ' ', 'g')), 64) AS secondary,
+				1::int AS session_count,
+				COALESCE(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0), 0)::float8 AS wait_sec,
+				COALESCE(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0), 0)::float8 AS cpu_sec,
+				0::bigint AS logical_reads,
+				0::bigint AS writes
+			FROM pg_stat_activity
+			WHERE pid <> pg_backend_pid()
+			  AND COALESCE(backend_type, 'client backend') = 'client backend'
+			  AND query IS NOT NULL
+			  AND btrim(query) <> ''
+			ORDER BY wait_sec DESC
+			LIMIT 20;
+		`
 	default:
-		groupExpr = "COALESCE(wait_event, COALESCE(wait_event_type, 'CPU'))"
-		secExpr = "COALESCE(wait_event_type, 'CPU')"
+		q = `
+			SELECT
+				COALESCE(wait_event, COALESCE(wait_event_type, 'CPU')) AS name,
+				COALESCE(wait_event_type, 'CPU') AS secondary,
+				COUNT(*)::int AS session_count,
+				COALESCE(SUM(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0)) FILTER (WHERE state = 'active'), 0)::float8 AS wait_sec,
+				COALESCE(SUM(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0)) FILTER (WHERE state = 'active'), 0)::float8 AS cpu_sec,
+				0::bigint AS logical_reads,
+				0::bigint AS writes
+			FROM pg_stat_activity
+			WHERE pid <> pg_backend_pid()
+			  AND COALESCE(backend_type, 'client backend') IN ('client backend', 'parallel worker')
+			  AND COALESCE(wait_event_type, '') <> 'Activity'
+			GROUP BY 1, 2
+			ORDER BY session_count DESC, wait_sec DESC
+			LIMIT 20;
+		`
 	}
 
-	q := fmt.Sprintf(`
-		SELECT
-			%s AS name,
-			%s AS secondary,
-			COUNT(*)::int AS session_count,
-			COALESCE(SUM(GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)), 0)) FILTER (WHERE state = 'active'), 0) AS wait_sec
-		FROM pg_stat_activity
-		WHERE pid <> pg_backend_pid()
-		GROUP BY 1, 2
-		ORDER BY session_count DESC, wait_sec DESC
-		LIMIT 20;
-	`, groupExpr, secExpr)
+	return c.scanPgPerspectiveQuery(queryCtx, q)
+}
 
+func (c *Client) scanPgPerspectiveQuery(queryCtx context.Context, q string) ([]DPAPerspectiveItem, error) {
 	rows, err := c.db.QueryContext(queryCtx, q)
 	if err != nil {
 		return nil, fmt.Errorf("pg DPA perspective query failed: %w", err)
@@ -530,19 +982,36 @@ func (c *Client) pgGetLiveDPAPerspective(ctx context.Context, perspective string
 	defer rows.Close()
 
 	items := make([]DPAPerspectiveItem, 0)
+	var totalWait float64
+	var totalReads int64
 	var totalSessions int
 	for rows.Next() {
 		var item DPAPerspectiveItem
-		if err := rows.Scan(&item.Name, &item.Secondary, &item.SessionCount, &item.WaitSec); err != nil {
+		if err := rows.Scan(
+			&item.Name,
+			&item.Secondary,
+			&item.SessionCount,
+			&item.WaitSec,
+			&item.CPUSec,
+			&item.LogicalReads,
+			&item.Writes,
+		); err != nil {
 			continue
 		}
-		item.CPUSec = item.WaitSec
 		item.ExecCount = int64(item.SessionCount)
+		totalWait += item.WaitSec
+		totalReads += item.LogicalReads
 		totalSessions += item.SessionCount
 		items = append(items, item)
 	}
-	if totalSessions > 0 {
-		for i := range items {
+
+	for i := range items {
+		switch {
+		case totalWait > 0:
+			items[i].Percentage = math.Round((items[i].WaitSec/totalWait)*1000) / 10
+		case totalReads > 0:
+			items[i].Percentage = math.Round((float64(items[i].LogicalReads)/float64(totalReads))*1000) / 10
+		case totalSessions > 0:
 			items[i].Percentage = math.Round((float64(items[i].SessionCount)/float64(totalSessions))*1000) / 10
 		}
 	}
@@ -1153,6 +1622,230 @@ func (c *Client) pgGetPLEReport(ctx context.Context) (*PLEReport, error) {
 		TableEvictionImpacts: tableImpacts,
 		DoctorInsights:       insights,
 	}, nil
+}
+
+func (c *Client) GetPgConfigReport(ctx context.Context) (*PgConfigReport, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.status.Connected || c.db == nil {
+		return nil, fmt.Errorf("not connected")
+	}
+	if !c.isPostgres() {
+		return nil, fmt.Errorf("PostgreSQL configuration view is only available when connected to PostgreSQL")
+	}
+	return c.pgGetConfigReport(ctx)
+}
+
+func (c *Client) pgGetConfigReport(ctx context.Context) (*PgConfigReport, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+
+	report := &PgConfigReport{
+		ServerVersion:  c.status.ServerVersion,
+		Settings:       []PgSettingEntry{},
+		FileSettings:   []PgFileSettingEntry{},
+		HbaRules:       []PgHbaRuleEntry{},
+		IdentMappings:  []PgIdentMappingEntry{},
+		DbRoleSettings: []PgDbRoleSettingEntry{},
+		Extensions:     []PgExtensionEntry{},
+		FetchedAt:      time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// 1. Metadata, role privileges, and file paths
+	_ = c.db.QueryRowContext(queryCtx, `
+		SELECT
+			current_user,
+			COALESCE(u.usesuper, false),
+			(COALESCE(u.usesuper, false) OR pg_has_role(current_user, 'pg_read_all_settings', 'MEMBER')),
+			COALESCE(current_setting('config_file', true), ''),
+			COALESCE(current_setting('hba_file', true), ''),
+			COALESCE(current_setting('ident_file', true), ''),
+			COALESCE(current_setting('data_directory', true), '')
+		FROM pg_user u
+		WHERE u.usename = current_user;
+	`).Scan(
+		&report.CurrentUser,
+		&report.IsSuperuser,
+		&report.CanReadAll,
+		&report.ConfigFile,
+		&report.HbaFile,
+		&report.IdentFile,
+		&report.DataDirectory,
+	)
+
+	// 2. Runtime pg_settings (all visible parameters)
+	if rows, err := c.db.QueryContext(queryCtx, `
+		SELECT
+			COALESCE(name, ''),
+			COALESCE(setting, ''),
+			COALESCE(current_setting(name, true), COALESCE(setting, '')),
+			COALESCE(unit, ''),
+			COALESCE(category, ''),
+			COALESCE(short_desc, ''),
+			COALESCE(context, ''),
+			COALESCE(vartype, ''),
+			COALESCE(source, ''),
+			COALESCE(sourcefile, ''),
+			COALESCE(sourceline, 0),
+			COALESCE(boot_val, ''),
+			COALESCE(reset_val, ''),
+			COALESCE(pending_restart, false)
+		FROM pg_settings
+		ORDER BY category ASC, name ASC;
+	`); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var s PgSettingEntry
+			if err := rows.Scan(
+				&s.Name, &s.Setting, &s.FormattedValue, &s.Unit,
+				&s.Category, &s.ShortDesc, &s.Context, &s.VarType,
+				&s.Source, &s.SourceFile, &s.SourceLine,
+				&s.BootVal, &s.ResetVal, &s.PendingRestart,
+			); err != nil {
+				continue
+			}
+			s.IsModified = (s.Source != "" && s.Source != "default") || (s.BootVal != "" && s.BootVal != s.ResetVal)
+			if s.IsModified {
+				report.ModifiedCount++
+			}
+			if s.PendingRestart {
+				report.PendingRestartCnt++
+			}
+			report.Settings = append(report.Settings, s)
+		}
+		report.TotalSettings = len(report.Settings)
+	}
+
+	// 3. postgresql.conf / postgresql.auto.conf raw lines (pg_file_settings)
+	if rows, err := c.db.QueryContext(queryCtx, `
+		SELECT
+			COALESCE(sourcefile, ''),
+			COALESCE(seqno, 0),
+			COALESCE(sourceline, 0),
+			COALESCE(name, ''),
+			COALESCE(setting, ''),
+			COALESCE(applied, false),
+			COALESCE(error, '')
+		FROM pg_file_settings
+		ORDER BY seqno ASC;
+	`); err != nil {
+		report.FileSettingsError = err.Error()
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var f PgFileSettingEntry
+			if err := rows.Scan(&f.SourceFile, &f.SeqNo, &f.SourceLine, &f.Name, &f.Setting, &f.Applied, &f.Error); err != nil {
+				continue
+			}
+			report.FileSettings = append(report.FileSettings, f)
+		}
+	}
+
+	// 4. pg_hba.conf authentication rules (pg_hba_file_rules)
+	if rows, err := c.db.QueryContext(queryCtx, `
+		SELECT
+			COALESCE(line_number, 0),
+			COALESCE(type, ''),
+			COALESCE(array_to_string(database, ', '), ''),
+			COALESCE(array_to_string(user_name, ', '), ''),
+			COALESCE(address, ''),
+			COALESCE(netmask, ''),
+			COALESCE(auth_method, ''),
+			COALESCE(array_to_string(options, ', '), ''),
+			COALESCE(error, '')
+		FROM pg_hba_file_rules
+		ORDER BY line_number ASC;
+	`); err != nil {
+		report.HbaError = err.Error()
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var h PgHbaRuleEntry
+			if err := rows.Scan(
+				&h.LineNumber, &h.Type, &h.Database, &h.UserName,
+				&h.Address, &h.Netmask, &h.AuthMethod, &h.Options, &h.Error,
+			); err != nil {
+				continue
+			}
+			report.HbaRules = append(report.HbaRules, h)
+		}
+	}
+
+	// 5. pg_ident.conf mappings (pg_ident_file_mappings — available PG 15+)
+	if rows, err := c.db.QueryContext(queryCtx, `
+		SELECT
+			COALESCE(map_number, 0),
+			COALESCE(file_name, ''),
+			COALESCE(line_number, 0),
+			COALESCE(map_name, ''),
+			COALESCE(sys_name, ''),
+			COALESCE(pg_username, ''),
+			COALESCE(error, '')
+		FROM pg_ident_file_mappings
+		ORDER BY line_number ASC;
+	`); err != nil {
+		report.IdentError = err.Error()
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var m PgIdentMappingEntry
+			if err := rows.Scan(
+				&m.MapNumber, &m.FileName, &m.LineNumber,
+				&m.MapName, &m.SysName, &m.PgUsername, &m.Error,
+			); err != nil {
+				continue
+			}
+			report.IdentMappings = append(report.IdentMappings, m)
+		}
+	}
+
+	// 6. Per-Database / Per-Role Overrides (pg_db_role_setting)
+	if rows, err := c.db.QueryContext(queryCtx, `
+		SELECT
+			COALESCE(d.datname, '* (All Databases)'),
+			COALESCE(r.rolname, '* (All Roles)'),
+			split_part(kv, '=', 1) AS param_name,
+			substr(kv, strpos(kv, '=') + 1) AS param_value
+		FROM pg_db_role_setting s
+		LEFT JOIN pg_database d ON d.oid = s.setdatabase
+		LEFT JOIN pg_roles r ON r.oid = s.setrole
+		CROSS JOIN LATERAL unnest(s.setconfig) AS kv
+		ORDER BY 1 ASC, 2 ASC, 3 ASC;
+	`); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var d PgDbRoleSettingEntry
+			if err := rows.Scan(&d.DatabaseName, &d.RoleName, &d.Name, &d.Value); err != nil {
+				continue
+			}
+			report.DbRoleSettings = append(report.DbRoleSettings, d)
+		}
+	}
+
+	// 7. Installed Extensions (pg_extension)
+	if rows, err := c.db.QueryContext(queryCtx, `
+		SELECT
+			e.extname,
+			e.extversion,
+			COALESCE(n.nspname, 'public'),
+			e.extrelocatable,
+			COALESCE(obj_description(e.oid, 'pg_extension'), '')
+		FROM pg_extension e
+		LEFT JOIN pg_namespace n ON n.oid = e.extnamespace
+		ORDER BY e.extname ASC;
+	`); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var ext PgExtensionEntry
+			if err := rows.Scan(&ext.Name, &ext.Version, &ext.Schema, &ext.Relocatable, &ext.Description); err != nil {
+				continue
+			}
+			report.Extensions = append(report.Extensions, ext)
+		}
+	}
+
+	return report, nil
 }
 
 func maxInt64(a, b int64) int64 {

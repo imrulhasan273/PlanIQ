@@ -102,12 +102,28 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
   } | null>(null);
   const [bannerMsg, setBannerMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Synchronize engine filter with app engine change (e.g. from top bar)
+  // Synchronize engine filter and active editor profile with app engine change (e.g. from top bar)
   useEffect(() => {
-    if (engine) {
-      setEngineFilter(engine);
+    if (!engine) return;
+    setEngineFilter(engine);
+    if (profiles.length > 0) {
+      const defaultForEngine = profiles.find((p) => p.isDefault && getProfileEngine(p) === engine);
+      const firstForEngine = profiles.find((p) => getProfileEngine(p) === engine);
+      const chosen = defaultForEngine || firstForEngine;
+      if (chosen) {
+        setSelectedId(chosen.id);
+        setFormData({ ...chosen, engine });
+        setTestResult(null);
+      } else {
+        setSelectedId('');
+        setFormData(getEmptyProfile(engine, 0, windowsUser?.username));
+        setTestResult(null);
+      }
+    } else {
+      setSelectedId('');
+      setFormData(getEmptyProfile(engine, 0, windowsUser?.username));
     }
-  }, [engine]);
+  }, [engine, profiles]);
 
   // Load all profiles from SQLite on mount
   useEffect(() => {
@@ -743,48 +759,36 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
           </div>
 
           <div className="conn-form-scrollable">
-            {/* SECTION 0: Target Database Engine */}
+            {/* SECTION 0: Target Database Engine (Strictly matches active engine) */}
             <div className="conn-form-section conn-engine-section">
               <div className="conn-section-header">
                 <Database size={15} color="#38bdf8" />
                 <span>Target Database Engine</span>
               </div>
-              <div className="conn-engine-toggle-grid">
-                <div
-                  className={`conn-engine-card ${isPg ? 'selected pg-selected' : ''}`}
-                  onClick={() => handleSwitchFormEngine('postgresql')}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <div className="conn-engine-icon">🐘</div>
-                  <div className="conn-engine-info">
-                    <div className="conn-engine-title">PostgreSQL</div>
-                    <div className="conn-engine-desc">Port 5432 · db 'postgres' · pg_stat_activity</div>
-                  </div>
-                  {isPg && (
+              <div className="conn-engine-toggle-grid" style={{ gridTemplateColumns: '1fr' }}>
+                {isPg ? (
+                  <div className="conn-engine-card selected pg-selected">
+                    <div className="conn-engine-icon">🐘</div>
+                    <div className="conn-engine-info">
+                      <div className="conn-engine-title">PostgreSQL</div>
+                      <div className="conn-engine-desc">Port 5432 · db &apos;postgres&apos; · pg_stat_activity · EXPLAIN JSON</div>
+                    </div>
                     <span className="conn-engine-active-indicator">
-                      <Check size={14} /> Active
+                      <Check size={14} /> Active Engine
                     </span>
-                  )}
-                </div>
-
-                <div
-                  className={`conn-engine-card ${!isPg ? 'selected mssql-selected' : ''}`}
-                  onClick={() => handleSwitchFormEngine('sqlserver')}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <div className="conn-engine-icon">🗄️</div>
-                  <div className="conn-engine-info">
-                    <div className="conn-engine-title">Microsoft SQL Server</div>
-                    <div className="conn-engine-desc">Port 1433 · db 'master' · sys.dm_exec_requests</div>
                   </div>
-                  {!isPg && (
+                ) : (
+                  <div className="conn-engine-card selected mssql-selected">
+                    <div className="conn-engine-icon">🗄️</div>
+                    <div className="conn-engine-info">
+                      <div className="conn-engine-title">Microsoft SQL Server</div>
+                      <div className="conn-engine-desc">Port 1433 · db &apos;master&apos; · sys.dm_exec_requests · ShowPlan XML</div>
+                    </div>
                     <span className="conn-engine-active-indicator">
-                      <Check size={14} /> Active
+                      <Check size={14} /> Active Engine
                     </span>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
 

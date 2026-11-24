@@ -2,126 +2,154 @@ import React, { useState, useEffect } from 'react';
 import {
   Server,
   Database,
-  Shield,
   ShieldCheck,
   CheckCircle2,
   AlertCircle,
   X,
   RefreshCw,
-  Lock,
-  Cpu,
-  Zap,
-  Activity,
   HardDrive,
   ExternalLink,
-  Plus
+  Plus,
+  Zap,
 } from 'lucide-react';
 import { ConnectionConfig, ConnectionStatus, DBConnectionProfile } from '../types/livedb';
-import { ConnectLiveDB, DisconnectLiveDB, GetLiveDBStatus, GetSavedDBConnections, SaveDBConnection } from '../../wailsjs/go/main/App';
+import { ConnectLiveDB, DisconnectLiveDB, GetSavedDBConnections, SaveDBConnection } from '../../wailsjs/go/main/App';
 
 interface LiveConnectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   status: ConnectionStatus | null;
   engine?: 'sqlserver' | 'postgresql';
+  onEngineChange?: (engine: 'sqlserver' | 'postgresql') => void;
   onStatusChange: (status: ConnectionStatus | null) => void;
   defaultUsername?: string;
   onOpenConnectionsTab?: () => void;
 }
+
+const inferEngine = (
+  p: { engine?: string; port?: number; database?: string },
+  fallback: 'sqlserver' | 'postgresql'
+): 'sqlserver' | 'postgresql' => {
+  if (p.engine === 'postgresql' || p.engine === 'sqlserver') return p.engine;
+  if (p.port === 5432 || p.database?.toLowerCase() === 'postgres') return 'postgresql';
+  if (p.port === 1433) return 'sqlserver';
+  return fallback;
+};
+
+const getDefaultConfig = (targetEngine: 'sqlserver' | 'postgresql', defaultUsername?: string): ConnectionConfig => {
+  const pg = targetEngine === 'postgresql';
+  const saved = localStorage.getItem(pg ? 'planiq_live_conn_pg' : 'planiq_live_conn');
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      parsed.password = '';
+      parsed.engine = targetEngine;
+      if (defaultUsername && (!parsed.username || parsed.username === 'sa')) {
+        parsed.username = pg ? 'postgres' : defaultUsername;
+      }
+      return parsed;
+    } catch {}
+  }
+  return {
+    engine: targetEngine,
+    server: 'localhost',
+    port: pg ? 5432 : 1433,
+    database: pg ? 'postgres' : 'master',
+    authType: 'sql',
+    username: pg ? 'postgres' : (defaultUsername || 'sa'),
+    password: '',
+    encrypt: false,
+    trustServerCertificate: true,
+    applicationIntent: 'ReadOnly',
+    timeoutSeconds: 4,
+  };
+};
 
 export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
   isOpen,
   onClose,
   status,
   engine = 'sqlserver',
+  onEngineChange,
   onStatusChange,
   defaultUsername,
   onOpenConnectionsTab,
 }) => {
-  const isPg = engine === 'postgresql' || status?.serverType === 'postgresql';
+  const [modalEngine, setModalEngine] = useState<'sqlserver' | 'postgresql'>(engine);
   const [savedProfiles, setSavedProfiles] = useState<DBConnectionProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
+  const [config, setConfig] = useState<ConnectionConfig>(() => getDefaultConfig(engine, defaultUsername));
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const [config, setConfig] = useState<ConnectionConfig>(() => {
-    const saved = localStorage.getItem(isPg ? 'planiq_live_conn_pg' : 'planiq_live_conn');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        parsed.password = '';
-        if (defaultUsername && (!parsed.username || parsed.username === 'sa' || parsed.username === 'postgres')) {
-          parsed.username = defaultUsername;
-        }
-        return parsed;
-      } catch {}
-    }
-    return {
-      server: 'localhost',
-      port: isPg ? 5432 : 1433,
-      database: isPg ? 'postgres' : 'master',
-      authType: 'sql',
-      username: isPg ? 'postgres' : (defaultUsername || 'sa'),
-      password: '',
-      encrypt: false,
-      trustServerCertificate: true,
-      applicationIntent: 'ReadOnly',
-      timeoutSeconds: 4,
-    };
-  });
+  const isPg = modalEngine === 'postgresql';
+  const engineProfiles = savedProfiles.filter((p) => inferEngine(p, 'sqlserver') === modalEngine);
 
-  // When defaultUsername arrives, update username if it's currently unset or default
+  // Keep modalEngine synced with active app engine when opening, then load saved SQLite profiles
   useEffect(() => {
-    if (defaultUsername) {
-      setConfig((prev) => {
-        if (!prev.username || prev.username === 'sa') {
-          return { ...prev, username: defaultUsername };
-        }
-        return prev;
-      });
-    }
-  }, [defaultUsername]);
+    if (!isOpen) return;
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setModalEngine(engine);
+    loadSavedProfiles(engine);
+  }, [isOpen, engine]);
 
-  // Load saved profiles from SQLite when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      loadSavedProfiles();
+  const applyProfileToForm = (found: DBConnectionProfile, silent: boolean = false) => {
+    const profEngine = inferEngine(found, modalEngine);
+    setModalEngine(profEngine);
+    setSelectedProfileId(found.id);
+    setConfig({
+      engine: profEngine,
+      server: found.server,
+      port: Number(found.port) || (profEngine === 'postgresql' ? 5432 : 1433),
+      database: found.database,
+      authType: (profEngine === 'postgresql' && found.authType === 'windows' ? 'sql' : found.authType) as any,
+      username: found.username || '',
+      password: found.password || '',
+      encrypt: !!found.encrypt,
+      trustServerCertificate: found.trustServerCertificate ?? true,
+      applicationIntent: found.applicationIntent || 'ReadOnly',
+      timeoutSeconds: Number(found.timeoutSeconds) || 4,
+    });
+    if (!silent) {
+      setErrorMsg(null);
+      setSuccessMsg(`Loaded "${found.name}" (${profEngine === 'postgresql' ? 'PostgreSQL' : 'SQL Server'})`);
+      setTimeout(() => setSuccessMsg(null), 3000);
     }
-  }, [isOpen]);
+  };
 
-  const loadSavedProfiles = async () => {
+  const loadSavedProfiles = async (targetEngine: 'sqlserver' | 'postgresql' = modalEngine) => {
     try {
       if (typeof window !== 'undefined' && (window as any).go?.main?.App?.GetSavedDBConnections) {
         const list = await GetSavedDBConnections();
         if (Array.isArray(list)) {
           setSavedProfiles(list);
+          // Auto-select default or first profile matching the active engine so its encrypted password & port are loaded immediately
+          if (list.length > 0) {
+            const matchDefault = list.find((p) => p.isDefault && inferEngine(p, 'sqlserver') === targetEngine);
+            const matchFirst = list.find((p) => inferEngine(p, 'sqlserver') === targetEngine);
+            const chosen = matchDefault || matchFirst;
+            if (chosen) {
+              applyProfileToForm(chosen, true);
+              return;
+            }
+          }
         }
       }
     } catch (err) {
       console.warn('Failed to load saved DB connections:', err);
     }
+    setSelectedProfileId('');
+    setConfig(getDefaultConfig(targetEngine, defaultUsername));
   };
 
   const handleSelectSavedProfile = (id: string) => {
     setSelectedProfileId(id);
+    if (!id) return;
     const found = savedProfiles.find((p) => p.id === id);
     if (found) {
-      const profEngine =
-        found.engine === 'postgresql' || found.port === 5432 || found.database?.toLowerCase() === 'postgres'
-          ? 'postgresql'
-          : 'sqlserver';
-      setConfig({
-        server: found.server,
-        port: found.port || (profEngine === 'postgresql' ? 5432 : 1433),
-        database: found.database,
-        authType: found.authType as any,
-        username: found.username || '',
-        password: found.password || '',
-        encrypt: found.encrypt,
-        trustServerCertificate: found.trustServerCertificate,
-        applicationIntent: found.applicationIntent || 'ReadOnly',
-        timeoutSeconds: found.timeoutSeconds || 4,
-      });
-      setSuccessMsg(`Loaded "${found.name}" profile settings`);
-      setTimeout(() => setSuccessMsg(null), 3000);
+      applyProfileToForm(found, false);
     }
   };
 
@@ -129,11 +157,12 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
     try {
       const name = prompt('Enter a profile name for SQLite storage:', `${config.server} (${config.database})`);
       if (!name) return;
+      const targetEngine = inferEngine(config, modalEngine);
       await SaveDBConnection({
         id: '',
         name,
         server: config.server,
-        port: config.port,
+        port: Number(config.port) || (targetEngine === 'postgresql' ? 5432 : 1433),
         database: config.database,
         authType: config.authType,
         username: config.username || '',
@@ -141,29 +170,26 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
         encrypt: config.encrypt ?? false,
         trustServerCertificate: config.trustServerCertificate ?? true,
         applicationIntent: config.applicationIntent || 'ReadOnly',
-        timeoutSeconds: config.timeoutSeconds || 4,
+        timeoutSeconds: Number(config.timeoutSeconds) || 4,
         isDefault: false,
-        engine: isPg ? 'postgresql' : 'sqlserver',
+        engine: targetEngine,
         createdAt: '',
         updatedAt: '',
       } as any);
       setSuccessMsg(`Saved profile "${name}" to SQLite!`);
-      loadSavedProfiles();
+      loadSavedProfiles(targetEngine);
     } catch (err: any) {
       setErrorMsg(`Save failed: ${err?.message || err}`);
     }
   };
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-
   if (!isOpen) return null;
 
   const handleSaveConfig = (cfg: ConnectionConfig) => {
     setConfig(cfg);
-    const key = isPg ? 'planiq_live_conn_pg' : 'planiq_live_conn';
-    localStorage.setItem(key, JSON.stringify({ ...cfg, password: '' }));
+    const targetEngine = inferEngine(cfg, modalEngine);
+    const key = targetEngine === 'postgresql' ? 'planiq_live_conn_pg' : 'planiq_live_conn';
+    localStorage.setItem(key, JSON.stringify({ ...cfg, engine: targetEngine, password: '' }));
   };
 
   const handleConnect = async () => {
@@ -171,23 +197,35 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
 
+    const targetEngine = inferEngine(config, modalEngine);
+    const payload: ConnectionConfig = {
+      ...config,
+      engine: targetEngine,
+      port: Number(config.port) || (targetEngine === 'postgresql' ? 5432 : 1433),
+      timeoutSeconds: Number(config.timeoutSeconds) || 4,
+    };
+
     try {
       if (typeof window !== 'undefined' && (window as any).go?.main?.App?.ConnectLiveDB) {
-        const res = await ConnectLiveDB({
-          ...config,
-          engine: isPg ? 'postgresql' : 'sqlserver',
-        } as any);
-        onStatusChange(res);
-        setSuccessMsg(`Successfully connected to ${res.serverName} (${res.databaseName})`);
-        handleSaveConfig(config);
-        setTimeout(() => {
-          onClose();
-        }, 800);
+        const res = await ConnectLiveDB(payload as any);
+        if (res && res.connected) {
+          if (onEngineChange && targetEngine !== engine) {
+            onEngineChange(targetEngine);
+          }
+          onStatusChange(res);
+          setSuccessMsg(`Successfully connected to ${res.serverName} (${res.databaseName})`);
+          handleSaveConfig(payload);
+          setTimeout(() => {
+            onClose();
+          }, 700);
+        } else {
+          setErrorMsg(res?.errorMessage || (targetEngine === 'postgresql' ? 'Failed to connect to PostgreSQL' : 'Failed to connect to SQL Server'));
+        }
       } else {
         setErrorMsg('Live database connection requires running PlanIQ as a desktop application.');
       }
     } catch (err: any) {
-      setErrorMsg(err?.message || (isPg ? 'Failed to connect to PostgreSQL' : 'Failed to connect to SQL Server'));
+      setErrorMsg(err?.message || (targetEngine === 'postgresql' ? 'Failed to connect to PostgreSQL' : 'Failed to connect to SQL Server'));
     } finally {
       setIsLoading(false);
     }
@@ -238,8 +276,8 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
               </h2>
               <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>
                 {isPg
-                  ? 'Live pg_stat_activity, pg_stat_statements, pg_locks & Wait Events'
-                  : 'Live In-Flight Plans, Query Store Harvesting & Real-Time Deadlocks'}
+                  ? 'Live pg_stat_activity, pg_stat_statements, pg_locks & PG Configs'
+                  : 'Live In-Flight Plans, Query Store Harvesting, Deadlocks & Configs'}
               </p>
             </div>
           </div>
@@ -254,7 +292,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
         </div>
 
         {/* Body */}
-        <div className="modal-body" style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div className="modal-body" style={{ padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {/* Active status banner if connected */}
           {status && status.connected ? (
             <div
@@ -262,7 +300,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                 background: 'rgba(52, 211, 153, 0.1)',
                 border: '1px solid rgba(52, 211, 153, 0.3)',
                 borderRadius: '8px',
-                padding: '12px 16px',
+                padding: '10px 14px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -272,7 +310,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                 <CheckCircle2 size={18} color="#34d399" />
                 <div>
                   <div style={{ fontSize: '13px', fontWeight: 600, color: '#34d399' }}>
-                    Connected to {status.serverName}
+                    Connected to {status.serverName} ({status.serverType === 'postgresql' ? 'PostgreSQL' : 'SQL Server'})
                   </div>
                   <div style={{ fontSize: '11px', color: '#94a3b8' }}>
                     Database: <strong style={{ color: '#cbd5e1' }}>{status.databaseName}</strong> • Latency: {status.latencyMs}ms
@@ -291,7 +329,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
             </div>
           ) : null}
 
-          {/* SQLite Saved Connection Dropdown */}
+          {/* SQLite Saved Connection Dropdown (Filtered to Selected Engine) */}
           <div
             style={{
               background: 'rgba(15, 23, 42, 0.75)',
@@ -307,7 +345,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <HardDrive size={13} color="#34d399" />
                 <span style={{ fontSize: '12px', fontWeight: 600, color: '#f8fafc' }}>
-                  Load Saved SQLite Profile
+                  Load Saved {isPg ? 'PostgreSQL' : 'SQL Server'} Profile
                 </span>
                 <span
                   style={{
@@ -319,7 +357,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                     color: '#34d399',
                   }}
                 >
-                  {savedProfiles.length} Saved
+                  {engineProfiles.length} Saved
                 </span>
               </div>
               {onOpenConnectionsTab && (
@@ -366,11 +404,13 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                   overflow: 'hidden',
                 }}
               >
-                {savedProfiles.map((p) => {
-                  const profEngine =
-                    p.engine === 'postgresql' || p.port === 5432 || p.database?.toLowerCase() === 'postgres'
-                      ? 'postgresql'
-                      : 'sqlserver';
+                <option value="">
+                  {engineProfiles.length === 0
+                    ? `-- No saved ${isPg ? 'PostgreSQL' : 'SQL Server'} profiles --`
+                    : `-- Select a saved ${isPg ? 'PostgreSQL' : 'SQL Server'} profile --`}
+                </option>
+                {engineProfiles.map((p) => {
+                  const profEngine = inferEngine(p, modalEngine);
                   return (
                     <option key={p.id} value={p.id}>
                       {profEngine === 'postgresql' ? '🐘 ' : '🗄️ '} {p.name} ({p.server}:{p.port || (profEngine === 'postgresql' ? 5432 : 1433)} / {p.database}) {p.isDefault ? '★' : ''}
@@ -391,8 +431,6 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
               </button>
             </div>
           </div>
-
-
 
           {/* Connection Form */}
           <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr', gap: '12px' }}>
@@ -415,9 +453,12 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
               <input
                 type="number"
                 className="form-input"
-                placeholder={isPg ? "5432" : "1433"}
+                placeholder={isPg ? '5432' : '1433'}
                 value={config.port}
-                onChange={(e) => handleSaveConfig({ ...config, port: parseInt(e.target.value) || (isPg ? 5432 : 1433) })}
+                onChange={(e) => {
+                  const nextPort = parseInt(e.target.value, 10) || (isPg ? 5432 : 1433);
+                  handleSaveConfig({ ...config, port: nextPort });
+                }}
               />
             </div>
           </div>
@@ -429,7 +470,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
             <input
               type="text"
               className="form-input"
-              placeholder={isPg ? "postgres, production_db" : "e.g. SalesDB, AdventureWorks"}
+              placeholder={isPg ? 'postgres, production_db' : 'e.g. SalesDB, master'}
               value={config.database}
               onChange={(e) => handleSaveConfig({ ...config, database: e.target.value })}
             />
@@ -450,15 +491,17 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                 />
                 {isPg ? 'Password (MD5 / SCRAM-SHA-256)' : 'SQL Authentication'}
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#e2e8f0', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="authType"
-                  checked={config.authType === 'windows'}
-                  onChange={() => handleSaveConfig({ ...config, authType: 'windows' })}
-                />
-                {isPg ? 'Local / OS Peer' : 'Windows / Integrated'}
-              </label>
+              {!isPg && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#e2e8f0', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="authType"
+                    checked={config.authType === 'windows'}
+                    onChange={() => handleSaveConfig({ ...config, authType: 'windows' })}
+                  />
+                  Windows / Integrated
+                </label>
+              )}
             </div>
           </div>
 
@@ -471,7 +514,7 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
                 <input
                   type="text"
                   className="form-input"
-                  placeholder={isPg ? "postgres" : "sa"}
+                  placeholder={isPg ? 'postgres' : 'sa'}
                   value={config.username || ''}
                   onChange={(e) => handleSaveConfig({ ...config, username: e.target.value })}
                 />
@@ -490,6 +533,26 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* SSL / Encryption toggle so local & TLS servers both connect cleanly */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: '#cbd5e1', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={!!config.encrypt}
+                onChange={(e) => handleSaveConfig({ ...config, encrypt: e.target.checked })}
+              />
+              <span>{isPg ? 'Require SSL/TLS' : 'Encrypt Connection (TLS)'}</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: '#cbd5e1', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={config.trustServerCertificate ?? true}
+                onChange={(e) => handleSaveConfig({ ...config, trustServerCertificate: e.target.checked })}
+              />
+              <span>Trust Server Certificate</span>
+            </label>
+          </div>
 
           {/* Strict Read-Only & Zero-Lock Enforcement Note */}
           <div

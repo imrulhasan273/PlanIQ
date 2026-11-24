@@ -33,7 +33,8 @@ import {
   HelpCircle,
   Sliders,
   Download,
-  Clock
+  Clock,
+  EyeOff
 } from 'lucide-react';
 import { PlanAnalysis, StatementAnalysis, PlanNode } from '../types/plan';
 import { DiagnosticTooltip } from './DiagnosticTooltip';
@@ -48,6 +49,9 @@ interface PlanVisualizerTabProps {
   plan: PlanAnalysis;
   selectedStatement: StatementAnalysis;
   onSelectStatement: (stmt: StatementAnalysis) => void;
+  onExportRawPlan?: () => void;
+  onExportAnonymizedPlan?: () => void;
+  onAnonymizeInPlace?: () => void;
 }
 
 // Standard SQL Server Operator Plain-English Explanations (Matching SSMS Tooltip Header)
@@ -2198,6 +2202,9 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
   plan,
   selectedStatement,
   onSelectStatement,
+  onExportRawPlan,
+  onExportAnonymizedPlan,
+  onAnonymizeInPlace,
 }) => {
   const [selectedNode, setSelectedNode] = useState<PlanNode | null>(
     selectedStatement.rootNode || null
@@ -2582,6 +2589,37 @@ export const PlanVisualizerTab: React.FC<PlanVisualizerTabProps> = ({
             <Download size={13} />
             <span>HTML Report</span>
           </button>
+          {onExportRawPlan && (
+            <button
+              className="btn-copy-sm"
+              title={plan?.engine === 'postgresql' || !!selectedStatement.pg ? 'Export full PostgreSQL EXPLAIN JSON (.json)' : 'Export full SQL Server ShowPlan XML (.sqlplan)'}
+              onClick={onExportRawPlan}
+            >
+              <Download size={13} color="#38bdf8" />
+              <span>{plan?.engine === 'postgresql' || !!selectedStatement.pg ? 'Export .json' : 'Export .sqlplan'}</span>
+            </button>
+          )}
+          {onExportAnonymizedPlan && (
+            <button
+              className="btn-copy-sm"
+              title="Anonymize table/column/index identifiers and mask parameter/string literals, then download"
+              onClick={onExportAnonymizedPlan}
+              style={{ borderColor: 'rgba(245, 158, 11, 0.4)', color: '#fbbf24' }}
+            >
+              <EyeOff size={13} color="#fbbf24" />
+              <span>Export Anonymized</span>
+            </button>
+          )}
+          {onAnonymizeInPlace && (
+            <button
+              className="btn-copy-sm"
+              title="Mask sensitive object names and literals directly in the visualizer"
+              onClick={onAnonymizeInPlace}
+            >
+              <EyeOff size={13} color="#a78bfa" />
+              <span>Mask View</span>
+            </button>
+          )}
         </div>
       )}
 
