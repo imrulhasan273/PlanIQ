@@ -5,7 +5,8 @@ dist
 frontend/dist
 frontend/.test-dist
 frontend/package.json.md5
-
+# Documentation with confidential server configs
+docs/
 # Dependencies
 node_modules
 frontend/node_modules
