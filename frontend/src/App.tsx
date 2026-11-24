@@ -129,21 +129,23 @@ export function App() {
     return saved !== null ? saved === 'dark' : true;
   });
 
-  // Load authoritative theme preference from SQLite DB on startup
+  // Load authoritative theme preference from SQLite DB on startup (desktop mode)
   useEffect(() => {
-    GetAppTheme()
-      .then((theme) => {
-        if (theme === 'light') {
-          setIsDark(false);
-          localStorage.setItem('planiq_theme', 'light');
-        } else if (theme === 'dark') {
-          setIsDark(true);
-          localStorage.setItem('planiq_theme', 'dark');
-        }
-      })
-      .catch((err) => {
-        console.warn('Failed to load theme from SQLite config DB:', err);
-      });
+    if (typeof window !== 'undefined' && (window as any).go?.main?.App?.GetAppTheme) {
+      GetAppTheme()
+        .then((theme) => {
+          if (theme === 'light') {
+            setIsDark(false);
+            localStorage.setItem('planiq_theme', 'light');
+          } else if (theme === 'dark') {
+            setIsDark(true);
+            localStorage.setItem('planiq_theme', 'dark');
+          }
+        })
+        .catch((err) => {
+          console.warn('Failed to load theme from SQLite config DB:', err);
+        });
+    }
   }, []);
 
   const handleToggleTheme = () => {
@@ -151,10 +153,12 @@ export function App() {
       const next = !prev;
       const themeStr = next ? 'dark' : 'light';
       localStorage.setItem('planiq_theme', themeStr);
-      // Persist to SQLite DB so reopening the app preserves the theme
-      SetAppTheme(themeStr).catch((err) => {
-        console.warn('Failed to save theme to SQLite config DB:', err);
-      });
+      // Persist to SQLite DB so reopening the app preserves the theme (desktop mode)
+      if (typeof window !== 'undefined' && (window as any).go?.main?.App?.SetAppTheme) {
+        SetAppTheme(themeStr).catch((err) => {
+          console.warn('Failed to save theme to SQLite config DB:', err);
+        });
+      }
       return next;
     });
   };
