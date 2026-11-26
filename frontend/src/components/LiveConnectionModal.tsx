@@ -111,6 +111,8 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
       trustServerCertificate: found.trustServerCertificate ?? true,
       applicationIntent: found.applicationIntent || 'ReadOnly',
       timeoutSeconds: Number(found.timeoutSeconds) || 4,
+      allowRbacWrite: Boolean(found.allowRbacWrite),
+      allowBackupRestore: Boolean(found.allowBackupRestore),
     });
     if (!silent) {
       setErrorMsg(null);
@@ -173,6 +175,8 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
         timeoutSeconds: Number(config.timeoutSeconds) || 4,
         isDefault: false,
         engine: targetEngine,
+        allowRbacWrite: Boolean(config.allowRbacWrite),
+        allowBackupRestore: Boolean(config.allowBackupRestore),
         createdAt: '',
         updatedAt: '',
       } as any);
@@ -552,6 +556,32 @@ export const LiveConnectionModal: React.FC<LiveConnectionModalProps> = ({
               />
               <span>Trust Server Certificate</span>
             </label>
+            {isPg && (
+              <>
+                <label
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: '#cbd5e1', cursor: 'pointer' }}
+                  title="Allow executing confirmed DDL in Security & RBAC Studio while keeping Live Radar Read-Only"
+                >
+                  <input
+                    type="checkbox"
+                    checked={Boolean(config.allowRbacWrite)}
+                    onChange={(e) => handleSaveConfig({ ...config, allowRbacWrite: e.target.checked })}
+                  />
+                  <span>Write for RBAC</span>
+                </label>
+                <label
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: '#cbd5e1', cursor: 'pointer' }}
+                  title="Enable PostgreSQL Backup & Restore Studio tab for this connection"
+                >
+                  <input
+                    type="checkbox"
+                    checked={Boolean(config.allowBackupRestore)}
+                    onChange={(e) => handleSaveConfig({ ...config, allowBackupRestore: e.target.checked })}
+                  />
+                  <span>Backup &amp; Restore</span>
+                </label>
+              </>
+            )}
           </div>
 
           {/* Strict Read-Only & Zero-Lock Enforcement Note */}

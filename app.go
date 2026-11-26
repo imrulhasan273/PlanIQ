@@ -4,14 +4,17 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
+	sysruntime "runtime"
 	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"github.com/imrulhasan273/PlanIQ/pkg/advisor"
 	"github.com/imrulhasan273/PlanIQ/pkg/configdb"
 	"github.com/imrulhasan273/PlanIQ/pkg/livedb"
+	"github.com/imrulhasan273/PlanIQ/pkg/pgbackup"
 	"github.com/imrulhasan273/PlanIQ/pkg/sqlplan"
 )
 
@@ -490,6 +493,755 @@ type WindowsUserInfo struct {
 	Domain      string `json:"domain"`
 	FullAccount string `json:"fullAccount"`
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PostgreSQL Security & RBAC Studio — IPC Methods
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GetPgRbacOverview returns all roles, FDWs, and foreign servers for the RBAC Studio overview.
+func (a *App) GetPgRbacOverview() (*livedb.PgRbacOverview, error) {
+	client := livedb.GetClient()
+	return client.PgGetRbacOverview(a.ctx)
+}
+
+// GetPgTablePrivilegesForRole returns table/view-level grants for a role.
+func (a *App) GetPgTablePrivilegesForRole(roleName string) ([]livedb.PgObjectPrivilege, error) {
+	client := livedb.GetClient()
+	return client.PgGetTablePrivilegesForRole(a.ctx, roleName)
+}
+
+// GetPgSchemaPrivilegesForRole returns schema-level ACL entries for a role.
+func (a *App) GetPgSchemaPrivilegesForRole(roleName string) ([]livedb.PgSchemaPrivilege, error) {
+	client := livedb.GetClient()
+	return client.PgGetSchemaPrivilegesForRole(a.ctx, roleName)
+}
+
+// GetPgDatabasePrivilegesForRole returns database-level ACL entries for a role.
+func (a *App) GetPgDatabasePrivilegesForRole(roleName string) ([]livedb.PgDatabasePrivilege, error) {
+	client := livedb.GetClient()
+	return client.PgGetDatabasePrivilegesForRole(a.ctx, roleName)
+}
+
+// GetPgColumnPrivileges returns column-level grants for a role + optional schema/table filter.
+func (a *App) GetPgColumnPrivileges(roleName, schema, table string) ([]livedb.PgColumnPrivilege, error) {
+	client := livedb.GetClient()
+	return client.PgGetColumnPrivileges(a.ctx, roleName, schema, table)
+}
+
+// GetPgTableColumns returns all column names of a table/view in ordinal order.
+func (a *App) GetPgTableColumns(schema, table string) ([]string, error) {
+	client := livedb.GetClient()
+	return client.PgGetTableColumns(a.ctx, schema, table)
+}
+
+// GetPgSequencePrivilegesForRole returns sequence-level grants for a role.
+func (a *App) GetPgSequencePrivilegesForRole(roleName string) ([]livedb.PgObjectPrivilege, error) {
+	client := livedb.GetClient()
+	return client.PgGetSequencePrivilegesForRole(a.ctx, roleName)
+}
+
+// GetPgFunctionPrivilegesForRole returns function/procedure EXECUTE grants for a role.
+func (a *App) GetPgFunctionPrivilegesForRole(roleName string) ([]livedb.PgObjectPrivilege, error) {
+	client := livedb.GetClient()
+	return client.PgGetFunctionPrivilegesForRole(a.ctx, roleName)
+}
+
+// GetPgDefaultPrivileges returns all ALTER DEFAULT PRIVILEGES rules.
+func (a *App) GetPgDefaultPrivileges() ([]livedb.PgDefaultPrivilege, error) {
+	client := livedb.GetClient()
+	return client.PgGetDefaultPrivileges(a.ctx)
+}
+
+// GetPgRLSPolicies returns all RLS policies in the connected database.
+func (a *App) GetPgRLSPolicies() ([]livedb.PgRLSPolicy, error) {
+	client := livedb.GetClient()
+	return client.PgGetRLSPolicies(a.ctx)
+}
+
+// GetPgRLSTableStatuses returns RLS enabled/force status for all tables.
+func (a *App) GetPgRLSTableStatuses() ([]livedb.PgRLSTableStatus, error) {
+	client := livedb.GetClient()
+	return client.PgGetRLSTableStatuses(a.ctx)
+}
+
+// GetPgForeignDataWrappers returns all FDW definitions.
+func (a *App) GetPgForeignDataWrappers() ([]livedb.PgForeignDataWrapper, error) {
+	client := livedb.GetClient()
+	return client.PgGetForeignDataWrappers(a.ctx)
+}
+
+// GetPgForeignServers returns all foreign server definitions.
+func (a *App) GetPgForeignServers() ([]livedb.PgForeignServer, error) {
+	client := livedb.GetClient()
+	return client.PgGetForeignServers(a.ctx)
+}
+
+// GetPgUserMappings returns user mappings for a foreign server (passwords redacted).
+// Pass empty serverName to get all mappings.
+func (a *App) GetPgUserMappings(serverName string) ([]livedb.PgUserMapping, error) {
+	client := livedb.GetClient()
+	return client.PgGetUserMappings(a.ctx, serverName)
+}
+
+// GetPgRoleParamSettings returns per-role configuration overrides.
+// Pass empty roleName to get all settings.
+func (a *App) GetPgRoleParamSettings(roleName string) ([]livedb.PgRoleParamSetting, error) {
+	client := livedb.GetClient()
+	return client.PgGetRoleParamSettings(a.ctx, roleName)
+}
+
+// RunPgSecurityAudit executes all security checks and returns findings.
+func (a *App) RunPgSecurityAudit() ([]livedb.SecurityAuditFinding, error) {
+	client := livedb.GetClient()
+	return client.PgRunSecurityAudit(a.ctx)
+}
+
+// ExecutePgRbacScript runs a DDL script in a transaction on the connected database.
+func (a *App) ExecutePgRbacScript(ddl string) error {
+	client := livedb.GetClient()
+	return client.PgExecuteRbacScript(a.ctx, ddl)
+}
+
+// RunPgImpersonatedQuery runs a SQL query with SET ROLE applied (sandbox mode).
+func (a *App) RunPgImpersonatedQuery(roleName, query string) (*livedb.PgQueryResult, error) {
+	client := livedb.GetClient()
+	return client.PgRunImpersonatedQuery(a.ctx, roleName, query)
+}
+
+// RunPgImpersonatedQueryInDB runs an impersonated SQL query against a specific database.
+func (a *App) RunPgImpersonatedQueryInDB(roleName, dbName, query string) (*livedb.PgQueryResult, error) {
+	client := livedb.GetClient()
+	return client.PgRunImpersonatedQueryInDB(a.ctx, roleName, dbName, query)
+}
+
+// ─── PostgreSQL Backup & Restore Studio IPCs ──────────────────────────────────
+
+func (a *App) requirePgBackupContext() (livedb.ConnectionConfig, livedb.ConnectionStatus, string, int, error) {
+	client := livedb.GetClient()
+	cfg, ok := client.GetActiveConfig()
+	status := client.GetStatus()
+	if !ok || !status.Connected {
+		return cfg, status, "", 0, fmt.Errorf("not connected to a PostgreSQL server")
+	}
+	if cfg.Engine != "postgresql" && status.ServerType != "postgresql" {
+		return cfg, status, "", 0, fmt.Errorf("Backup & Restore Studio is only available for PostgreSQL connections")
+	}
+	if !cfg.AllowBackupRestore {
+		return cfg, status, "", 0, fmt.Errorf("Backup & Restore is not enabled for this connection. Check 'Backup & Restore' in connection settings.")
+	}
+	customBinDir := ""
+	if store, err := configdb.GetDB(); err == nil {
+		if dir, dErr := store.GetBackupBinDir(); dErr == nil {
+			customBinDir = dir
+		}
+	}
+	return cfg, status, customBinDir, 0, nil
+}
+
+func (a *App) detectPgToolchainWithCatalog(database string) (livedb.ConnectionConfig, pgbackup.ToolchainInfo, *pgbackup.BackupCatalog, error) {
+	cfg, status, customBinDir, _, err := a.requirePgBackupContext()
+	if err != nil {
+		return cfg, pgbackup.ToolchainInfo{}, nil, err
+	}
+	catalog, catErr := pgbackup.FetchBackupCatalog(a.ctx, cfg, database)
+	verNum := 0
+	verRaw := status.ServerVersion
+	if catErr == nil && catalog != nil {
+		verNum = catalog.ServerVersionNum
+		if catalog.ServerVersion != "" {
+			verRaw = catalog.ServerVersion
+		}
+	}
+	tools := pgbackup.DetectToolchain(customBinDir, verNum, verRaw)
+	return cfg, tools, catalog, nil
+}
+
+// GetPgBackupToolchain returns detected PostgreSQL CLI tools and version compatibility metadata.
+func (a *App) GetPgBackupToolchain() (*pgbackup.ToolchainInfo, error) {
+	_, tools, _, err := a.detectPgToolchainWithCatalog("")
+	if err != nil {
+		return nil, err
+	}
+	return &tools, nil
+}
+
+// SelectPgBackupBinDir opens a native folder picker for a custom PostgreSQL bin/ directory and persists it.
+func (a *App) SelectPgBackupBinDir() (*pgbackup.ToolchainInfo, error) {
+	_, status, currentDir, _, err := a.requirePgBackupContext()
+	if err != nil {
+		return nil, err
+	}
+	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:            "Select PostgreSQL bin/ folder (containing pg_dump, pg_restore, pg_basebackup)",
+		DefaultDirectory: currentDir,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if dir == "" {
+		tools := pgbackup.DetectToolchain(currentDir, 0, status.ServerVersion)
+		return &tools, nil
+	}
+	if store, sErr := configdb.GetDB(); sErr == nil {
+		_ = store.SetBackupBinDir(dir)
+	}
+	tools := pgbackup.DetectToolchain(dir, 0, status.ServerVersion)
+	return &tools, nil
+}
+
+// GetPgBackupCatalog returns databases, tablespaces, schemas, tables, and extensions for Backup & Restore Studio.
+func (a *App) GetPgBackupCatalog(database string) (*pgbackup.BackupCatalog, error) {
+	cfg, _, _, _, err := a.requirePgBackupContext()
+	if err != nil {
+		return nil, err
+	}
+	return pgbackup.FetchBackupCatalog(a.ctx, cfg, database)
+}
+
+// PickPgBackupOutputPath opens a save-file or directory dialog for the chosen backup format.
+func (a *App) PickPgBackupOutputPath(format string, defaultName string) (string, error) {
+	f := strings.ToLower(strings.TrimSpace(format))
+	if f == "directory" || f == "multi_db" || f == "basebackup" || f == "incremental" || f == "combine" || f == "dir" {
+		return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+			Title: "Select Output Directory for Backup",
+		})
+	}
+	ext := ".dump"
+	display := "PostgreSQL Custom Archive (*.dump)"
+	switch f {
+	case "tar":
+		ext = ".tar"
+		display = "PostgreSQL Tar Archive (*.tar)"
+	case "plain", "sql":
+		ext = ".sql"
+		display = "Plain SQL Script (*.sql)"
+	}
+	if defaultName == "" {
+		defaultName = "backup" + ext
+	}
+	return runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Select Backup Output File",
+		DefaultFilename: defaultName,
+		Filters: []runtime.FileFilter{
+			{DisplayName: display, Pattern: "*" + ext},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
+}
+
+// PickPgRestoreSource opens a file or directory dialog for selecting a backup to inspect or restore.
+func (a *App) PickPgRestoreSource(isDir bool) (string, error) {
+	if isDir {
+		return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+			Title: "Select PostgreSQL Directory Backup, Physical Backup, or Multi-DB Folder",
+		})
+	}
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select PostgreSQL Backup File (.dump, .tar, .sql, manifest, backup_manifest)",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "PostgreSQL Backups (*.dump;*.backup;*.tar;*.sql;*.json)", Pattern: "*.dump;*.backup;*.tar;*.sql;*.json"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
+}
+
+func (a *App) emitBackupEvents() (func(pgbackup.BackupLogEvent), func(pgbackup.BackupStatusEvent), func(pgbackup.BackupProgressEvent)) {
+	onLog := func(ev pgbackup.BackupLogEvent) {
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "pg-backup:log", ev)
+		}
+	}
+	onStatus := func(ev pgbackup.BackupStatusEvent) {
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "pg-backup:status", ev)
+		}
+	}
+	onProgress := func(ev pgbackup.BackupProgressEvent) {
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "pg-backup:progress", ev)
+		}
+	}
+	return onLog, onStatus, onProgress
+}
+
+func estimateLogicalBackupBytes(catalog *pgbackup.BackupCatalog, req pgbackup.LogicalBackupRequest) int64 {
+	if catalog == nil {
+		return 0
+	}
+	switch req.Mode {
+	case "multi_db":
+		set := make(map[string]bool)
+		for _, d := range req.Databases {
+			set[d] = true
+		}
+		var sum int64
+		for _, d := range catalog.Databases {
+			if set[d.Name] {
+				sum += d.SizeBytes
+			}
+		}
+		return sum
+	case "table":
+		set := make(map[string]bool)
+		for _, t := range req.Tables {
+			set[t] = true
+		}
+		var sum int64
+		for _, t := range catalog.Tables {
+			if set[t.Schema+"."+t.Name] {
+				sum += t.SizeBytes
+			}
+		}
+		return sum
+	case "cluster_full":
+		var sum int64
+		for _, d := range catalog.Databases {
+			sum += d.SizeBytes
+		}
+		return sum
+	default:
+		for _, d := range catalog.Databases {
+			if d.Name == req.Database {
+				return d.SizeBytes
+			}
+		}
+		return 0
+	}
+}
+
+// PreviewPgLogicalBackup builds the CLI preview for logical backups without running anything.
+func (a *App) PreviewPgLogicalBackup(req pgbackup.LogicalBackupRequest) (*pgbackup.BackupCommandPreview, error) {
+	cfg, tools, catalog, err := a.detectPgToolchainWithCatalog(req.Database)
+	if err != nil {
+		return nil, err
+	}
+	_, _, preview, bErr := pgbackup.BuildLogicalBackupPlan(cfg, tools, catalog, req)
+	if bErr != nil {
+		return &preview, bErr
+	}
+	return &preview, nil
+}
+
+// StartPgLogicalBackup starts a background pg_dump / pg_dumpall / multi-DB backup job.
+func (a *App) StartPgLogicalBackup(req pgbackup.LogicalBackupRequest) (string, error) {
+	if strings.TrimSpace(req.OutputPath) == "" {
+		return "", fmt.Errorf("please choose an output path before starting the backup")
+	}
+	cfg, tools, catalog, err := a.detectPgToolchainWithCatalog(req.Database)
+	if err != nil {
+		return "", err
+	}
+	var tempFiles []string
+	filterPath := ""
+	if len(req.FilterRules) > 0 {
+		fp, fErr := pgbackup.WriteFilterFile(req.FilterRules)
+		if fErr != nil {
+			return "", fmt.Errorf("failed to write filter file: %w", fErr)
+		}
+		if fp != "" {
+			filterPath = fp
+			tempFiles = append(tempFiles, fp)
+		}
+	}
+	cmds, manifest, preview, bErr := pgbackup.BuildLogicalBackupPlan(cfg, tools, catalog, req, filterPath)
+	if bErr != nil {
+		for _, tf := range tempFiles {
+			_ = os.Remove(tf)
+		}
+		return "", bErr
+	}
+	dbLabel := req.Database
+	if req.Mode == "multi_db" {
+		dbLabel = fmt.Sprintf("%d databases", len(req.Databases))
+	} else if strings.HasPrefix(req.Mode, "cluster_") {
+		dbLabel = "cluster"
+	}
+	jobMeta := configdb.PgBackupJobRecord{
+		Engine:         "postgresql",
+		Server:         cfg.Server,
+		DatabaseName:   dbLabel,
+		Operation:      "backup",
+		Mode:           req.Mode,
+		Format:         req.Format,
+		OutputPath:     req.OutputPath,
+		CommandPreview: preview.DisplayCommand,
+	}
+	onLog, onStatus, onProgress := a.emitBackupEvents()
+	manifestDir := ""
+	if manifest != nil {
+		manifestDir = req.OutputPath
+	}
+	estBytes := estimateLogicalBackupBytes(catalog, req)
+	return pgbackup.GetRunner().StartWithProgress(
+		a.ctx, jobMeta, cmds, pgbackup.BuildChildEnv(cfg), manifest, manifestDir, tempFiles,
+		estBytes, req.GenerateChecksum, onLog, onStatus, onProgress,
+	)
+}
+
+// PreviewPgPhysicalBackup builds the CLI preview for pg_basebackup / pg_combinebackup / pg_verifybackup.
+func (a *App) PreviewPgPhysicalBackup(req pgbackup.PhysicalBackupRequest) (*pgbackup.BackupCommandPreview, error) {
+	cfg, tools, _, err := a.detectPgToolchainWithCatalog("")
+	if err != nil {
+		return nil, err
+	}
+	_, preview, bErr := pgbackup.BuildPhysicalBackupPlan(cfg, tools, req)
+	if bErr != nil {
+		return &preview, bErr
+	}
+	return &preview, nil
+}
+
+// StartPgPhysicalBackup starts a background physical backup, incremental, combine, or verify job.
+func (a *App) StartPgPhysicalBackup(req pgbackup.PhysicalBackupRequest) (string, error) {
+	targetOut := req.OutputDir
+	if req.Operation == "verify" {
+		targetOut = req.VerifyBackupDir
+	}
+	if strings.TrimSpace(targetOut) == "" {
+		return "", fmt.Errorf("please select a target directory before starting")
+	}
+	cfg, tools, catalog, err := a.detectPgToolchainWithCatalog("")
+	if err != nil {
+		return "", err
+	}
+	cmds, preview, bErr := pgbackup.BuildPhysicalBackupPlan(cfg, tools, req)
+	if bErr != nil {
+		return "", bErr
+	}
+	op := "backup"
+	if req.Operation == "verify" {
+		op = "verify"
+	} else if req.Operation == "combine" {
+		op = "combine"
+	}
+	var estCluster int64
+	if catalog != nil && req.Operation == "basebackup" {
+		for _, d := range catalog.Databases {
+			estCluster += d.SizeBytes
+		}
+	}
+	jobMeta := configdb.PgBackupJobRecord{
+		Engine:         "postgresql",
+		Server:         cfg.Server,
+		DatabaseName:   "cluster",
+		Operation:      op,
+		Mode:           req.Operation,
+		Format:         req.Format,
+		OutputPath:     targetOut,
+		CommandPreview: preview.DisplayCommand,
+	}
+	onLog, onStatus, onProgress := a.emitBackupEvents()
+	return pgbackup.GetRunner().StartWithProgress(
+		a.ctx, jobMeta, cmds, pgbackup.BuildChildEnv(cfg), nil, "", nil,
+		estCluster, false, onLog, onStatus, onProgress,
+	)
+}
+
+// InspectPgBackupTOC inspects an archive backup file or directory via `pg_restore --list`.
+func (a *App) InspectPgBackupTOC(sourcePath string) ([]pgbackup.TocEntry, error) {
+	_, tools, _, err := a.detectPgToolchainWithCatalog("")
+	if err != nil {
+		return nil, err
+	}
+	return pgbackup.InspectArchiveTOC(a.ctx, tools, sourcePath)
+}
+
+// InspectPgMultiDbManifest parses planiq-backup-manifest.json from a multi-DB backup directory.
+func (a *App) InspectPgMultiDbManifest(sourcePath string) (*pgbackup.MultiDbManifest, error) {
+	if _, _, _, _, err := a.requirePgBackupContext(); err != nil {
+		return nil, err
+	}
+	manifest, _, err := pgbackup.ParseMultiDbManifest(sourcePath)
+	return manifest, err
+}
+
+// PreviewPgRestore builds the CLI preview for pg_restore, psql, or multi-DB restore.
+func (a *App) PreviewPgRestore(req pgbackup.RestoreRequest) (*pgbackup.BackupCommandPreview, error) {
+	cfg, tools, _, err := a.detectPgToolchainWithCatalog("")
+	if err != nil {
+		return nil, err
+	}
+	_, preview, bErr := pgbackup.BuildRestorePlan(cfg, tools, req, "")
+	if bErr != nil {
+		return &preview, bErr
+	}
+	return &preview, nil
+}
+
+// StartPgRestore runs a pg_restore, psql, or multi-DB batch restore asynchronously.
+func (a *App) StartPgRestore(req pgbackup.RestoreRequest) (string, error) {
+	if strings.TrimSpace(req.SourcePath) == "" {
+		return "", fmt.Errorf("please select a backup source before restoring")
+	}
+	cfg, tools, _, err := a.detectPgToolchainWithCatalog("")
+	if err != nil {
+		return "", err
+	}
+	var tempFiles []string
+	listFile := ""
+	if req.SourceKind == "archive" && len(req.SelectedTocIDs) > 0 {
+		entries, tErr := pgbackup.InspectArchiveTOC(a.ctx, tools, req.SourcePath)
+		if tErr != nil {
+			return "", fmt.Errorf("failed to inspect archive TOC for selective restore: %w", tErr)
+		}
+		lf, wErr := pgbackup.WriteFilteredTocList(entries, req.SelectedTocIDs)
+		if wErr != nil {
+			return "", fmt.Errorf("failed to write filtered TOC list: %w", wErr)
+		}
+		listFile = lf
+		tempFiles = append(tempFiles, lf)
+	}
+	cmds, preview, bErr := pgbackup.BuildRestorePlan(cfg, tools, req, listFile)
+	if bErr != nil {
+		for _, f := range tempFiles {
+			_ = os.Remove(f)
+		}
+		return "", bErr
+	}
+	targetDB := req.TargetDatabase
+	if req.SourceKind == "multi_db_manifest" {
+		targetDB = fmt.Sprintf("%d databases", len(req.SelectedDatabases))
+	}
+	jobMeta := configdb.PgBackupJobRecord{
+		Engine:         "postgresql",
+		Server:         cfg.Server,
+		DatabaseName:   targetDB,
+		Operation:      "restore",
+		Mode:           req.SourceKind,
+		Format:         req.SourceKind,
+		OutputPath:     req.SourcePath,
+		CommandPreview: preview.DisplayCommand,
+	}
+	onLog, onStatus, onProgress := a.emitBackupEvents()
+	restoreEnv := pgbackup.BuildRestoreChildEnv(cfg, req.BoostRestore, req.BoostMem)
+	return pgbackup.GetRunner().StartWithProgress(
+		a.ctx, jobMeta, cmds, restoreEnv, nil, "", tempFiles, 0, false, onLog, onStatus, onProgress,
+	)
+}
+
+// CheckPgBackupDiskSpace checks free capacity on the destination volume/mount on Windows, Linux, and macOS.
+func (a *App) CheckPgBackupDiskSpace(targetPath string, estimatedBytes int64) (*pgbackup.DiskSpaceInfo, error) {
+	info, err := pgbackup.GetFreeDiskSpace(targetPath, estimatedBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// VerifyPgBackupChecksum validates the .sha256 sidecar file for a logical backup file or folder.
+func (a *App) VerifyPgBackupChecksum(targetPath string) (*pgbackup.ChecksumVerifyResult, error) {
+	res, err := pgbackup.VerifySha256Sidecar(targetPath)
+	if err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+// GetPgPitrStatus queries wal_level, archive_mode, archive_command, and pg_stat_archiver for PITR readiness.
+func (a *App) GetPgPitrStatus() (*pgbackup.PitrStatus, error) {
+	cfg, _, _, _, err := a.requirePgBackupContext()
+	if err != nil {
+		return nil, err
+	}
+	return pgbackup.FetchPitrStatus(a.ctx, cfg)
+}
+
+// GeneratePgBackupScript builds a standalone Windows PowerShell (.ps1) or Linux Bash (.sh) backup script.
+func (a *App) GeneratePgBackupScript(req pgbackup.ScriptExportRequest) (string, error) {
+	cfg, _, _, _, err := a.requirePgBackupContext()
+	if err != nil {
+		return "", err
+	}
+	return pgbackup.GenerateAutomationScript(cfg, req), nil
+}
+
+// SavePgBackupScriptFile opens a native save dialog and writes a generated .ps1 or .sh automation script.
+func (a *App) SavePgBackupScriptFile(defaultName string, content string) (string, error) {
+	extFilter := runtime.FileFilter{DisplayName: "All Files (*.*)", Pattern: "*.*"}
+	if strings.HasSuffix(strings.ToLower(defaultName), ".ps1") {
+		extFilter = runtime.FileFilter{DisplayName: "PowerShell Script (*.ps1)", Pattern: "*.ps1"}
+	} else if strings.HasSuffix(strings.ToLower(defaultName), ".sh") {
+		extFilter = runtime.FileFilter{DisplayName: "Shell Script (*.sh)", Pattern: "*.sh"}
+	}
+	p, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save Automation Backup Script",
+		DefaultFilename: defaultName,
+		Filters:         []runtime.FileFilter{extFilter, {DisplayName: "All Files (*.*)", Pattern: "*.*"}},
+	})
+	if err != nil || p == "" {
+		return p, err
+	}
+	if wErr := os.WriteFile(p, []byte(content), 0o755); wErr != nil {
+		return "", wErr
+	}
+	return p, nil
+}
+
+// GetPgBackupProfiles loads saved reusable backup templates from SQLite.
+func (a *App) GetPgBackupProfiles() ([]configdb.PgBackupProfile, error) {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	return store.GetBackupProfiles()
+}
+
+// SavePgBackupProfile saves or updates a reusable backup template in SQLite.
+func (a *App) SavePgBackupProfile(p configdb.PgBackupProfile) (*configdb.PgBackupProfile, error) {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	return store.SaveBackupProfile(p)
+}
+
+// DeletePgBackupProfile deletes a saved backup template from SQLite.
+func (a *App) DeletePgBackupProfile(id string) error {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return err
+	}
+	return store.DeleteBackupProfile(id)
+}
+
+func (a *App) resolveCloneConfigs(req pgbackup.DirectCloneRequest) (livedb.ConnectionConfig, livedb.ConnectionConfig, error) {
+	srcCfg, _, _, _, err := a.requirePgBackupContext()
+	if err != nil {
+		return srcCfg, srcCfg, err
+	}
+	dstCfg := srcCfg
+	if strings.TrimSpace(req.TargetProfileID) != "" {
+		store, sErr := configdb.GetDB()
+		if sErr != nil {
+			return srcCfg, dstCfg, sErr
+		}
+		profiles, lErr := store.GetDBConnections()
+		if lErr != nil {
+			return srcCfg, dstCfg, lErr
+		}
+		found := false
+		for _, p := range profiles {
+			if p.ID == req.TargetProfileID {
+				dstCfg = livedb.ConnectionConfig{
+					Engine:                 p.Engine,
+					Server:                 p.Server,
+					Port:                   p.Port,
+					Database:               p.Database,
+					AuthType:               p.AuthType,
+					Username:               p.Username,
+					Password:               p.Password,
+					Encrypt:                p.Encrypt,
+					TrustServerCertificate: p.TrustServerCertificate,
+					TimeoutSeconds:         p.TimeoutSeconds,
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			return srcCfg, dstCfg, fmt.Errorf("selected target connection profile not found")
+		}
+	}
+	return srcCfg, dstCfg, nil
+}
+
+// PreviewPgDirectClone returns the streaming pg_dump | pg_restore preview for zero-disk DB cloning.
+func (a *App) PreviewPgDirectClone(req pgbackup.DirectCloneRequest) (*pgbackup.BackupCommandPreview, error) {
+	srcCfg, dstCfg, err := a.resolveCloneConfigs(req)
+	if err != nil {
+		return nil, err
+	}
+	_, tools, _, tErr := a.detectPgToolchainWithCatalog(req.SourceDatabase)
+	if tErr != nil {
+		return nil, tErr
+	}
+	_, _, _, preview, bErr := pgbackup.BuildDirectClonePlan(srcCfg, dstCfg, tools, req)
+	if bErr != nil {
+		return &preview, bErr
+	}
+	return &preview, nil
+}
+
+// StartPgDirectClone executes a zero-disk streaming pg_dump | pg_restore clone between DBs or servers.
+func (a *App) StartPgDirectClone(req pgbackup.DirectCloneRequest) (string, error) {
+	srcCfg, dstCfg, err := a.resolveCloneConfigs(req)
+	if err != nil {
+		return "", err
+	}
+	_, tools, _, tErr := a.detectPgToolchainWithCatalog(req.SourceDatabase)
+	if tErr != nil {
+		return "", tErr
+	}
+	dumpCmd, restoreCmd, analyzeCmd, preview, bErr := pgbackup.BuildDirectClonePlan(srcCfg, dstCfg, tools, req)
+	if bErr != nil {
+		return "", bErr
+	}
+	targetLabel := dstCfg.Server + "/" + strings.TrimSpace(req.TargetDatabase)
+	jobMeta := configdb.PgBackupJobRecord{
+		Engine:         "postgresql",
+		Server:         srcCfg.Server,
+		DatabaseName:   req.SourceDatabase + " -> " + req.TargetDatabase,
+		Operation:      "clone",
+		Mode:           "direct_pipe",
+		Format:         "stream",
+		OutputPath:     targetLabel,
+		CommandPreview: preview.DisplayCommand,
+	}
+	onLog, onStatus, _ := a.emitBackupEvents()
+	return pgbackup.GetRunner().StartPipeClone(
+		a.ctx, jobMeta, dumpCmd, pgbackup.BuildChildEnv(srcCfg), restoreCmd,
+		pgbackup.BuildRestoreChildEnv(dstCfg, true, "512MB"), analyzeCmd, onLog, onStatus,
+	)
+}
+
+// CancelPgBackupJob cancels the active backup or restore process if one is running.
+func (a *App) CancelPgBackupJob() error {
+	return pgbackup.GetRunner().CancelActive()
+}
+
+// GetPgBackupJobs returns recorded PostgreSQL backup & restore job history from SQLite.
+func (a *App) GetPgBackupJobs() ([]configdb.PgBackupJobRecord, error) {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	return store.GetBackupJobs(200)
+}
+
+// DeletePgBackupJob deletes a backup job entry from SQLite history.
+func (a *App) DeletePgBackupJob(id string) error {
+	store, err := configdb.GetDB()
+	if err != nil {
+		return err
+	}
+	return store.DeleteBackupJob(id)
+}
+
+// OpenBackupFolderInOS opens the OS file manager on the backup file's folder or backup directory.
+func (a *App) OpenBackupFolderInOS(targetPath string) error {
+	p := strings.TrimSpace(targetPath)
+	if p == "" {
+		return fmt.Errorf("no path specified")
+	}
+	dir := p
+	if st, err := os.Stat(p); err == nil {
+		if !st.IsDir() {
+			dir = filepath.Dir(p)
+		}
+	} else {
+		dir = filepath.Dir(p)
+	}
+	switch sysruntime.GOOS {
+	case "windows":
+		return exec.Command("explorer", dir).Start()
+	case "darwin":
+		return exec.Command("open", dir).Start()
+	default:
+		return exec.Command("xdg-open", dir).Start()
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // GetCurrentWindowsUser returns the logged-in Windows OS user and domain
 func (a *App) GetCurrentWindowsUser() WindowsUserInfo {

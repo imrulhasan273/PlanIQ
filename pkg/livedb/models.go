@@ -13,18 +13,22 @@ type ConnectionConfig struct {
 	TrustServerCertificate bool   `json:"trustServerCertificate"`
 	ApplicationIntent      string `json:"applicationIntent"` // "ReadOnly"
 	TimeoutSeconds         int    `json:"timeoutSeconds"`
+	AllowRbacWrite         bool   `json:"allowRbacWrite,omitempty"`
+	AllowBackupRestore     bool   `json:"allowBackupRestore,omitempty"`
 }
 
 // ConnectionStatus reports the health and version of the live connection
 type ConnectionStatus struct {
-	Connected      bool   `json:"connected"`
-	ServerVersion  string `json:"serverVersion"`
-	ServerName     string `json:"serverName"`
-	DatabaseName   string `json:"databaseName"`
-	ActiveSessions int    `json:"activeSessions"`
-	LatencyMs      int64  `json:"latencyMs"`
-	IsReadOnly     bool   `json:"isReadOnly"`
-	IsDemo         bool   `json:"isDemo"`
+	Connected          bool   `json:"connected"`
+	ServerVersion      string `json:"serverVersion"`
+	ServerName         string `json:"serverName"`
+	DatabaseName       string `json:"databaseName"`
+	ActiveSessions     int    `json:"activeSessions"`
+	LatencyMs          int64  `json:"latencyMs"`
+	IsReadOnly         bool   `json:"isReadOnly"`
+	AllowRbacWrite     bool   `json:"allowRbacWrite,omitempty"`
+	AllowBackupRestore bool   `json:"allowBackupRestore,omitempty"`
+	IsDemo             bool   `json:"isDemo"`
 	ErrorMessage   string `json:"errorMessage,omitempty"`
 	ServerType     string `json:"serverType,omitempty"`
 }

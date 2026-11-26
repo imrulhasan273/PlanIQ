@@ -189,15 +189,17 @@ func openAndPingPostgres(ctx context.Context, cfg ConnectionConfig, appName stri
 	}
 
 	status := &ConnectionStatus{
-		Connected:      true,
-		ServerVersion:  version,
-		ServerName:     srvName,
-		DatabaseName:   dbName,
-		ActiveSessions: activeSessions,
-		LatencyMs:      latency,
-		IsReadOnly:     true,
-		IsDemo:         false,
-		ServerType:     "postgresql",
+		Connected:          true,
+		ServerVersion:      version,
+		ServerName:         srvName,
+		DatabaseName:       dbName,
+		ActiveSessions:     activeSessions,
+		LatencyMs:          latency,
+		IsReadOnly:         true,
+		AllowRbacWrite:     cfg.AllowRbacWrite,
+		AllowBackupRestore: cfg.AllowBackupRestore,
+		IsDemo:             false,
+		ServerType:         "postgresql",
 	}
 	return db, status, nil
 }
@@ -520,4 +522,14 @@ func (c *Client) GetStatus() ConnectionStatus {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.status
+}
+
+// GetActiveConfig returns a copy of the active connection configuration and whether it is connected.
+func (c *Client) GetActiveConfig() (ConnectionConfig, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.db == nil || !c.status.Connected {
+		return ConnectionConfig{}, false
+	}
+	return c.config, true
 }

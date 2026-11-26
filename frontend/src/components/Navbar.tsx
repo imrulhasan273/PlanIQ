@@ -31,6 +31,7 @@ import {
   Sun,
   RotateCcw,
   EyeOff,
+  ShieldCheck,
 } from 'lucide-react';
 import { PlanAnalysis } from '../types/plan';
 import { ConnectionStatus, WindowsUserInfo, DBConnectionProfile } from '../types/livedb';
@@ -133,6 +134,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           trustServerCertificate: p.trustServerCertificate,
           applicationIntent: p.applicationIntent,
           timeoutSeconds: Number(p.timeoutSeconds) || 4,
+          allowRbacWrite: Boolean(p.allowRbacWrite),
+          allowBackupRestore: Boolean(p.allowBackupRestore),
         } as any);
         setActiveTab('liveradar');
       }
@@ -1129,6 +1132,36 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </button>
           </div>
+
+          {/* Security & RBAC Studio (PostgreSQL + Write for RBAC enabled only) */}
+          {isPg && Boolean(liveStatus?.connected && liveStatus?.allowRbacWrite) && (
+            <div className="nav-dropdown-item-wrap">
+              <button
+                type="button"
+                className={`nav-category-btn ${activeTab === 'security-rbac' ? 'active' : ''}`}
+                onClick={(e) => handleSelectTab('security-rbac', e)}
+                title="PostgreSQL roles, privileges, RLS, FDW and security audit"
+              >
+                <ShieldCheck size={14} color={activeTab === 'security-rbac' ? '#38bdf8' : '#94a3b8'} />
+                <span className="category-title">Security &amp; RBAC</span>
+              </button>
+            </div>
+          )}
+
+          {/* Backup & Restore Studio (PostgreSQL + Backup & Restore enabled only) */}
+          {isPg && Boolean(liveStatus?.connected && liveStatus?.allowBackupRestore) && (
+            <div className="nav-dropdown-item-wrap">
+              <button
+                type="button"
+                className={`nav-category-btn ${activeTab === 'backup-restore' ? 'active' : ''}`}
+                onClick={(e) => handleSelectTab('backup-restore', e)}
+                title="PostgreSQL backup, physical/incremental basebackup, and restore studio"
+              >
+                <HardDrive size={14} color={activeTab === 'backup-restore' ? '#38bdf8' : '#94a3b8'} />
+                <span className="category-title">Backup &amp; Restore</span>
+              </button>
+            </div>
+          )}
 
           {/* Category 6: DB Connections (SQLite Persisted) */}
           <div className="nav-dropdown-item-wrap">

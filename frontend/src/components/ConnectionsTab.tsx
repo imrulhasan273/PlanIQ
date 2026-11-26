@@ -14,8 +14,6 @@ import {
   Lock,
   Star,
   Search,
-  Eye,
-  EyeOff,
   Activity,
   HardDrive,
   KeyRound,
@@ -62,6 +60,8 @@ const getEmptyProfile = (targetEngine: 'sqlserver' | 'postgresql' = 'sqlserver',
     timeoutSeconds: 4,
     isDefault: false,
     engine: targetEngine,
+    allowRbacWrite: false,
+    allowBackupRestore: false,
   };
 };
 
@@ -81,7 +81,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     getEmptyProfile(activeEngine, 0, windowsUser?.username)
   );
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [passwordResetRequired, setPasswordResetRequired] = useState<boolean>(false);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -103,16 +103,24 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
       const chosen = defaultForEngine || firstForEngine;
       if (chosen) {
         setSelectedId(chosen.id);
-        setFormData({ ...chosen, engine: activeEngine });
+        setFormData({
+          ...chosen,
+          engine: activeEngine,
+          allowRbacWrite: Boolean(chosen.allowRbacWrite),
+          allowBackupRestore: Boolean(chosen.allowBackupRestore),
+        });
+        setPasswordResetRequired(false);
         setTestResult(null);
       } else {
         setSelectedId('');
         setFormData(getEmptyProfile(activeEngine, 0, windowsUser?.username));
+        setPasswordResetRequired(false);
         setTestResult(null);
       }
     } else {
       setSelectedId('');
       setFormData(getEmptyProfile(activeEngine, 0, windowsUser?.username));
+      setPasswordResetRequired(false);
     }
   }, [activeEngine, profiles]);
 
@@ -155,7 +163,13 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
         }
         if (target) {
           setSelectedId(target.id);
-          setFormData({ ...target, engine: getProfileEngine(target) });
+          setFormData({
+            ...target,
+            engine: getProfileEngine(target),
+            allowRbacWrite: Boolean(target.allowRbacWrite),
+            allowBackupRestore: Boolean(target.allowBackupRestore),
+          });
+          setPasswordResetRequired(false);
         } else {
           handleNewProfile();
         }
@@ -175,9 +189,25 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     setTimeout(() => setBannerMsg(null), 5000);
   };
 
+  const updateSettingField = (patch: Partial<DBConnectionProfile>) => {
+    const modifyingSaved = Boolean(formData.id) && !passwordResetRequired;
+    if (modifyingSaved) {
+      setPasswordResetRequired(true);
+      setFormData((prev) => ({ ...prev, ...patch, password: '' }));
+    } else {
+      setFormData((prev) => ({ ...prev, ...patch }));
+    }
+  };
+
   const handleSelectProfile = (p: DBConnectionProfile) => {
     setSelectedId(p.id);
-    setFormData({ ...p, engine: getProfileEngine(p) });
+    setFormData({
+      ...p,
+      engine: getProfileEngine(p),
+      allowRbacWrite: Boolean(p.allowRbacWrite),
+      allowBackupRestore: Boolean(p.allowBackupRestore),
+    });
+    setPasswordResetRequired(false);
     setTestResult(null);
   };
 
@@ -186,6 +216,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
     const def = getEmptyProfile(activeEngine, sameEngineCount, windowsUser?.username);
     setSelectedId('');
     setFormData(def);
+    setPasswordResetRequired(false);
     setTestResult(null);
   };
 
@@ -194,11 +225,15 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
       ...p,
       id: '',
       name: `${p.name} (Copy)`,
+      password: '',
       isDefault: false,
       engine: getProfileEngine(p),
+      allowRbacWrite: Boolean(p.allowRbacWrite),
+      allowBackupRestore: Boolean(p.allowBackupRestore),
     };
     setSelectedId('');
     setFormData(clone);
+    setPasswordResetRequired(false);
     setTestResult(null);
     showBanner('success', `Duplicated "${p.name}". Click Save to persist to SQLite.`);
   };
@@ -216,12 +251,18 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
       showBanner('error', 'Database name is required.');
       return;
     }
+    if (formData.authType === 'sql' && passwordResetRequired && !formData.password?.trim()) {
+      showBanner('error', 'Connection settings were modified — please re-enter the password before saving.');
+      return;
+    }
 
     setIsSaving(true);
     try {
       const payload: DBConnectionProfile = {
         ...formData,
         engine: activeEngine,
+        allowRbacWrite: Boolean(formData.allowRbacWrite),
+        allowBackupRestore: Boolean(formData.allowBackupRestore),
       };
 
       let saved: DBConnectionProfile;
@@ -237,6 +278,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
         localStorage.setItem('planiq_saved_conns', JSON.stringify(updated.map((p) => ({ ...p, password: '' }))));
       }
 
+      setPasswordResetRequired(false);
       showBanner('success', `Saved connection "${saved.name}".`);
       await loadProfiles(saved.id);
 
@@ -305,6 +347,8 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
         trustServerCertificate: formData.trustServerCertificate,
         applicationIntent: formData.applicationIntent,
         timeoutSeconds: Number(formData.timeoutSeconds) || 4,
+        allowRbacWrite: Boolean(formData.allowRbacWrite),
+        allowBackupRestore: Boolean(formData.allowBackupRestore),
       };
 
       let res: ConnectionStatus;
@@ -354,6 +398,8 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
         trustServerCertificate: p.trustServerCertificate,
         applicationIntent: p.applicationIntent,
         timeoutSeconds: Number(p.timeoutSeconds) || 4,
+        allowRbacWrite: Boolean(p.allowRbacWrite),
+        allowBackupRestore: Boolean(p.allowBackupRestore),
       } as any);
 
       if (status && status.connected) {
@@ -643,7 +689,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                 <input
                   type="checkbox"
                   checked={formData.isDefault}
-                  onChange={(e) => setFormData({ ...formData, isDefault: e.target.checked })}
+                  onChange={(e) => updateSettingField({ isDefault: e.target.checked })}
                 />
                 <Star
                   size={13}
@@ -678,14 +724,14 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   <button
                     type="button"
                     className="conn-chip"
-                    onClick={() => setFormData({ ...formData, server: 'localhost' })}
+                    onClick={() => updateSettingField({ server: 'localhost' })}
                   >
                     localhost
                   </button>
                   <button
                     type="button"
                     className="conn-chip"
-                    onClick={() => setFormData({ ...formData, server: '127.0.0.1' })}
+                    onClick={() => updateSettingField({ server: '127.0.0.1' })}
                   >
                     127.0.0.1
                   </button>
@@ -694,8 +740,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                       type="button"
                       className="conn-chip"
                       onClick={() =>
-                        setFormData({
-                          ...formData,
+                        updateSettingField({
                           server: 'localhost',
                           port: 5432,
                           database: 'postgres',
@@ -709,7 +754,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     <button
                       type="button"
                       className="conn-chip"
-                      onClick={() => setFormData({ ...formData, server: '.\\SQLEXPRESS' })}
+                      onClick={() => updateSettingField({ server: '.\\SQLEXPRESS' })}
                     >
                       .\SQLEXPRESS
                     </button>
@@ -723,7 +768,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   <input
                     type="text"
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    onChange={(e) => updateSettingField({ name: e.target.value })}
                     placeholder={isPg ? 'e.g., PostgreSQL Production (pg-prod-01)' : 'e.g., Production SQL Server (sql-prod-01)'}
                     className="conn-input"
                   />
@@ -734,7 +779,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   <input
                     type="text"
                     value={formData.server}
-                    onChange={(e) => setFormData({ ...formData, server: e.target.value })}
+                    onChange={(e) => updateSettingField({ server: e.target.value })}
                     placeholder={isPg ? 'localhost, 127.0.0.1, or db.example.com' : 'localhost, sql.example.com, or .\\SQLEXPRESS'}
                     className="conn-input"
                   />
@@ -745,7 +790,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   <input
                     type="number"
                     value={formData.port}
-                    onChange={(e) => setFormData({ ...formData, port: Number(e.target.value) || (isPg ? 5432 : 1433) })}
+                    onChange={(e) => updateSettingField({ port: Number(e.target.value) || (isPg ? 5432 : 1433) })}
                     placeholder={isPg ? '5432' : '1433'}
                     className="conn-input"
                   />
@@ -758,7 +803,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   <input
                     type="text"
                     value={formData.database}
-                    onChange={(e) => setFormData({ ...formData, database: e.target.value })}
+                    onChange={(e) => updateSettingField({ database: e.target.value })}
                     placeholder={isPg ? 'postgres, production_db' : 'master, AppDB'}
                     className="conn-input"
                   />
@@ -768,7 +813,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   <label>Application Intent</label>
                   <select
                     value={formData.applicationIntent}
-                    onChange={(e) => setFormData({ ...formData, applicationIntent: e.target.value })}
+                    onChange={(e) => updateSettingField({ applicationIntent: e.target.value })}
                     className="conn-select"
                   >
                     <option value="ReadOnly">ReadOnly (Recommended)</option>
@@ -791,7 +836,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                   <button
                     type="button"
                     className={`conn-auth-pill ${formData.authType === 'sql' ? 'active' : ''}`}
-                    onClick={() => setFormData({ ...formData, authType: 'sql' })}
+                    onClick={() => updateSettingField({ authType: 'sql' })}
                   >
                     <Lock size={13} />
                     <span>{isPg ? 'Password Auth' : 'SQL Server Auth'}</span>
@@ -801,8 +846,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     type="button"
                     className={`conn-auth-pill ${formData.authType === 'windows' ? 'active' : ''}`}
                     onClick={() =>
-                      setFormData({
-                        ...formData,
+                      updateSettingField({
                         authType: 'windows',
                         username: windowsUser?.username || formData.username,
                       })
@@ -821,7 +865,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                         <button
                           type="button"
                           className="conn-helper-btn"
-                          onClick={() => setFormData({ ...formData, username: windowsUser.username })}
+                          onClick={() => updateSettingField({ username: windowsUser.username })}
                           title={`Fill Windows user: ${windowsUser.fullAccount || windowsUser.username}`}
                         >
                           Use {windowsUser.username}
@@ -831,7 +875,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     <input
                       type="text"
                       value={formData.username || ''}
-                      onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                      onChange={(e) => updateSettingField({ username: e.target.value })}
                       placeholder={formData.authType === 'windows' ? 'DOMAIN\\username' : (isPg ? 'postgres' : 'sa')}
                       className="conn-input"
                     />
@@ -842,21 +886,19 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                       <label>Password</label>
                       <div className="conn-password-wrap">
                         <input
-                          type={showPassword ? 'text' : 'password'}
+                          type="password"
+                          autoComplete="new-password"
                           value={formData.password || ''}
                           onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                          placeholder="••••••••"
+                          placeholder={passwordResetRequired ? 'Re-enter password to save changes' : '••••••••'}
                           className="conn-input"
                         />
-                        <button
-                          type="button"
-                          className="conn-toggle-eye"
-                          onClick={() => setShowPassword(!showPassword)}
-                          title={showPassword ? 'Hide password' : 'Show password'}
-                        >
-                          {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                        </button>
                       </div>
+                      {passwordResetRequired && (
+                        <span style={{ fontSize: '11px', color: '#f59e0b', marginTop: '4px', display: 'block' }}>
+                          Settings modified — re-enter password before saving.
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -874,7 +916,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     <input
                       type="checkbox"
                       checked={formData.trustServerCertificate}
-                      onChange={(e) => setFormData({ ...formData, trustServerCertificate: e.target.checked })}
+                      onChange={(e) => updateSettingField({ trustServerCertificate: e.target.checked })}
                     />
                     <div>
                       <span className="conn-check-title">
@@ -888,7 +930,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                     <input
                       type="checkbox"
                       checked={formData.encrypt}
-                      onChange={(e) => setFormData({ ...formData, encrypt: e.target.checked })}
+                      onChange={(e) => updateSettingField({ encrypt: e.target.checked })}
                     />
                     <div>
                       <span className="conn-check-title">
@@ -897,6 +939,41 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                       <span className="conn-check-desc">Enforce encrypted payload channel in transit</span>
                     </div>
                   </label>
+
+                  {isPg && (
+                    <>
+                      <label className="conn-checkbox-card">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(formData.allowRbacWrite)}
+                          onChange={(e) => updateSettingField({ allowRbacWrite: e.target.checked })}
+                        />
+                        <div>
+                          <span className="conn-check-title">
+                            Write for RBAC (Security &amp; RBAC Studio only)
+                          </span>
+                          <span className="conn-check-desc">
+                            Allow executing GRANT/REVOKE/ALTER ROLE DDL in Security &amp; RBAC. Live Radar remains strictly Read-Only.
+                          </span>
+                        </div>
+                      </label>
+                      <label className="conn-checkbox-card">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(formData.allowBackupRestore)}
+                          onChange={(e) => updateSettingField({ allowBackupRestore: e.target.checked })}
+                        />
+                        <div>
+                          <span className="conn-check-title">
+                            Enable Backup &amp; Restore Studio
+                          </span>
+                          <span className="conn-check-desc">
+                            Unlock the Backup &amp; Restore page in the top navbar for logical, physical, incremental, and restore workflows.
+                          </span>
+                        </div>
+                      </label>
+                    </>
+                  )}
 
                   <div className="conn-network-bottom-row">
                     <div className="conn-timeout-inline">
@@ -907,14 +984,31 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({
                         max={60}
                         value={formData.timeoutSeconds}
                         onChange={(e) =>
-                          setFormData({ ...formData, timeoutSeconds: Number(e.target.value) || 4 })
+                          updateSettingField({ timeoutSeconds: Number(e.target.value) || 4 })
                         }
                         className="conn-input conn-input-sm"
                       />
                     </div>
-                    <span className="conn-dba-safe-pill" title="PlanIQ runs read-only diagnostics without acquiring write locks">
+                    <span
+                      className="conn-dba-safe-pill"
+                      title={
+                        isPg && (formData.allowRbacWrite || formData.allowBackupRestore)
+                          ? 'Live Radar remains strictly Read-Only; enabled studios run user-confirmed operations'
+                          : 'PlanIQ runs read-only diagnostics without acquiring write locks'
+                      }
+                    >
                       <ShieldCheck size={12} />
-                      <span>Read-Only · Zero Locks</span>
+                      <span>
+                        {isPg && (formData.allowRbacWrite || formData.allowBackupRestore)
+                          ? [
+                              'Live Radar Read-Only',
+                              formData.allowRbacWrite ? 'RBAC Write' : '',
+                              formData.allowBackupRestore ? 'Backup/Restore' : '',
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')
+                          : 'Read-Only · Zero Locks'}
+                      </span>
                     </span>
                   </div>
                 </div>

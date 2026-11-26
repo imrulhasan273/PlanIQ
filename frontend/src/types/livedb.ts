@@ -10,6 +10,8 @@ export interface ConnectionConfig {
   trustServerCertificate?: boolean;
   applicationIntent?: string;
   timeoutSeconds?: number;
+  allowRbacWrite?: boolean;
+  allowBackupRestore?: boolean;
 }
 
 export interface ConnectionStatus {
@@ -20,6 +22,8 @@ export interface ConnectionStatus {
   activeSessions: number;
   latencyMs: number;
   isReadOnly: boolean;
+  allowRbacWrite?: boolean;
+  allowBackupRestore?: boolean;
   isDemo: boolean;
   errorMessage?: string;
   serverType?: string;
@@ -339,6 +343,8 @@ export interface DBConnectionProfile {
   timeoutSeconds: number;
   isDefault: boolean;
   engine?: string;
+  allowRbacWrite?: boolean;
+  allowBackupRestore?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

@@ -11,6 +11,8 @@ import { TuningPlaybookTab } from './components/TuningPlaybookTab';
 import { DeadlockTab } from './components/DeadlockTab';
 import { LiveRadarTab } from './components/LiveRadarTab';
 import { ConnectionsTab } from './components/ConnectionsTab';
+import { PgSecurityRbacTab } from './components/pg/PgSecurityRbacTab';
+import { PgBackupRestoreTab } from './components/pg/PgBackupRestoreTab';
 import { LiveConnectionModal } from './components/LiveConnectionModal';
 import { PasteModal } from './components/PasteModal';
 import { AISettingsModal } from './components/AISettingsModal';
@@ -53,7 +55,9 @@ export type TabType =
   | 'playbook'
   | 'deadlock'
   | 'liveradar'
-  | 'connections';
+  | 'connections'
+  | 'security-rbac'
+  | 'backup-restore';
 
 export function App() {
   const [plan, setPlan] = useState<PlanAnalysis | null>(null);
@@ -70,6 +74,55 @@ export function App() {
   const [liveStatus, setLiveStatus] = useState<ConnectionStatus | null>(null);
   const [deadlockGraphs, setDeadlockGraphs] = useState<DeadlockGraph[]>([]);
   const [windowsUser, setWindowsUser] = useState<WindowsUserInfo | null>(null);
+
+  // ── Security & RBAC Studio state ──────────────────────────────────────────
+  const [rbacOverview, setRbacOverview] = useState<import('./types/rbac').PgRbacOverview | null>(null);
+  const [rbacAuditFindings, setRbacAuditFindings] = useState<import('./types/rbac').SecurityAuditFinding[]>([]);
+  const [rbacLoading, setRbacLoading] = useState(false);
+  const [rbacAuditing, setRbacAuditing] = useState(false);
+  const [rbacError, setRbacError] = useState<string | null>(null);
+
+  const handleLoadRbacOverview = async () => {
+    if (!(window as any)?.go?.main?.App?.GetPgRbacOverview) return;
+    setRbacLoading(true);
+    setRbacError(null);
+    try {
+      const { GetPgRbacOverview } = await import('../wailsjs/go/main/App');
+      const data = await GetPgRbacOverview();
+      setRbacOverview(data ?? null);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      console.error('RBAC overview load error', e);
+      setRbacError(msg);
+      setRbacOverview(null);
+    } finally {
+      setRbacLoading(false);
+    }
+  };
+
+  const handleRunRbacAudit = async () => {
+    if (!(window as any)?.go?.main?.App?.RunPgSecurityAudit) return;
+    setRbacAuditing(true);
+    setRbacError(null);
+    try {
+      const { RunPgSecurityAudit } = await import('../wailsjs/go/main/App');
+      const findings = await RunPgSecurityAudit();
+      setRbacAuditFindings(findings ?? []);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      console.error('RBAC audit error', e);
+      setRbacError(msg);
+    } finally {
+      setRbacAuditing(false);
+    }
+  };
+
+  const handleApplyRbacDDL = async (ddl: string) => {
+    if (!(window as any)?.go?.main?.App?.ExecutePgRbacScript) return;
+    const { ExecutePgRbacScript } = await import('../wailsjs/go/main/App');
+    await ExecutePgRbacScript(ddl);
+    await handleLoadRbacOverview();
+  };
   const [selectedEngine, setSelectedEngine] = useState<'sqlserver' | 'postgresql'>(() => {
     const saved = localStorage.getItem('planiq_engine');
     return saved === 'postgresql' ? 'postgresql' : 'sqlserver';
@@ -92,6 +145,29 @@ export function App() {
       (window as any).go.main.App.SetActiveEngine(selectedEngine).catch(() => {});
     }
   }, [selectedEngine]);
+
+  useEffect(() => {
+    const rbacAllowed = selectedEngine === 'postgresql' && Boolean(liveStatus?.connected && liveStatus?.allowRbacWrite);
+    if (!rbacAllowed) {
+      setRbacOverview(null);
+      setRbacError(null);
+      if (activeTab === 'security-rbac') {
+        setActiveTab(liveStatus?.connected ? 'liveradar' : 'overview');
+      }
+      return;
+    }
+    if (activeTab === 'security-rbac') {
+      handleLoadRbacOverview();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedEngine, liveStatus?.connected, liveStatus?.allowRbacWrite]);
+
+  useEffect(() => {
+    const backupAllowed = selectedEngine === 'postgresql' && Boolean(liveStatus?.connected && liveStatus?.allowBackupRestore);
+    if (!backupAllowed && activeTab === 'backup-restore') {
+      setActiveTab(liveStatus?.connected ? 'liveradar' : 'overview');
+    }
+  }, [activeTab, selectedEngine, liveStatus?.connected, liveStatus?.allowBackupRestore]);
 
   useEffect(() => {
     const isPg = selectedEngine === 'postgresql' || plan?.engine === 'postgresql';
@@ -440,7 +516,32 @@ export function App() {
           </div>
         )}
 
-        {activeTab === 'connections' ? (
+        {activeTab === 'security-rbac' && selectedEngine === 'postgresql' && Boolean(liveStatus?.connected && liveStatus?.allowRbacWrite) ? (
+          <ErrorBoundary onReset={() => setActiveTab('overview')}>
+            <PgSecurityRbacTab
+              overview={rbacOverview}
+              auditFindings={rbacAuditFindings}
+              isLoading={rbacLoading}
+              isAuditing={rbacAuditing}
+              isConnected={Boolean(liveStatus?.connected)}
+              allowRbacWrite={Boolean(liveStatus?.allowRbacWrite)}
+              activeDatabase={liveStatus?.databaseName}
+              error={rbacError}
+              pollingToggle={null}
+              onRefresh={handleLoadRbacOverview}
+              onRunAudit={handleRunRbacAudit}
+              onApplyDDL={handleApplyRbacDDL}
+              onOpenConnections={() => setActiveTab('connections')}
+            />
+          </ErrorBoundary>
+        ) : activeTab === 'backup-restore' && selectedEngine === 'postgresql' && Boolean(liveStatus?.connected && liveStatus?.allowBackupRestore) ? (
+          <ErrorBoundary onReset={() => setActiveTab('overview')}>
+            <PgBackupRestoreTab
+              liveStatus={liveStatus}
+              onOpenConnections={() => setActiveTab('connections')}
+            />
+          </ErrorBoundary>
+        ) : activeTab === 'connections' ? (
           <ErrorBoundary onReset={() => setActiveTab('overview')}>
             <ConnectionsTab
               liveStatus={liveStatus}

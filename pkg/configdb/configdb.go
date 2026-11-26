@@ -95,6 +95,8 @@ func GetDB() (*Store, error) {
 			timeout_seconds INTEGER NOT NULL DEFAULT 4,
 			is_default INTEGER NOT NULL DEFAULT 0,
 			engine TEXT NOT NULL DEFAULT 'sqlserver',
+			allow_rbac_write INTEGER NOT NULL DEFAULT 0,
+			allow_backup_restore INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
@@ -134,6 +136,38 @@ func GetDB() (*Store, error) {
 			synced_at TEXT NOT NULL,
 			PRIMARY KEY (server_name, timestamp, victim_spid)
 		);
+		CREATE TABLE IF NOT EXISTS pg_backup_settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS pg_backup_jobs (
+			id TEXT PRIMARY KEY,
+			started_at TEXT NOT NULL,
+			finished_at TEXT DEFAULT '',
+			duration_ms INTEGER NOT NULL DEFAULT 0,
+			engine TEXT NOT NULL DEFAULT 'postgresql',
+			server TEXT DEFAULT '',
+			database_name TEXT DEFAULT '',
+			operation TEXT NOT NULL,
+			mode TEXT DEFAULT '',
+			format TEXT DEFAULT '',
+			output_path TEXT DEFAULT '',
+			size_bytes INTEGER NOT NULL DEFAULT 0,
+			status TEXT NOT NULL,
+			exit_code INTEGER NOT NULL DEFAULT 0,
+			command_preview TEXT DEFAULT '',
+			error_message TEXT DEFAULT ''
+		);
+
+		CREATE TABLE IF NOT EXISTS pg_backup_profiles (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			payload_json TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
 		`
 		if _, err := db.Exec(createSQL); err != nil {
 			initErr = fmt.Errorf("failed to init config db tables: %w", err)
@@ -142,6 +176,8 @@ func GetDB() (*Store, error) {
 
 		// Run migrations for existing SQLite databases
 		_, _ = db.Exec(`ALTER TABLE db_connections ADD COLUMN engine TEXT NOT NULL DEFAULT 'sqlserver';`)
+		_, _ = db.Exec(`ALTER TABLE db_connections ADD COLUMN allow_rbac_write INTEGER NOT NULL DEFAULT 0;`)
+		_, _ = db.Exec(`ALTER TABLE db_connections ADD COLUMN allow_backup_restore INTEGER NOT NULL DEFAULT 0;`)
 
 		// Purge any legacy demo mock connection from SQLite
 		_, _ = db.Exec(`DELETE FROM db_connections WHERE id = 'conn_demo_prod' OR auth_type = 'demo' OR server = 'demo';`)
@@ -248,6 +284,8 @@ type DBConnectionProfile struct {
 	TimeoutSeconds         int    `json:"timeoutSeconds"`
 	IsDefault              bool   `json:"isDefault"`
 	Engine                 string `json:"engine"`
+	AllowRbacWrite         bool   `json:"allowRbacWrite"`
+	AllowBackupRestore     bool   `json:"allowBackupRestore"`
 	CreatedAt              string `json:"createdAt"`
 	UpdatedAt              string `json:"updatedAt"`
 }
@@ -260,7 +298,7 @@ func (s *Store) GetDBConnections() ([]DBConnectionProfile, error) {
 	rows, err := s.db.Query(`
 		SELECT id, name, server, port, database_name, auth_type, username, password,
 		       encrypt, trust_server_certificate, application_intent, timeout_seconds,
-		       is_default, COALESCE(engine, 'sqlserver'), created_at, updated_at
+		       is_default, COALESCE(engine, 'sqlserver'), COALESCE(allow_rbac_write, 0), COALESCE(allow_backup_restore, 0), created_at, updated_at
 		FROM db_connections
 		ORDER BY is_default DESC, updated_at DESC;
 	`)
@@ -272,17 +310,19 @@ func (s *Store) GetDBConnections() ([]DBConnectionProfile, error) {
 	var list []DBConnectionProfile
 	for rows.Next() {
 		var p DBConnectionProfile
-		var encInt, trustInt, defInt int
+		var encInt, trustInt, defInt, allowRbacInt, allowBackupInt int
 		if err := rows.Scan(
 			&p.ID, &p.Name, &p.Server, &p.Port, &p.Database, &p.AuthType,
 			&p.Username, &p.Password, &encInt, &trustInt, &p.ApplicationIntent,
-			&p.TimeoutSeconds, &defInt, &p.Engine, &p.CreatedAt, &p.UpdatedAt,
+			&p.TimeoutSeconds, &defInt, &p.Engine, &allowRbacInt, &allowBackupInt, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			continue
 		}
 		p.Encrypt = (encInt == 1)
 		p.TrustServerCertificate = (trustInt == 1)
 		p.IsDefault = (defInt == 1)
+		p.AllowRbacWrite = (allowRbacInt == 1)
+		p.AllowBackupRestore = (allowBackupInt == 1)
 		if decrypted, decErr := decryptSecret(s.secretKey, p.Password); decErr == nil {
 			p.Password = decrypted
 		}
@@ -348,6 +388,14 @@ func (s *Store) SaveDBConnection(p DBConnectionProfile) (*DBConnectionProfile, e
 		// If setting as default, clear other defaults
 		_, _ = s.db.Exec(`UPDATE db_connections SET is_default = 0;`)
 	}
+	allowRbacInt := 0
+	if p.AllowRbacWrite {
+		allowRbacInt = 1
+	}
+	allowBackupInt := 0
+	if p.AllowBackupRestore {
+		allowBackupInt = 1
+	}
 
 	encPassword, err := encryptSecret(s.secretKey, p.Password)
 	if err != nil {
@@ -358,8 +406,8 @@ func (s *Store) SaveDBConnection(p DBConnectionProfile) (*DBConnectionProfile, e
 	INSERT INTO db_connections (
 		id, name, server, port, database_name, auth_type, username, password,
 		encrypt, trust_server_certificate, application_intent, timeout_seconds,
-		is_default, engine, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		is_default, engine, allow_rbac_write, allow_backup_restore, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		name = excluded.name,
 		server = excluded.server,
@@ -374,12 +422,14 @@ func (s *Store) SaveDBConnection(p DBConnectionProfile) (*DBConnectionProfile, e
 		timeout_seconds = excluded.timeout_seconds,
 		is_default = excluded.is_default,
 		engine = excluded.engine,
+		allow_rbac_write = excluded.allow_rbac_write,
+		allow_backup_restore = excluded.allow_backup_restore,
 		updated_at = excluded.updated_at;
 	`
 	_, err = s.db.Exec(stmt,
 		p.ID, p.Name, p.Server, p.Port, p.Database, p.AuthType,
 		p.Username, encPassword, encInt, trustInt, p.ApplicationIntent,
-		p.TimeoutSeconds, defInt, p.Engine, p.CreatedAt, p.UpdatedAt,
+		p.TimeoutSeconds, defInt, p.Engine, allowRbacInt, allowBackupInt, p.CreatedAt, p.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save connection profile: %w", err)
@@ -684,5 +734,213 @@ func (s *Store) GetStoredDeadlocks(serverName string, days int) ([]StoredDeadloc
 
 	return deadlocks, nil
 }
+
+// PgBackupJobRecord stores the history of PostgreSQL backup and restore jobs in SQLite.
+type PgBackupJobRecord struct {
+	ID             string `json:"id"`
+	StartedAt      string `json:"startedAt"`
+	FinishedAt     string `json:"finishedAt"`
+	DurationMs     int64  `json:"durationMs"`
+	Engine         string `json:"engine"`
+	Server         string `json:"server"`
+	DatabaseName   string `json:"databaseName"`
+	Operation      string `json:"operation"`
+	Mode           string `json:"mode"`
+	Format         string `json:"format"`
+	OutputPath     string `json:"outputPath"`
+	SizeBytes      int64  `json:"sizeBytes"`
+	Status         string `json:"status"`
+	ExitCode       int    `json:"exitCode"`
+	CommandPreview string `json:"commandPreview"`
+	ErrorMessage   string `json:"errorMessage"`
+}
+
+// GetBackupBinDir returns the custom PostgreSQL bin/ folder path stored in SQLite, if any.
+func (s *Store) GetBackupBinDir() (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var val string
+	err := s.db.QueryRow(`SELECT value FROM pg_backup_settings WHERE key = 'pg_bin_dir';`).Scan(&val)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", err
+	}
+	return val, nil
+}
+
+// SetBackupBinDir saves or clears the custom PostgreSQL bin/ folder path in SQLite.
+func (s *Store) SetBackupBinDir(dir string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stmt := `
+		INSERT INTO pg_backup_settings (key, value)
+		VALUES ('pg_bin_dir', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+	`
+	_, err := s.db.Exec(stmt, strings.TrimSpace(dir))
+	return err
+}
+
+// SaveBackupJob inserts or updates a PostgreSQL backup/restore job record in SQLite.
+func (s *Store) SaveBackupJob(job PgBackupJobRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if job.Engine == "" {
+		job.Engine = "postgresql"
+	}
+	stmt := `
+		INSERT INTO pg_backup_jobs (
+			id, started_at, finished_at, duration_ms, engine, server, database_name,
+			operation, mode, format, output_path, size_bytes, status, exit_code,
+			command_preview, error_message
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			finished_at = excluded.finished_at,
+			duration_ms = excluded.duration_ms,
+			output_path = excluded.output_path,
+			size_bytes = excluded.size_bytes,
+			status = excluded.status,
+			exit_code = excluded.exit_code,
+			command_preview = excluded.command_preview,
+			error_message = excluded.error_message;
+	`
+	_, err := s.db.Exec(stmt,
+		job.ID, job.StartedAt, job.FinishedAt, job.DurationMs, job.Engine, job.Server, job.DatabaseName,
+		job.Operation, job.Mode, job.Format, job.OutputPath, job.SizeBytes, job.Status, job.ExitCode,
+		job.CommandPreview, job.ErrorMessage,
+	)
+	return err
+}
+
+// GetBackupJobs returns recent PostgreSQL backup and restore job records ordered newest first.
+func (s *Store) GetBackupJobs(limit int) ([]PgBackupJobRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.db.Query(`
+		SELECT id, started_at, COALESCE(finished_at, ''), duration_ms, COALESCE(engine, 'postgresql'),
+		       COALESCE(server, ''), COALESCE(database_name, ''), operation, COALESCE(mode, ''),
+		       COALESCE(format, ''), COALESCE(output_path, ''), size_bytes, status, exit_code,
+		       COALESCE(command_preview, ''), COALESCE(error_message, '')
+		FROM pg_backup_jobs
+		ORDER BY started_at DESC
+		LIMIT ?;
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []PgBackupJobRecord
+	for rows.Next() {
+		var j PgBackupJobRecord
+		if err := rows.Scan(
+			&j.ID, &j.StartedAt, &j.FinishedAt, &j.DurationMs, &j.Engine,
+			&j.Server, &j.DatabaseName, &j.Operation, &j.Mode,
+			&j.Format, &j.OutputPath, &j.SizeBytes, &j.Status, &j.ExitCode,
+			&j.CommandPreview, &j.ErrorMessage,
+		); err != nil {
+			continue
+		}
+		jobs = append(jobs, j)
+	}
+	return jobs, nil
+}
+
+// DeleteBackupJob removes a backup/restore history record from SQLite.
+func (s *Store) DeleteBackupJob(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM pg_backup_jobs WHERE id = ?;`, id)
+	return err
+}
+
+// PgBackupProfile stores a reusable PostgreSQL backup template in SQLite.
+type PgBackupProfile struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Kind        string `json:"kind"` // "logical" | "physical"
+	PayloadJSON string `json:"payloadJson"`
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
+}
+
+// SaveBackupProfile inserts or updates a reusable backup template in SQLite.
+func (s *Store) SaveBackupProfile(p PgBackupProfile) (*PgBackupProfile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if p.ID == "" {
+		p.ID = fmt.Sprintf("pgprof_%d", time.Now().UnixNano())
+		p.CreatedAt = now
+	} else if p.CreatedAt == "" {
+		p.CreatedAt = now
+	}
+	p.UpdatedAt = now
+	if p.Kind == "" {
+		p.Kind = "logical"
+	}
+
+	stmt := `
+		INSERT INTO pg_backup_profiles (id, name, kind, payload_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			kind = excluded.kind,
+			payload_json = excluded.payload_json,
+			updated_at = excluded.updated_at;
+	`
+	if _, err := s.db.Exec(stmt, p.ID, p.Name, p.Kind, p.PayloadJSON, p.CreatedAt, p.UpdatedAt); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// GetBackupProfiles returns all saved PostgreSQL backup templates ordered newest updated first.
+func (s *Store) GetBackupProfiles() ([]PgBackupProfile, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, name, kind, payload_json, created_at, updated_at
+		FROM pg_backup_profiles
+		ORDER BY updated_at DESC, name ASC;
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []PgBackupProfile
+	for rows.Next() {
+		var p PgBackupProfile
+		if err := rows.Scan(&p.ID, &p.Name, &p.Kind, &p.PayloadJSON, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			continue
+		}
+		list = append(list, p)
+	}
+	return list, nil
+}
+
+// DeleteBackupProfile deletes a saved backup template by ID.
+func (s *Store) DeleteBackupProfile(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM pg_backup_profiles WHERE id = ?;`, id)
+	return err
+}
+
+
 
 
